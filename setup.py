@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pytapo",
-    version="0.2",
+    version="0.4",
     author="Juraj Nyíri",
     author_email="juraj.nyiri@gmail.com",
     description="Python library for communication with Tapo Cameras",
@@ -15,9 +15,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     install_requires=[
           'requests',
-          'json',
-          'urllib3',
-          'hashlib'
+          'urllib3'
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
