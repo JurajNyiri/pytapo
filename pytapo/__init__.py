@@ -403,12 +403,18 @@ class Tapo:
             return self.savePreset(name)
 
     def deletePreset(self, presetID):
-        raise Exception("Todo: deletePreset")
         if(not str(presetID) in self.presets):
             raise Exception("Preset " + str(presetID) + " is not set in the app.")
         self.ensureAuthenticated()
         url = self.getHostURL()
-        data = {}
+        data = {
+            "method": "do",
+            "preset": {
+                "remove_preset": {
+                    "id": [presetID]
+                }
+            }
+        }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
         data = json.loads(res.text)
         if(self.responseIsOK(res)):
@@ -416,8 +422,7 @@ class Tapo:
             return True
         else:
             self.refreshStok()
-            self.getPresets()
-            #return self.deletePreset(presetID)
+            return self.deletePreset(presetID)
 
     def setPreset(self, presetID):
         if(not str(presetID) in self.presets):
