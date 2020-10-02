@@ -375,7 +375,9 @@ class Tapo:
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
         data = json.loads(res.text)
         if(self.responseIsOK(res)):
-            self.presets = data['preset']['preset']['id']
+            self.presets = {}
+            for key, id in enumerate(data['preset']['preset']['id']):
+                self.presets[id] = data['preset']['preset']['name'][key]
             return self.presets
         else:
             self.refreshStok()
