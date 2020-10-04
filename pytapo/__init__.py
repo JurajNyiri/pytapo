@@ -6,7 +6,7 @@ import requests
 import hashlib
 import json
 import urllib3
-from .ERROR_CODES import ERROR_CODES
+from .const import ERROR_CODES, DEVICES_WITH_NO_PRESETS
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class Tapo:
@@ -26,7 +26,11 @@ class Tapo:
             'Content-Type': 'application/json; charset=UTF-8'
         }
         self.hashedPassword = hashlib.md5(password.encode('utf8')).hexdigest().upper()
-        self.presets = self.getPresets()
+        self.basicInfo = self.getBasicInfo()
+        if(self.basicInfo['device_info']['basic_info']['device_model'] in DEVICES_WITH_NO_PRESETS):
+            self.presets = {}
+        else:
+            self.presets = self.getPresets()
 
     def getHostURL(self):
         return 'https://'+self.host+':443'+'/stok='+self.stok+'/ds'
