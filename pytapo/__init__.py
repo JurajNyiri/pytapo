@@ -6,6 +6,7 @@ import requests
 import hashlib
 import json
 import urllib3
+from .ERROR_CODES import ERROR_CODES
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class Tapo:
@@ -55,7 +56,7 @@ class Tapo:
         data = json.loads(res.text)
         return (res and data and data['error_code'] == 0)
     
-    def getModuleSpec(self):
+    def getModuleSpec(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -68,10 +69,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
-            self.refreshStok()
-            return self.getModuleSpec()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getModuleSpec(True)
 
-    def getAudioSpec(self):
+    def getAudioSpec(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -84,10 +88,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
-            self.refreshStok()
-            return self.getAudioSpec()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getAudioSpec(True)
 
-    def getVhttpd(self):
+    def getVhttpd(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -100,10 +107,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
-            self.refreshStok()
-            return self.getVhttpd()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getVhttpd(True)
 
-    def getBasicInfo(self):
+    def getBasicInfo(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -116,10 +126,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
-            self.refreshStok()
-            return self.getBasicInfo()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getBasicInfo(True)
 
-    def getTime(self):
+    def getTime(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -132,10 +145,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
-            self.refreshStok()
-            return self.getTime()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getTime(True)
 
-    def getMotorCapability(self):
+    def getMotorCapability(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -148,10 +164,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
-            self.refreshStok()
-            return self.getMotorCapability()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getMotorCapability(True)
 
-    def setPrivacyMode(self, enabled):
+    def setPrivacyMode(self, enabled, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
 
@@ -178,10 +197,13 @@ class Tapo:
             else:
                 return True
         else:
-            self.refreshStok()
-            return self.setPrivacyMode(enabled)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.setPrivacyMode(enabled, True)
 
-    def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True):
+    def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         alarm_mode = []
@@ -217,10 +239,13 @@ class Tapo:
             else:
                 return True
         else:
-            self.refreshStok()
-            return self.setAlarm(enabled, soundEnabled, lightEnabled)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.setAlarm(enabled, soundEnabled, lightEnabled, True)
 
-    def moveMotor(self, x, y):
+    def moveMotor(self, x, y, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -248,11 +273,14 @@ class Tapo:
             else:
                 return True
         else:
-            self.refreshStok()
-            return self.moveMotor(x, y)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.moveMotor(x, y, True)
 
     
-    def format(self):
+    def format(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -276,10 +304,13 @@ class Tapo:
             else:
                 return True
         else:
-            self.refreshStok()
-            return self.format()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.format(True)
 
-    def setLEDEnabled(self, enabled):
+    def setLEDEnabled(self, enabled, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -295,10 +326,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return True
         else:
-            self.refreshStok()
-            return self.setLEDEnabled(enabled)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.setLEDEnabled(enabled, True)
 
-    def setMotionDetection(self, enabled, sensitivity=False):
+    def setMotionDetection(self, enabled, sensitivity=False, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -324,10 +358,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return True
         else:
-            self.refreshStok()
-            return self.setMotionDetection(enabled, sensitivity)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.setMotionDetection(enabled, sensitivity, True)
 
-    def setAutoTrackTarget(self, enabled):
+    def setAutoTrackTarget(self, enabled, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -343,10 +380,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return True
         else:
-            self.refreshStok()
-            return self.setAutoTrackTarget(enabled)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.setAutoTrackTarget(enabled, True)
 
-    def reboot(self):
+    def reboot(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -360,10 +400,13 @@ class Tapo:
         if(self.responseIsOK(res)):
             return True
         else:
-            self.refreshStok()
-            return self.reboot()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.reboot(True)
 
-    def getPresets(self):
+    def getPresets(self, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -380,10 +423,13 @@ class Tapo:
                 self.presets[id] = data['preset']['preset']['name'][key]
             return self.presets
         else:
-            self.refreshStok()
-            return self.getPresets()
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getPresets(True)
     
-    def savePreset(self, name):
+    def savePreset(self, name, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
@@ -401,10 +447,13 @@ class Tapo:
             self.getPresets()
             return True
         else:
-            self.refreshStok()
-            return self.savePreset(name)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.savePreset(name, True)
 
-    def deletePreset(self, presetID):
+    def deletePreset(self, presetID, raiseException = False):
         if(not str(presetID) in self.presets):
             raise Exception("Preset " + str(presetID) + " is not set in the app.")
         self.ensureAuthenticated()
@@ -423,10 +472,13 @@ class Tapo:
             self.getPresets()
             return True
         else:
-            self.refreshStok()
-            return self.deletePreset(presetID)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.deletePreset(presetID, True)
 
-    def setPreset(self, presetID):
+    def setPreset(self, presetID, raiseException = False):
         if(not str(presetID) in self.presets):
             raise Exception("Preset " + str(presetID) + " is not set in the app.")
         self.ensureAuthenticated()
@@ -443,8 +495,15 @@ class Tapo:
         data = json.loads(res.text)
         if(self.responseIsOK(res)):
             return True
-        elif(data['error_code'] == -64302): # ID not found
-            return False
         else:
-            self.refreshStok()
-            return self.setPreset(presetID)
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.setPreset(presetID, True)
+    
+    def getErrorMessage(self, errorCode):
+        if(str(errorCode) in ERROR_CODES):
+            return str(ERROR_CODES[str(errorCode)])
+        else:
+            return str(errorCode)
