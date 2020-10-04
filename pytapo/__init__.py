@@ -66,6 +66,7 @@ class Tapo:
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
@@ -85,6 +86,7 @@ class Tapo:
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
@@ -104,6 +106,7 @@ class Tapo:
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
@@ -123,6 +126,7 @@ class Tapo:
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
@@ -142,6 +146,7 @@ class Tapo:
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
@@ -161,6 +166,7 @@ class Tapo:
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
             return json.loads(res.text)
         else:
@@ -175,27 +181,17 @@ class Tapo:
         url = self.getHostURL()
 
         data = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [{
-                    "method": "setLensMaskConfig",
-                    "params": {
-                        "lens_mask": {
-                            "lens_mask_info": {
-                                "enabled": "on" if enabled else "off"
-                            }
-                        }
-                    }
-                }]
+            "method": "set",
+            "lens_mask": {
+                "lens_mask_info": {
+                    "enabled": "on" if enabled else "off"
+                }
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
-            data = json.loads(res.text)['result']['responses'][0]
-            if(data['error_code'] != 0):
-                return False
-            else:
-                return True
+            return True
         else:
             if(raiseException):
                 raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
@@ -214,30 +210,21 @@ class Tapo:
             alarm_mode.append("light")
 
         data = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [{
-                    "method": "setAlertConfig",
-                    "params": {
-                        "msg_alarm": {
-                            "chn1_msg_alarm_info": {
-                                "alarm_type":"0",
-                                "enabled": "on" if enabled else "off",
-                                "light_type":"0",
-                                "alarm_mode": alarm_mode
-                            }
-                        }
-                    }
-                }]
+            "method": "set",
+            "msg_alarm": {
+                "chn1_msg_alarm_info": {
+                    "alarm_type":"0",
+                    "enabled": "on" if enabled else "off",
+                    "light_type":"0",
+                    "alarm_mode": alarm_mode
+                }
             }
         }
+            
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
-            data = json.loads(res.text)['result']['responses'][0]
-            if(data['error_code'] != 0):
-                return False
-            else:
-                return True
+            return True
         else:
             if(raiseException):
                 raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
@@ -248,30 +235,20 @@ class Tapo:
     def moveMotor(self, x, y, raiseException = False):
         self.ensureAuthenticated()
         url = self.getHostURL()
-        data = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [{
-                    "method": "motorMove",
-                    "params": {
-                        "motor": {
-                            "move": {
-                                "x_coord":str(x),
-                                "y_coord":str(y)
-                            }
-                        }
-                    }
-                }]
+        
+        data = { 
+            "method": "do",
+            "motor": {
+                "move": {
+                    "x_coord":str(x),
+                    "y_coord":str(y)
+                }
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
-            data = json.loads(res.text)['result']['responses'][0]
-            if(data['error_code'] != 0):
-                # motor cannot move further, usually error -64304
-                return False
-            else:
-                return True
+            return True
         else:
             if(raiseException):
                 raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
@@ -284,25 +261,15 @@ class Tapo:
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [{
-                    "method": "formatSdCard",
-                    "params": {
-                        "harddisk_manage": {
-                            "format_hd": "1"
-                        }
-                    }
-                }]
+            "method": "do",
+            "harddisk_manage": {
+                "format_hd": "1"
             }
         }
         res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
         if(self.responseIsOK(res)):
-            data = json.loads(res.text)['result']['responses'][0]
-            if(data['error_code'] != 0):
-                return False
-            else:
-                return True
+            return True
         else:
             if(raiseException):
                 raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
