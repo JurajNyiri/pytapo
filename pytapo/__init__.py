@@ -79,6 +79,106 @@ class Tapo:
             else:
                 self.refreshStok()
                 return self.getModuleSpec(True)
+    
+    def getPrivacyMode(self, raiseException = False):
+        self.ensureAuthenticated()
+        url = self.getHostURL()
+        data = {
+            "method": "get",
+            "lens_mask": {
+                "name": ['lens_mask_info']
+            }
+        }
+        res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
+        if(self.responseIsOK(res)):
+            return json.loads(res.text)['lens_mask']['lens_mask_info']
+        else:
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getPrivacyMode(True)
+    
+    def getMotionDetection(self, raiseException = False):
+        self.ensureAuthenticated()
+        url = self.getHostURL()
+        data = {
+            "method": "get",
+            "motion_detection": {
+                "name": ['motion_det']
+            }
+        }
+        res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
+        if(self.responseIsOK(res)):
+            return data['motion_detection']['motion_det']
+        else:
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getMotionDetection(True)
+    
+    def getAlarm(self, raiseException = False):
+        self.ensureAuthenticated()
+        url = self.getHostURL()
+        data = {
+            "method": "get",
+            "msg_alarm": {
+                "name": ['chn1_msg_alarm_info']
+            }
+        }
+        res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
+        if(self.responseIsOK(res)):
+            return json.loads(res.text)['msg_alarm']['chn1_msg_alarm_info']
+        else:
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getAlarm(True)
+
+    def getLED(self, raiseException = False):
+        self.ensureAuthenticated()
+        url = self.getHostURL()
+        data = {
+            "method": "get",
+            "led": {
+                "name": ['config']
+            }
+        }
+        res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
+        if(self.responseIsOK(res)):
+            return json.loads(res.text)['led']['config']
+        else:
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getLED(True)
+
+    def getAutoTrackTarget(self, raiseException = False):
+        self.ensureAuthenticated()
+        url = self.getHostURL()
+        data = {
+            "method": "get",
+            "target_track": {
+                "name": ['target_track_info']
+            }
+        }
+        res = requests.post(url, data = json.dumps(data), headers=self.headers, verify=False)
+        data = json.loads(res.text)
+        if(self.responseIsOK(res)):
+            return json.loads(res.text)['target_track']['target_track_info']
+        else:
+            if(raiseException):
+                raise Exception("Error: "+self.getErrorMessage(data['error_code'])+" Response:" + json.dumps(data))
+            else:
+                self.refreshStok()
+                return self.getAutoTrackTarget(True)
 
     def getAudioSpec(self, raiseException = False):
         self.ensureAuthenticated()
