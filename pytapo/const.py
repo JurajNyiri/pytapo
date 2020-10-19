@@ -5,7 +5,7 @@ ERROR_CODES = {
     "-64321": "Preset ID was deleted so no longer exists",
     "-40106": "Parameter to get/do does not exist",
     "-40105": "Method does not exist",
-    "-40101": "Parameter to set does not exist"
+    "-40101": "Parameter to set does not exist",
 }
 DEVICE_MODEL_C100 = "C100"
 DEVICE_MODEL_C200 = "C200"
