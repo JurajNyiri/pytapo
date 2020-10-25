@@ -35,7 +35,7 @@ Pytapo is an unofficial module for achieving interoperability with Tapo cameras.
 
 Author is in no way affiliated with Tp-Link or Tapo.
 
-All the methods used within the library are available and published on the internet (examples linked above) and this module is purely just a wrapper around those published requests.
+All the api requests used within the library are available and published on the internet (examples linked above) and this module is purely just a wrapper around those https requests.
 
 Author does not guarantee functionality of this library and is not responsible for any damage.
 
