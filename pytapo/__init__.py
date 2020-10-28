@@ -93,56 +93,6 @@ class Tapo:
                 self.refreshStok()
                 return self.getOsd(True)
 
-    def getLdc(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
-            "method": "get",
-            "image": {"name": "switch"},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getLdc(True)
-
-    def setLdc(self, enabled, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
-            "method": "set",
-            "image": {"switch": {"ldc": "on" if enabled else "off"}},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setLdc(True)
-
     def setOsd(
         self,
         label,
@@ -236,43 +186,6 @@ class Tapo:
                     weekY,
                     True,
                 )
-
-    # todo: test and finish after fw update available
-    def isUpdateAvailable(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [
-                    {
-                        "method": "checkFirmwareVersionByCloud",
-                        "params": {"cloud_config": {"check_fw_version": "null"}},
-                    },
-                    {
-                        "method": "getCloudConfig",
-                        "params": {"cloud_config": {"name": ["upgrade_info"]}},
-                    },
-                ]
-            },
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.isUpdateAvailable(True)
 
     def getModuleSpec(self, raiseException=False):
         self.ensureAuthenticated()
