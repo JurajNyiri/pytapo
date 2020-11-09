@@ -599,7 +599,7 @@ class Tapo:
                 )
             else:
                 self.refreshStok()
-                return self.setInfType(inf_type, True)
+                return self.setDayNightMode(inf_type, True)
 
     def setMotionDetection(self, enabled, sensitivity=False, raiseException=False):
         self.ensureAuthenticated()
