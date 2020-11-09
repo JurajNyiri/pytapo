@@ -574,14 +574,21 @@ class Tapo:
                 return self.setLEDEnabled(enabled, True)
 
     def setDayNightMode(self, inf_type, raiseException=False):
-        if not inf_type in ["off", "on", "auto"]:
+        if inf_type not in ["off", "on", "auto"]:
             raise Exception("Invalid inf_type, can be off, on or auto.")
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
-            "method": "multipleRequest", "params": {"requests": [{
-                "method": "setDayNightModeConfig",
-                "params": {"image": {"common": {"inf_type": inf_type}}}}]}}
+            "method": "multipleRequest",
+            "params": {
+                "requests": [
+                    {
+                        "method": "setDayNightModeConfig",
+                        "params": {"image": {"common": {"inf_type": inf_type}}},
+                    }
+                ]
+            },
+        }
         res = requests.post(
             url, data=json.dumps(data), headers=self.headers, verify=False
         )
