@@ -579,7 +579,7 @@ class Tapo:
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
-            "method": "multipleRequest","params": {"requests": [{
+            "method": "multipleRequest", "params": {"requests": [{
                 "method": "setDayNightModeConfig",
                 "params": {"image": {"common": {"inf_type": inf_type}}
         }}]}}
