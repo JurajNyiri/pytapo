@@ -574,7 +574,8 @@ class Tapo:
                 return self.setLEDEnabled(enabled, True)
 
     def setDayNightMode(self, inf_type, raiseException=False):
-        # "off"/"on"/"auto"
+        if not inf_type in ["off","on","auto"]:
+            raise Exception("Invalid inf_type, can be off, on or auto.")
         self.ensureAuthenticated()
         url = self.getHostURL()
         data = {
