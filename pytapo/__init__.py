@@ -65,8 +65,16 @@ class Tapo:
         raise Exception("Invalid authentication data.")
 
     def responseIsOK(self, res):
-        data = json.loads(res.text)
-        return res and data and data["error_code"] == 0
+        if res.status_code != 200:
+            raise Exception(
+                "Error communicating with Tapo Camera. Status code: "
+                + str(res.status_code)
+            )
+        try:
+            data = json.loads(res.text)
+            return res and data and data["error_code"] == 0
+        except Exception as e:
+            raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
     def getOsd(self, raiseException=False):
         self.ensureAuthenticated()
