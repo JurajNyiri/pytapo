@@ -56,9 +56,13 @@ class Tapo:
                 "username": self.user,
             },
         }
+        print(url)
+        print(data)
         res = requests.post(
             url, data=json.dumps(data), headers=self.headers, verify=False
         )
+        print(res)
+        print(res.text)
         if self.responseIsOK(res):
             self.stok = json.loads(res.text)["result"]["stok"]
             return self.stok
