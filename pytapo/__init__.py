@@ -243,6 +243,9 @@ class Tapo:
         })
 
     def moveMotorStep(self, angle):
+        if not (0 <= angle < 360):
+            raise Exception("Angle must be in a range 0 <= angle < 360")
+
         return self.performRequest({
             "method": "do",
             "motor": {"movestep": {"direction": str(angle)}},
