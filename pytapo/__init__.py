@@ -73,35 +73,36 @@ class Tapo:
                 + str(res.status_code)
             )
         try:
-            data = json.loads(res.text)
+            data = res.json()
             return res and data and data["error_code"] == 0
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
-    def getOsd(self, raiseException=False):
+    def performRequest(self, inData, loginRetryCountdown=5):
         self.ensureAuthenticated()
         url = self.getHostURL()
-        data = {
-            "method": "get",
-            "OSD": {"name": ["date", "week", "font"], "table": ["label_info"]},
-        }
         res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
+            url, data=json.dumps(inData), headers=self.headers, verify=False
         )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
+        data = res.json()
+        if not self.responseIsOK(res):
+            if data["error_code"] == -40401 and loginRetryCountdown > 0:  # Invalid Stok
+                self.refreshStok()
+                return self.performRequest(inData, loginRetryCountdown - 1)
+            else:
                 raise Exception(
                     "Error: "
                     + self.getErrorMessage(data["error_code"])
                     + " Response:"
                     + json.dumps(data)
                 )
-            else:
-                self.refreshStok()
-                return self.getOsd(True)
+        return data
+
+    def getOsd(self):
+        return self.performRequest({
+            "method": "get",
+            "OSD": {"name": ["date", "week", "font"], "table": ["label_info"]},
+        })
 
     def setOsd(
             self,
@@ -138,8 +139,6 @@ class Tapo:
             raise Exception(
                 "Error: Incorrect corrdinates, must be between 0 and 10000."
             )
-        self.ensureAuthenticated()
-        url = self.getHostURL()
         data = {
             "method": "set",
             "OSD": {
@@ -167,312 +166,56 @@ class Tapo:
                 },
             },
         }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setOsd(
-                    label,
-                    dateEnabled,
-                    labelEnabled,
-                    weekEnabled,
-                    dateX,
-                    dateY,
-                    labelX,
-                    labelY,
-                    weekX,
-                    weekY,
-                    True,
-                )
+        return self.performRequest(data)
 
-    def getModuleSpec(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "get", "function": {"name": ["module_spec"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getModuleSpec(True)
+    def getModuleSpec(self):
+        return self.performRequest({"method": "get", "function": {"name": ["module_spec"]}})
 
-    def getPrivacyMode(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
+    def getPrivacyMode(self):
         data = {"method": "get", "lens_mask": {"name": ["lens_mask_info"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)["lens_mask"]["lens_mask_info"]
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getPrivacyMode(True)
+        return self.performRequest(data)["lens_mask"]["lens_mask_info"]
 
-    def getMotionDetection(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
+    def getMotionDetection(self):
         data = {"method": "get", "motion_detection": {"name": ["motion_det"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return data["motion_detection"]["motion_det"]
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getMotionDetection(True)
+        return self.performRequest(data)["motion_detection"]["motion_det"]
 
-    def getAlarm(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
+    def getAlarm(self):
         data = {"method": "get", "msg_alarm": {"name": ["chn1_msg_alarm_info"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)["msg_alarm"]["chn1_msg_alarm_info"]
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getAlarm(True)
+        return self.performRequest(data)["msg_alarm"]["chn1_msg_alarm_info"]
 
-    def getLED(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
+    def getLED(self):
         data = {"method": "get", "led": {"name": ["config"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)["led"]["config"]
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getLED(True)
+        return self.performRequest(data)["led"]["config"]
 
-    def getAutoTrackTarget(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
+    def getAutoTrackTarget(self):
         data = {"method": "get", "target_track": {"name": ["target_track_info"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)["target_track"]["target_track_info"]
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getAutoTrackTarget(True)
+        return self.performRequest(data)["target_track"]["target_track_info"]
 
-    def getAudioSpec(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
+    def getAudioSpec(self):
+        return self.performRequest({
             "method": "get",
             "audio_capability": {"name": ["device_speaker", "device_microphone"]},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getAudioSpec(True)
+        })
 
-    def getVhttpd(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "get", "cet": {"name": ["vhttpd"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getVhttpd(True)
+    def getVhttpd(self):
+        return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
 
-    def getBasicInfo(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "get", "device_info": {"name": ["basic_info"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getBasicInfo(True)
+    def getBasicInfo(self):
+        return self.performRequest({"method": "get", "device_info": {"name": ["basic_info"]}})
 
-    def getTime(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "get", "system": {"name": ["clock_status"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getTime(True)
+    def getTime(self):
+        return self.performRequest({"method": "get", "system": {"name": ["clock_status"]}})
 
-    def getMotorCapability(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "get", "motor": {"name": ["capability"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return json.loads(res.text)
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getMotorCapability(True)
+    def getMotorCapability(self):
+        return self.performRequest({"method": "get", "motor": {"name": ["capability"]}})
 
-    def setPrivacyMode(self, enabled, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-
-        data = {
+    def setPrivacyMode(self, enabled):
+        return self.performRequest({
             "method": "set",
             "lens_mask": {"lens_mask_info": {"enabled": "on" if enabled else "off"}},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setPrivacyMode(enabled, True)
+        })
 
-    def setAlarm(
-            self, enabled, soundEnabled=True, lightEnabled=True, raiseException=False
-    ):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
+    def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True):
         alarm_mode = []
 
         if soundEnabled:
@@ -492,128 +235,33 @@ class Tapo:
             },
         }
 
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setAlarm(enabled, soundEnabled, lightEnabled, True)
+        return self.performRequest(data)
 
-    def moveMotor(self, x, y, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-
-        data = {
+    def moveMotor(self, x, y):
+        return self.performRequest({
             "method": "do",
             "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.moveMotor(x, y, True)
+        })
 
-    def moveMotorStep(self, angle, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
+    def moveMotorStep(self, angle):
+        return self.performRequest({
             "method": "do",
             "motor": {"movestep": {"direction": str(angle)}},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.moveMotorStep(angle, True)
+        })
 
-    def format(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "do", "harddisk_manage": {"format_hd": "1"}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.format(True)
+    def format(self):
+        return self.performRequest({"method": "do", "harddisk_manage": {"format_hd": "1"}})
 
-    def setLEDEnabled(self, enabled, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
+    def setLEDEnabled(self, enabled):
+        return self.performRequest({
             "method": "set",
             "led": {"config": {"enabled": "on" if enabled else "off"}},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setLEDEnabled(enabled, True)
+        })
 
-    def setDayNightMode(self, inf_type, raiseException=False):
+    def setDayNightMode(self, inf_type):
         if inf_type not in ["off", "on", "auto"]:
             raise Exception("Invalid inf_type, can be off, on or auto.")
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
+        return self.performRequest({
             "method": "multipleRequest",
             "params": {
                 "requests": [
@@ -623,28 +271,9 @@ class Tapo:
                     }
                 ]
             },
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setDayNightMode(inf_type, True)
+        })
 
-    def setMotionDetection(self, enabled, sensitivity=False, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
+    def setMotionDetection(self, enabled, sensitivity=False):
         data = {
             "method": "set",
             "motion_detection": {"motion_det": {"enabled": "on" if enabled else "off"}},
@@ -659,174 +288,47 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high.")
 
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setMotionDetection(enabled, sensitivity, True)
+        return self.performRequest(data)
 
-    def setAutoTrackTarget(self, enabled, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
+    def setAutoTrackTarget(self, enabled):
+        return self.performRequest({
             "method": "set",
             "target_track": {
                 "target_track_info": {"enabled": "on" if enabled else "off"}
             },
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setAutoTrackTarget(enabled, True)
+        })
 
-    def reboot(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "do", "system": {"reboot": "null"}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.reboot(True)
+    def reboot(self):
+        return self.performRequest({"method": "do", "system": {"reboot": "null"}})
 
-    def getPresets(self, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "get", "preset": {"name": ["preset"]}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            self.presets = {}
-            for key, id in enumerate(data["preset"]["preset"]["id"]):
-                self.presets[id] = data["preset"]["preset"]["name"][key]
-            return self.presets
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.getPresets(True)
+    def getPresets(self):
+        data = self.performRequest({"method": "get", "preset": {"name": ["preset"]}})
+        self.presets = {id: data["preset"]["preset"]["name"][key]
+                        for key, id in enumerate(data["preset"]["preset"]["id"])}
+        return self.presets
 
-    def savePreset(self, name, raiseException=False):
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {
+    def savePreset(self, name):
+        self.performRequest({
             "method": "do",
             "preset": {"set_preset": {"name": str(name), "save_ptz": "1"}},
-        }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            self.getPresets()
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.savePreset(name, True)
+        })
+        self.getPresets()
+        return True
 
-    def deletePreset(self, presetID, raiseException=False):
+    def deletePreset(self, presetID):
         if not str(presetID) in self.presets:
             raise Exception("Preset " + str(presetID) + " is not set in the app.")
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "do", "preset": {"remove_preset": {"id": [presetID]}}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            self.getPresets()
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.deletePreset(presetID, True)
 
-    def setPreset(self, presetID, raiseException=False):
+        self.performRequest({"method": "do", "preset": {"remove_preset": {"id": [presetID]}}})
+        self.getPresets()
+
+    def setPreset(self, presetID):
         if not str(presetID) in self.presets:
             raise Exception("Preset " + str(presetID) + " is not set in the app.")
-        self.ensureAuthenticated()
-        url = self.getHostURL()
-        data = {"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}}
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        data = json.loads(res.text)
-        if self.responseIsOK(res):
-            return True
-        else:
-            if raiseException:
-                raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
-                )
-            else:
-                self.refreshStok()
-                return self.setPreset(presetID, True)
+        return self.performRequest({"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}})
 
-    def getErrorMessage(self, errorCode):
+    @staticmethod
+    def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
             return str(ERROR_CODES[str(errorCode)])
         else:
