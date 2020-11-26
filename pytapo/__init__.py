@@ -2,10 +2,12 @@
 # Author: Juraj Nyiri
 #
 
-import requests
 import hashlib
 import json
+
+import requests
 import urllib3
+
 from .const import ERROR_CODES, DEVICES_WITH_NO_PRESETS
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -31,8 +33,8 @@ class Tapo:
 
         self.basicInfo = self.getBasicInfo()
         if (
-            self.basicInfo["device_info"]["basic_info"]["device_model"]
-            in DEVICES_WITH_NO_PRESETS
+                self.basicInfo["device_info"]["basic_info"]["device_model"]
+                in DEVICES_WITH_NO_PRESETS
         ):
             self.presets = {}
         else:
@@ -102,36 +104,36 @@ class Tapo:
                 return self.getOsd(True)
 
     def setOsd(
-        self,
-        label,
-        dateEnabled=True,
-        labelEnabled=False,
-        weekEnabled=False,
-        dateX=0,
-        dateY=0,
-        labelX=0,
-        labelY=500,
-        weekX=0,
-        weekY=0,
-        raiseException=False,
+            self,
+            label,
+            dateEnabled=True,
+            labelEnabled=False,
+            weekEnabled=False,
+            dateX=0,
+            dateY=0,
+            labelX=0,
+            labelY=500,
+            weekX=0,
+            weekY=0,
+            raiseException=False,
     ):
         if len(label) >= 16:
             raise Exception("Error: Label cannot be longer than 16 characters.")
         elif len(label) == 0:
             labelEnabled = False
         if (
-            dateX > 10000
-            or dateX < 0
-            or labelX > 10000
-            or labelX < 0
-            or weekX > 10000
-            or weekX < 0
-            or dateY > 10000
-            or dateY < 0
-            or labelY > 10000
-            or labelY < 0
-            or weekY > 10000
-            or weekY < 0
+                dateX > 10000
+                or dateX < 0
+                or labelX > 10000
+                or labelX < 0
+                or weekX > 10000
+                or weekX < 0
+                or dateY > 10000
+                or dateY < 0
+                or labelY > 10000
+                or labelY < 0
+                or weekY > 10000
+                or weekY < 0
         ):
             raise Exception(
                 "Error: Incorrect corrdinates, must be between 0 and 10000."
@@ -467,7 +469,7 @@ class Tapo:
                 return self.setPrivacyMode(enabled, True)
 
     def setAlarm(
-        self, enabled, soundEnabled=True, lightEnabled=True, raiseException=False
+            self, enabled, soundEnabled=True, lightEnabled=True, raiseException=False
     ):
         self.ensureAuthenticated()
         url = self.getHostURL()
@@ -533,6 +535,31 @@ class Tapo:
             else:
                 self.refreshStok()
                 return self.moveMotor(x, y, True)
+
+    def moveMotorStep(self, angle, raiseException=False):
+        self.ensureAuthenticated()
+        url = self.getHostURL()
+        data = {
+            "method": "do",
+            "motor": {"movestep": {"direction": str(angle)}},
+        }
+        res = requests.post(
+            url, data=json.dumps(data), headers=self.headers, verify=False
+        )
+        data = json.loads(res.text)
+        if self.responseIsOK(res):
+            return True
+        else:
+            if raiseException:
+                raise Exception(
+                    "Error: "
+                    + self.getErrorMessage(data["error_code"])
+                    + " Response:"
+                    + json.dumps(data)
+                )
+            else:
+                self.refreshStok()
+                return self.moveMotorStep(angle, True)
 
     def format(self, raiseException=False):
         self.ensureAuthenticated()
