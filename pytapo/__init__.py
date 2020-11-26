@@ -21,7 +21,7 @@ class Tapo:
         self.stok = False
         self.headers = {
             "Host": self.host,
-            "Referer": "https://" + self.host + ":443",
+            "Referer": "https://{host}".format(host=self.host),
             "Accept": "application/json",
             "Accept-Encoding": "gzip, deflate",
             "User-Agent": "Tapo CameraClient Android",
@@ -41,7 +41,7 @@ class Tapo:
             self.presets = self.getPresets()
 
     def getHostURL(self):
-        return "https://" + self.host + ":443" + "/stok=" + self.stok + "/ds"
+        return "https://{host}/stok={stok}/ds".format(host=self.host, stok=self.stok)
 
     def ensureAuthenticated(self):
         if not self.stok:
@@ -49,7 +49,7 @@ class Tapo:
         return True
 
     def refreshStok(self):
-        url = "https://" + self.host + ":443"
+        url = "https://{host}".format(host=self.host)
         data = {
             "method": "login",
             "params": {
@@ -116,7 +116,6 @@ class Tapo:
             labelY=500,
             weekX=0,
             weekY=0,
-            raiseException=False,
     ):
         if len(label) >= 16:
             raise Exception("Error: Label cannot be longer than 16 characters.")
