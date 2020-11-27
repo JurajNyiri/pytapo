@@ -481,3 +481,39 @@ def test_setLEDEnabled():
     tapo.setLEDEnabled(origLedEnabled)
     result = tapo.getLED()
     assert (result["enabled"] == "on") == origLedEnabled
+
+
+def test_getCommonImage():
+    tapo = Tapo(host, user, password)
+    result = tapo.getCommonImage()
+    assert result["error_code"] == 0
+    assert "image" in result
+    assert "common" in result["image"]
+
+
+def test_setDayNightMode():
+    tapo = Tapo(host, user, password)
+    origDayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    result = tapo.setDayNightMode("off")
+    assert result["error_code"] == 0
+    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    assert dayNightMode == "off"
+    result = tapo.setDayNightMode("on")
+    assert result["error_code"] == 0
+    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    assert dayNightMode == "on"
+    result = tapo.setDayNightMode("auto")
+    assert result["error_code"] == 0
+    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    assert dayNightMode == "auto"
+    result = tapo.setDayNightMode("off")
+    assert result["error_code"] == 0
+    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    assert dayNightMode == "off"
+    result = tapo.setDayNightMode(origDayNightMode)
+    assert result["error_code"] == 0
+    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    assert dayNightMode == origDayNightMode
+    with pytest.raises(Exception) as err:
+        tapo.setDayNightMode("unsupported")
+    assert "Invalid inf_type, can be off, on or auto" in str(err.value)
