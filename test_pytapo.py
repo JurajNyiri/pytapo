@@ -48,7 +48,7 @@ def test_refreshStok_failure():
     with pytest.raises(Exception) as err:
         tapo = Tapo(host, user, invalidPassword)
         tapo.refreshStok()
-    assert "Invalid authentication data." in str(err.value)
+    assert "Invalid authentication data" in str(err.value)
 
 
 def test_getHostURL():
@@ -279,11 +279,11 @@ def test_setOsd_failure():
 
     # just in case something succeeded, restore original
     setOsd(tapo, originalOsd)
-    assert "Error: Label cannot be longer than 16 characters." == str(err1.value)
-    assert "Error: Incorrect corrdinates, must be between 0 and 10000." == str(
+    assert "Error: Label cannot be longer than 16 characters" == str(err1.value)
+    assert "Error: Incorrect corrdinates, must be between 0 and 10000" == str(
         err2.value
     )
-    assert "Error: Incorrect corrdinates, must be between 0 and 10000." == str(
+    assert "Error: Incorrect corrdinates, must be between 0 and 10000" == str(
         err3.value
     )
 
@@ -392,3 +392,36 @@ def test_setPrivacyMode():
     result = tapo.getPrivacyMode()
     assert result["enabled"] == "off"
     tapo.setPrivacyMode(origEnabled)
+
+
+def test_setAlarm():
+    tapo = Tapo(host, user, password)
+    origAlarm = tapo.getAlarm()
+    tapo.setAlarm(False)
+    result = tapo.getAlarm()
+    assert result["enabled"] == "off"
+    tapo.setAlarm(True)
+    result = tapo.getAlarm()
+    assert result["enabled"] == "on"
+
+    with pytest.raises(Exception) as err:
+        result = tapo.setAlarm(False, False, False)
+    assert "You need to use at least sound or light for alarm" in str(err.value)
+
+    tapo.setAlarm(False, True, False)
+    result = tapo.getAlarm()
+    assert result["enabled"] == "off"
+    assert "sound" in result["alarm_mode"]
+    assert "light" not in result["alarm_mode"]
+
+    tapo.setAlarm(True, False, True)
+    result = tapo.getAlarm()
+    assert result["enabled"] == "on"
+    assert "sound" not in result["alarm_mode"]
+    assert "light" in result["alarm_mode"]
+
+    tapo.setAlarm(
+        origAlarm["enabled"] == "on",
+        "sound" in origAlarm["alarm_mode"],
+        "light" in origAlarm["alarm_mode"],
+    )
