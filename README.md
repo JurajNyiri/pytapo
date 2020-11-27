@@ -8,24 +8,6 @@ Python library for communication with Tapo Cameras
 python3 -m pip install pytapo
 ```
 
-## Test changes:
-
-Set the following environment variables:
-
-`PYTAPO_USER` - user you set in Advanced Settings -> Camera Account
-
-`PYTAPO_PASSWORD` - password you set in Advanced Settings -> Camera Account
-
-`PYTAPO_IP` - ip of the camera, example: 192.168.1.52
-
-Install `pre-commit` and `tox` from pip.
-
-Run `pre-commit install` and `pre-commit install -t pre-push`.
-
-Then run `tox` to run all the tests.
-
-Tests and linters are ran automatically before files are commited / pushed.
-
 ## Usage examples:
 
 ### Initiate library:
@@ -41,6 +23,37 @@ tapo = Tapo(host, user, password)
 
 print(tapo.getBasicInfo())
 ```
+
+
+## Contributions:
+
+Contributions to pytapo are welcomed. Please make sure to obey any TOS you have agreed to when you bought your Tapo product.
+Owner of this repository is not responsible for any PRs or code changes to this project created by 3rd parties.
+
+When you make a new change to the code base, make sure to have 100% unit test coverage.
+
+### Test instructions
+
+Set the following environment variables:
+
+`PYTAPO_USER` - user you set in Advanced Settings -> Camera Account
+
+`PYTAPO_PASSWORD` - password you set in Advanced Settings -> Camera Account
+
+`PYTAPO_IP` - ip of the camera, example: 192.168.1.52
+
+Install `pre-commit` and `tox` from pip.
+
+Run `pre-commit install` and `pre-commit install -t pre-push`.
+
+Then run `tox` to run all the tests.
+
+Linters are ran on every commit.
+
+Tests are ran on push. 
+
+Your camera may do all the actions supported by this library, including, but not limited to, move, change privacy mode and reboot while tests are running. 
+After the tests are done, your camera should be in the initial state.
 
 ## Thank you
 
