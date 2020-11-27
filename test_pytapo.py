@@ -350,3 +350,11 @@ def test_getAudioSpec():
     assert "device_speaker" in result["audio_capability"]
     assert "device_microphone" in result["audio_capability"]
     assert result["error_code"] == 0
+
+
+def test_getVhttpd():
+    tapo = Tapo(host, user, password)
+    result = tapo.getVhttpd()
+    assert "cet" in result
+    assert "vhttpd" in result["cet"]
+    assert result["error_code"] == 0
