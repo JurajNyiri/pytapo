@@ -6,3 +6,5 @@ build
 dist
 .pytest_cache
 pytapo.egg-info
+htmlcov
+.coverage
