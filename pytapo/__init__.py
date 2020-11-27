@@ -126,25 +126,6 @@ class Tapo:
         weekX=0,
         weekY=0,
     ):
-        if len(label) >= 16:
-            raise Exception("Error: Label cannot be longer than 16 characters")
-        elif len(label) == 0:
-            labelEnabled = False
-        if (
-            dateX > 10000
-            or dateX < 0
-            or labelX > 10000
-            or labelX < 0
-            or weekX > 10000
-            or weekX < 0
-            or dateY > 10000
-            or dateY < 0
-            or labelY > 10000
-            or labelY < 0
-            or weekY > 10000
-            or weekY < 0
-        ):
-            raise Exception("Error: Incorrect corrdinates, must be between 0 and 10000")
         data = {
             "method": "set",
             "OSD": {
@@ -166,12 +147,34 @@ class Tapo:
                 },
                 "label_info_1": {
                     "enabled": "on" if labelEnabled else "off",
-                    "text": label,
                     "x_coor": labelX,
                     "y_coor": labelY,
                 },
             },
         }
+
+        if len(label) >= 16:
+            raise Exception("Error: Label cannot be longer than 16 characters")
+        elif len(label) == 0:
+            labelEnabled = False
+        else:
+            data["OSD"]["label_info_1"]["text"] = label
+        if (
+            dateX > 10000
+            or dateX < 0
+            or labelX > 10000
+            or labelX < 0
+            or weekX > 10000
+            or weekX < 0
+            or dateY > 10000
+            or dateY < 0
+            or labelY > 10000
+            or labelY < 0
+            or weekY > 10000
+            or weekY < 0
+        ):
+            raise Exception("Error: Incorrect corrdinates, must be between 0 and 10000")
+
         return self.performRequest(data)
 
     def getModuleSpec(self):

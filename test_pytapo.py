@@ -12,7 +12,6 @@ host = os.environ.get("PYTAPO_IP")
 
 def setOsd(tapo, values):
     data = {
-        "origLabelText": values["OSD"]["label_info"][0]["label_info_1"]["text"],
         "origLabelEnabled": values["OSD"]["label_info"][0]["label_info_1"]["enabled"],
         "origLabelX": values["OSD"]["label_info"][0]["label_info_1"]["x_coor"],
         "origLabelY": values["OSD"]["label_info"][0]["label_info_1"]["y_coor"],
@@ -23,6 +22,11 @@ def setOsd(tapo, values):
         "origWeekX": values["OSD"]["week"]["x_coor"],
         "origWeekY": values["OSD"]["week"]["y_coor"],
     }
+
+    if "text" in values["OSD"]["label_info"][0]["label_info_1"]:
+        data["origLabelText"] = values["OSD"]["label_info"][0]["label_info_1"]["text"]
+    else:
+        data["origLabelText"] = ""
 
     tapo.setOsd(
         data["origLabelText"],
@@ -202,7 +206,7 @@ def test_setOsd_success():
     assert result2["OSD"]["week"]["x_coor"] == "11"
     assert result2["OSD"]["week"]["y_coor"] == "12"
 
-    assert "text" not in result3["OSD"]["label_info"][0]["label_info_1"]
+    assert result3["OSD"]["label_info"][0]["label_info_1"]["text"] == "unit test 2"
     assert result3["OSD"]["label_info"][0]["label_info_1"]["enabled"] == "off"
 
     result = tapo.getOsd()
