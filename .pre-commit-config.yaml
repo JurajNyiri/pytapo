@@ -11,12 +11,6 @@ repos:
     hooks:
       - id: black
         language_version: python3.8
-  - repo: https://github.com/Lucas-C/pre-commit-hooks-bandit
-    rev: v1.0.3
-    hooks:
-      - id: python-bandit-vulnerability-check
-        args: [-l, --recursive, -x, tests]
-        files: .py$
   - repo: local
     hooks:
       - id: tests

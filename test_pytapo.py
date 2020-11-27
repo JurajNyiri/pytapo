@@ -341,3 +341,12 @@ def test_getAutoTrackTarget():
     assert result[".name"] == "target_track_info"
     assert result[".type"] == "target_track_info"
     assert "enabled" in result
+
+
+def test_getAudioSpec():
+    tapo = Tapo(host, user, password)
+    result = tapo.getAudioSpec()
+    assert "audio_capability" in result
+    assert "device_speaker" in result["audio_capability"]
+    assert "device_microphone" in result["audio_capability"]
+    assert result["error_code"] == 0
