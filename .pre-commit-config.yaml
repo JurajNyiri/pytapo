@@ -1,0 +1,26 @@
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  sha: v1.2.3
+  hooks:
+    - id: check-merge-conflict
+    - id: debug-statements
+    - id: flake8
+      args: [--max-line-length=88]
+- repo: https://github.com/ambv/black
+  rev: stable
+  hooks:
+    - id: black
+      language_version: python3.8
+- repo: https://github.com/Lucas-C/pre-commit-hooks-bandit
+  sha: v1.0.3
+  hooks:
+    - id: python-bandit-vulnerability-check
+      args: [-l, --recursive, -x, tests]
+      files: .py$
+- repo: local
+  hooks:
+    - id: tests
+      name: run tests
+      entry: pytest -v
+      language: system
+      types: [python]
+      stages: [push]

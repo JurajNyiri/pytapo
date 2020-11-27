@@ -15,7 +15,13 @@ Set the following environment variables:
 `PYTAPO_PASSWORD` - password you set in Advanced Settings -> Camera Account
 `PYTAPO_IP` - ip of the camera, example: 192.168.1.52
 
+Install `pre-commit` and `tox` from pip.
+
+Run `pre-commit install`.
+
 Then run `tox` to run all the tests.
+
+Tests and linters are ran also before files are commited / pushed.
 
 ## Usage examples:
 
