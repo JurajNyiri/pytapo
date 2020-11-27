@@ -55,7 +55,8 @@ Linters are ran on every commit.
 
 Tests are ran on push. 
 
-Your camera may do all the actions supported by this library, including, but not limited to, move, change privacy mode and reboot while tests are running. 
+Your camera may do all the actions supported by this library, including, but not limited to, move, change privacy mode and reboot while tests are running. Camera does not format SD card during tests.
+
 After the tests are done, your camera should be in the initial state.
 
 ## Thank you
