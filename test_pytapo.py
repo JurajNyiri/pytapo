@@ -517,3 +517,112 @@ def test_setDayNightMode():
     with pytest.raises(Exception) as err:
         tapo.setDayNightMode("unsupported")
     assert "Invalid inf_type, can be off, on or auto" in str(err.value)
+
+
+def test_setMotionDetection():
+    tapo = Tapo(host, user, password)
+    origMotionDetection = tapo.getMotionDetection()
+    origMotionDetectionSensitivity = origMotionDetection["sensitivity"]
+    if origMotionDetectionSensitivity == "medium":
+        origMotionDetectionSensitivity = "normal"
+
+    tapo.setMotionDetection(False)
+    result = tapo.getMotionDetection()
+    assert result["enabled"] == "off"
+    tapo.setMotionDetection(True)
+    result = tapo.getMotionDetection()
+    assert result["enabled"] == "on"
+    tapo.setMotionDetection(False)
+    result = tapo.getMotionDetection()
+    assert result["enabled"] == "off"
+    tapo.setMotionDetection(False, "low")
+    result = tapo.getMotionDetection()
+    assert result["sensitivity"] == "low"
+    tapo.setMotionDetection(False, "normal")
+    result = tapo.getMotionDetection()
+    assert result["sensitivity"] == "medium"
+    tapo.setMotionDetection(False, "high")
+    result = tapo.getMotionDetection()
+    assert result["sensitivity"] == "high"
+
+    with pytest.raises(Exception) as err:
+        tapo.setMotionDetection(False, "unsupported")
+    assert "Invalid sensitivity, can be low, normal or high" in str(err.value)
+
+    tapo.setMotionDetection(
+        origMotionDetection["enabled"] == "on", origMotionDetectionSensitivity
+    )
+    result = tapo.getMotionDetection()
+    assert result["enabled"] == origMotionDetection["enabled"]
+    assert result["sensitivity"] == origMotionDetection["sensitivity"]
+
+
+def test_setAutoTrackTarget():
+    tapo = Tapo(host, user, password)
+    origAutoTrackEnabled = tapo.getAutoTrackTarget()["enabled"] == "on"
+    tapo.setAutoTrackTarget(True)
+    result = tapo.getAutoTrackTarget()
+    assert result["enabled"] == "on"
+    tapo.setAutoTrackTarget(False)
+    result = tapo.getAutoTrackTarget()
+    assert result["enabled"] == "off"
+    tapo.setAutoTrackTarget(True)
+    result = tapo.getAutoTrackTarget()
+    assert result["enabled"] == "on"
+
+    tapo.setAutoTrackTarget(origAutoTrackEnabled)
+    result = tapo.getAutoTrackTarget()
+    assert (result["enabled"] == "on") == origAutoTrackEnabled
+
+
+def test_errorMessage():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if not origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+    with pytest.raises(Exception) as err:
+        tapo.savePreset("unit test")
+    assert "Privacy mode is ON, not able to execute" in str(err.value)
+    if not origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+
+
+def test_preset():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+    result = tapo.savePreset("unit test")
+    assert result is True
+
+    presets = tapo.getPresets()
+    idToSet = list(presets.keys())[list(presets.values()).index("unit test")]
+    result = tapo.setPreset(idToSet)
+    assert result["error_code"] == 0
+
+    with pytest.raises(Exception) as err:
+        tapo.setPreset(-2)
+    assert "Preset -2 is not set in the app" in str(err.value)
+
+    while True:
+        try:
+            presets = tapo.getPresets()
+            idToDelete = list(presets.keys())[list(presets.values()).index("unit test")]
+            result = tapo.deletePreset(idToDelete)
+            assert result is True
+        except Exception as e:
+            assert "'unit test' is not in list" in str(e)
+            break
+
+    with pytest.raises(Exception) as err:
+        tapo.deletePreset(-1)
+    assert "Preset -1 is not set in the app" in str(err.value)
+
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+
+
+def test_reboot():
+    tapo = Tapo(host, user, password)
+    result = tapo.reboot()
+    assert result["error_code"] == 0
