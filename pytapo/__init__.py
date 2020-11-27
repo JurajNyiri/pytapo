@@ -283,7 +283,7 @@ class Tapo:
     def format(self):
         return self.performRequest(
             {"method": "do", "harddisk_manage": {"format_hd": "1"}}
-        )
+        )  # pragma: no cover
 
     def setLEDEnabled(self, enabled):
         return self.performRequest(

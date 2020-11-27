@@ -464,3 +464,20 @@ def test_moveMotorStep():
         tapo.setPrivacyMode(True)
     assert result1["error_code"] == 0
     assert result2["error_code"] == 0
+
+
+def test_setLEDEnabled():
+    tapo = Tapo(host, user, password)
+    origLedEnabled = tapo.getLED()["enabled"] == "on"
+    tapo.setLEDEnabled(True)
+    result = tapo.getLED()
+    assert result["enabled"] == "on"
+    tapo.setLEDEnabled(False)
+    result = tapo.getLED()
+    assert result["enabled"] == "off"
+    tapo.setLEDEnabled(True)
+    result = tapo.getLED()
+    assert result["enabled"] == "on"
+    tapo.setLEDEnabled(origLedEnabled)
+    result = tapo.getLED()
+    assert (result["enabled"] == "on") == origLedEnabled
