@@ -62,7 +62,7 @@ class Tapo:
             url, data=json.dumps(data), headers=self.headers, verify=False
         )
         if self.responseIsOK(res):
-            self.stok = json.loads(res.text)["result"]["stok"]
+            self.stok = res.json()["result"]["stok"]
             return self.stok
         raise Exception("Invalid authentication data.")
 
@@ -84,9 +84,12 @@ class Tapo:
         res = requests.post(
             url, data=json.dumps(inData), headers=self.headers, verify=False
         )
-        data = res.json()
-        if not self.responseIsOK(res):
-            if data["error_code"] == -40401 and loginRetryCountdown > 0:  # Invalid Stok
+        if self.responseIsOK(res):
+            return res.json()
+        else:
+            data = json.loads(res.text)
+            #  -40401: Invalid Stok
+            if data and "error_code" in data and data["error_code"] == -40401 and loginRetryCountdown > 0:
                 self.refreshStok()
                 return self.performRequest(inData, loginRetryCountdown - 1)
             else:
@@ -96,7 +99,6 @@ class Tapo:
                     + " Response:"
                     + json.dumps(data)
                 )
-        return data
 
     def getOsd(self):
         return self.performRequest({
