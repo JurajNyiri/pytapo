@@ -78,7 +78,7 @@ class Tapo:
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
-    def performRequest(self, inData, loginRetryCountdown=5):
+    def performRequest(self, inData, loginRetryCountdown=1):
         self.ensureAuthenticated()
         url = self.getHostURL()
         res = requests.post(
