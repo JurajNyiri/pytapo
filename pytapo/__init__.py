@@ -367,6 +367,7 @@ class Tapo:
             {"method": "do", "preset": {"remove_preset": {"id": [presetID]}}}
         )
         self.getPresets()
+        return True
 
     def setPreset(self, presetID):
         if not str(presetID) in self.presets:
