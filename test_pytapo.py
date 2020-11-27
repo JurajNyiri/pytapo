@@ -358,3 +358,13 @@ def test_getVhttpd():
     assert "cet" in result
     assert "vhttpd" in result["cet"]
     assert result["error_code"] == 0
+
+
+def test_getTime():
+    tapo = Tapo(host, user, password)
+    result = tapo.getTime()
+    assert "system" in result
+    assert "clock_status" in result["system"]
+    assert "seconds_from_1970" in result["system"]["clock_status"]
+    assert "local_time" in result["system"]["clock_status"]
+    assert result["error_code"] == 0
