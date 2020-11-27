@@ -368,3 +368,27 @@ def test_getTime():
     assert "seconds_from_1970" in result["system"]["clock_status"]
     assert "local_time" in result["system"]["clock_status"]
     assert result["error_code"] == 0
+
+
+def test_getMotorCapability():
+    tapo = Tapo(host, user, password)
+    result = tapo.getMotorCapability()
+    assert "motor" in result
+    assert "capability" in result["motor"]
+    assert result["error_code"] == 0
+
+
+def test_setPrivacyMode():
+    tapo = Tapo(host, user, password)
+    result = tapo.getPrivacyMode()
+    origEnabled = result["enabled"] == "on"
+    tapo.setPrivacyMode(False)
+    result = tapo.getPrivacyMode()
+    assert result["enabled"] == "off"
+    tapo.setPrivacyMode(True)
+    result = tapo.getPrivacyMode()
+    assert result["enabled"] == "on"
+    tapo.setPrivacyMode(False)
+    result = tapo.getPrivacyMode()
+    assert result["enabled"] == "off"
+    tapo.setPrivacyMode(origEnabled)

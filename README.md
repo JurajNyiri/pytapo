@@ -11,8 +11,11 @@ python3 -m pip install pytapo
 ## Test changes:
 
 Set the following environment variables:
+
 `PYTAPO_USER` - user you set in Advanced Settings -> Camera Account
+
 `PYTAPO_PASSWORD` - password you set in Advanced Settings -> Camera Account
+
 `PYTAPO_IP` - ip of the camera, example: 192.168.1.52
 
 Install `pre-commit` and `tox` from pip.
@@ -21,7 +24,7 @@ Run `pre-commit install` and `pre-commit install -t pre-push`.
 
 Then run `tox` to run all the tests.
 
-Tests and linters are ran also before files are commited / pushed.
+Tests and linters are ran automatically before files are commited / pushed.
 
 ## Usage examples:
 
