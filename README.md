@@ -17,7 +17,7 @@ Set the following environment variables:
 
 Install `pre-commit` and `tox` from pip.
 
-Run `pre-commit install`.
+Run `pre-commit install` and `pre-commit install -t pre-push`.
 
 Then run `tox` to run all the tests.
 
