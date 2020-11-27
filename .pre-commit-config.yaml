@@ -15,7 +15,7 @@
   hooks:
     - id: python-bandit-vulnerability-check
       args: [-l, --recursive, -x, tests]
-      files: pytapo/*.py$
+      files: pytapo/.*.py$
 - repo: local
   hooks:
     - id: tests
