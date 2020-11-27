@@ -1,5 +1,5 @@
 #
-# Author: Juraj Nyiri
+# Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
 
 import hashlib

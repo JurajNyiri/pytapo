@@ -286,3 +286,58 @@ def test_setOsd_failure():
     assert "Error: Incorrect corrdinates, must be between 0 and 10000." == str(
         err3.value
     )
+
+
+def test_getModuleSpec():
+    tapo = Tapo(host, user, password)
+    result = tapo.getModuleSpec()
+    print(result)
+    assert "function" in result
+    assert "module_spec" in result["function"]
+    assert result["error_code"] == 0
+
+
+def test_getPrivacyMode():
+    tapo = Tapo(host, user, password)
+    result = tapo.getPrivacyMode()
+    assert result[".name"] == "lens_mask_info"
+    assert result[".type"] == "lens_mask_info"
+    assert "enabled" in result
+
+
+def test_getMotionDetection():
+    tapo = Tapo(host, user, password)
+    result = tapo.getMotionDetection()
+    assert result[".name"] == "motion_det"
+    assert result[".type"] == "on_off"
+    assert "enabled" in result
+    assert "enhanced" in result
+    assert "sensitivity" in result
+    assert "digital_sensitivity" in result
+
+
+def test_getAlarm():
+    tapo = Tapo(host, user, password)
+    result = tapo.getAlarm()
+    assert result[".name"] == "chn1_msg_alarm_info"
+    assert result[".type"] == "info"
+    assert "enabled" in result
+    assert "alarm_type" in result
+    assert "alarm_mode" in result
+    assert "light_type" in result
+
+
+def test_getLED():
+    tapo = Tapo(host, user, password)
+    result = tapo.getLED()
+    assert result[".name"] == "config"
+    assert result[".type"] == "led"
+    assert "enabled" in result
+
+
+def test_getAutoTrackTarget():
+    tapo = Tapo(host, user, password)
+    result = tapo.getAutoTrackTarget()
+    assert result[".name"] == "target_track_info"
+    assert result[".type"] == "target_track_info"
+    assert "enabled" in result
