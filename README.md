@@ -29,9 +29,9 @@ print(tapo.getBasicInfo())
 
 Contributions to pytapo are welcomed. Please make sure to obey any TOS you have agreed to when you bought your Tapo product.
 
-Owner of this repository is not responsible for any PRs or code changes to this project created by 3rd parties.
-
 By creating a PR you acknowledge and agree that you are not breaking any TOS, law and/or have a permission to provide and share the code changes.
+
+Owner of this repository is not legally responsible for any PRs or code changes to this project created by 3rd parties.
 
 When you make a new change to the code base, make sure to have 100% unit test coverage.
 
