@@ -9,6 +9,35 @@ invalidPassword = "{password}_invalid".format(password=password)
 host = os.environ.get("PYTAPO_IP")
 
 
+def setOsd(tapo, values):
+    data = {
+        "origLabelText": values["OSD"]["label_info"][0]["label_info_1"]["text"],
+        "origLabelEnabled": values["OSD"]["label_info"][0]["label_info_1"]["enabled"],
+        "origLabelX": values["OSD"]["label_info"][0]["label_info_1"]["x_coor"],
+        "origLabelY": values["OSD"]["label_info"][0]["label_info_1"]["y_coor"],
+        "origDateEnabled": values["OSD"]["date"]["enabled"],
+        "origDateX": values["OSD"]["date"]["x_coor"],
+        "origDateY": values["OSD"]["date"]["y_coor"],
+        "origWeekEnabled": values["OSD"]["week"]["enabled"],
+        "origWeekX": values["OSD"]["week"]["x_coor"],
+        "origWeekY": values["OSD"]["week"]["y_coor"],
+    }
+
+    tapo.setOsd(
+        data["origLabelText"],
+        data["origDateEnabled"] == "on",
+        data["origLabelEnabled"] == "on",
+        data["origWeekEnabled"] == "on",
+        int(data["origDateX"]),
+        int(data["origDateY"]),
+        int(data["origLabelX"]),
+        int(data["origLabelY"]),
+        int(data["origWeekX"]),
+        int(data["origWeekY"]),
+    )
+    return data
+
+
 def test_refreshStok_success():
     tapo = Tapo(host, user, password)
     result = tapo.refreshStok()
@@ -110,3 +139,150 @@ def test_getOsd():
     result = tapo.getOsd()
     assert "OSD" in result
     assert result["error_code"] == 0
+
+
+def test_setOsd_success():
+    tapo = Tapo(host, user, password)
+    originalOsd = tapo.getOsd()
+
+    tapo.setOsd(
+        "unit test",
+        False,
+        False,
+        False,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+    )
+    result1 = tapo.getOsd()
+
+    tapo.setOsd(
+        "unit test 2",
+        True,
+        True,
+        True,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+    )
+    result2 = tapo.getOsd()
+
+    tapo.setOsd(
+        "",
+    )
+    result3 = tapo.getOsd()
+    origData = setOsd(tapo, originalOsd)
+
+    assert result1["OSD"]["label_info"][0]["label_info_1"]["text"] == "unit test"
+    assert result1["OSD"]["label_info"][0]["label_info_1"]["enabled"] == "off"
+    assert result1["OSD"]["label_info"][0]["label_info_1"]["x_coor"] == "3"
+    assert result1["OSD"]["label_info"][0]["label_info_1"]["y_coor"] == "4"
+    assert result1["OSD"]["date"]["enabled"] == "off"
+    assert result1["OSD"]["date"]["x_coor"] == "1"
+    assert result1["OSD"]["date"]["y_coor"] == "2"
+    assert result1["OSD"]["week"]["enabled"] == "off"
+    assert result1["OSD"]["week"]["x_coor"] == "5"
+    assert result1["OSD"]["week"]["y_coor"] == "6"
+
+    assert result2["OSD"]["label_info"][0]["label_info_1"]["text"] == "unit test 2"
+    assert result2["OSD"]["label_info"][0]["label_info_1"]["enabled"] == "on"
+    assert result2["OSD"]["label_info"][0]["label_info_1"]["x_coor"] == "9"
+    assert result2["OSD"]["label_info"][0]["label_info_1"]["y_coor"] == "10"
+    assert result2["OSD"]["date"]["enabled"] == "on"
+    assert result2["OSD"]["date"]["x_coor"] == "7"
+    assert result2["OSD"]["date"]["y_coor"] == "8"
+    assert result2["OSD"]["week"]["enabled"] == "on"
+    assert result2["OSD"]["week"]["x_coor"] == "11"
+    assert result2["OSD"]["week"]["y_coor"] == "12"
+
+    assert "text" not in result3["OSD"]["label_info"][0]["label_info_1"]
+    assert result3["OSD"]["label_info"][0]["label_info_1"]["enabled"] == "off"
+
+    result = tapo.getOsd()
+
+    assert (
+        result["OSD"]["label_info"][0]["label_info_1"]["text"]
+        == origData["origLabelText"]
+    )
+    assert (
+        result["OSD"]["label_info"][0]["label_info_1"]["enabled"]
+        == origData["origLabelEnabled"]
+    )
+    assert (
+        result["OSD"]["label_info"][0]["label_info_1"]["x_coor"]
+        == origData["origLabelX"]
+    )
+    assert (
+        result["OSD"]["label_info"][0]["label_info_1"]["y_coor"]
+        == origData["origLabelY"]
+    )
+    assert result["OSD"]["date"]["enabled"] == origData["origDateEnabled"]
+    assert result["OSD"]["date"]["x_coor"] == origData["origDateX"]
+    assert result["OSD"]["date"]["y_coor"] == origData["origDateY"]
+    assert result["OSD"]["week"]["enabled"] == origData["origWeekEnabled"]
+    assert result["OSD"]["week"]["x_coor"] == origData["origWeekX"]
+    assert result["OSD"]["week"]["y_coor"] == origData["origWeekY"]
+
+
+def test_setOsd_failure():
+    tapo = Tapo(host, user, password)
+
+    originalOsd = tapo.getOsd()
+
+    with pytest.raises(Exception) as err1:
+        tapo.setOsd(
+            "AAAAAAAAAAAAAAAAA",
+            False,
+            False,
+            False,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+
+    with pytest.raises(Exception) as err2:
+        tapo.setOsd(
+            "valid label",
+            False,
+            False,
+            False,
+            -50,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
+
+    with pytest.raises(Exception) as err3:
+        tapo.setOsd(
+            "valid label",
+            False,
+            False,
+            False,
+            1,
+            10001,
+            3,
+            4,
+            5,
+            6,
+        )
+
+    # just in case something succeeded, restore original
+    setOsd(tapo, originalOsd)
+    assert "Error: Label cannot be longer than 16 characters." == str(err1.value)
+    assert "Error: Incorrect corrdinates, must be between 0 and 10000." == str(
+        err2.value
+    )
+    assert "Error: Incorrect corrdinates, must be between 0 and 10000." == str(
+        err3.value
+    )
