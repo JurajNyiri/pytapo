@@ -74,16 +74,15 @@ class Tapo:
             )
         try:
             data = res.json()
-            print(data)
             return data["error_code"] == 0
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
-    def performRequest(self, inData, loginRetryCountdown=1):
+    def performRequest(self, requestData, loginRetry=False):
         self.ensureAuthenticated()
         url = self.getHostURL()
         res = requests.post(
-            url, data=json.dumps(inData), headers=self.headers, verify=False
+            url, data=json.dumps(requestData), headers=self.headers, verify=False
         )
         if self.responseIsOK(res):
             return res.json()
@@ -94,10 +93,10 @@ class Tapo:
                 data
                 and "error_code" in data
                 and data["error_code"] == -40401
-                and loginRetryCountdown > 0
+                and not loginRetry
             ):
                 self.refreshStok()
-                return self.performRequest(inData, loginRetryCountdown - 1)
+                return self.performRequest(requestData, True)
             else:
                 raise Exception(
                     "Error: "
