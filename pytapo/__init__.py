@@ -298,15 +298,16 @@ class Tapo:
             raise Exception("Invalid inf_type, can be off, on or auto")
         return self.performRequest(
             {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "setDayNightModeConfig",
-                            "params": {"image": {"common": {"inf_type": inf_type}}},
-                        }
-                    ]
-                },
+                "method": "set",
+                "image": {"common": {"inf_type": inf_type}},
+            }
+        )
+
+    def getCommonImage(self):
+        return self.performRequest(
+            {
+                "method": "get",
+                "image": {"name": "common"},
             }
         )
 
