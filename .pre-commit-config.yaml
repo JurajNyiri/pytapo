@@ -15,12 +15,12 @@
   hooks:
     - id: python-bandit-vulnerability-check
       args: [-l, --recursive, -x, tests]
-      files: .py$
+      files: pytapo/*.py$
 - repo: local
   hooks:
     - id: tests
       name: run tests
-      entry: pytest -v
+      entry: tox
       language: system
       types: [python]
       stages: [push]
