@@ -1,4 +1,5 @@
 # PyTapo
+
 Python library for communication with Tapo Cameras
 
 ## Install:
@@ -7,9 +8,19 @@ Python library for communication with Tapo Cameras
 python3 -m pip install pytapo
 ```
 
+## Test changes:
+
+Set the following environment variables:
+`PYTAPO_USER` - user you set in Advanced Settings -> Camera Account
+`PYTAPO_PASSWORD` - password you set in Advanced Settings -> Camera Account
+`PYTAPO_IP` - ip of the camera, example: 192.168.1.52
+
+Then run `tox` to run all the tests.
+
 ## Usage examples:
 
 ### Initiate library:
+
 ```
 from pytapo import Tapo
 
@@ -31,7 +42,7 @@ print(tapo.getBasicInfo())
 
 # Disclaimer
 
-Pytapo is an unofficial module for achieving interoperability with Tapo cameras. 
+Pytapo is an unofficial module for achieving interoperability with Tapo cameras.
 
 Author is in no way affiliated with Tp-Link or Tapo.
 
