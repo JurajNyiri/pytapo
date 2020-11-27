@@ -1,5 +1,6 @@
 import os
 import pytest
+import json
 from pytapo import Tapo
 
 user = os.environ.get("PYTAPO_USER")
@@ -23,7 +24,7 @@ def test_refreshStok_failure():
 def test_getHostURL():
     tapo = Tapo(host, user, password)
     hostURL = tapo.getHostURL()
-    assert "https://" + host + ":443" + "/stok=" in hostURL
+    assert "https://" + host + "/stok=" in hostURL
     assert "/ds" in hostURL
 
 
@@ -40,6 +41,9 @@ def test_responseIsOK_success():
         status_code = 200
         text = '{"error_code":0}'
 
+        def json(self):
+            return json.loads(self.text)
+
     result = tapo.responseIsOK(AttributeDict())
     assert result is True
 
@@ -51,12 +55,18 @@ def test_responseIsOK_failure():
         status_code = 200
         text = '{"error_code":404}'
 
+        def json(self):
+            return json.loads(self.text)
+
     result = tapo.responseIsOK(AttributeDict())
     assert result is False
 
     class AttributeDict(dict):
         status_code = 200
         text = "not json"
+
+        def json(self):
+            return json.loads(self.text)
 
     with pytest.raises(Exception) as err:
         result = tapo.responseIsOK(AttributeDict())
@@ -66,6 +76,9 @@ def test_responseIsOK_failure():
     class AttributeDict(dict):
         status_code = 404
         text = "not json"
+
+        def json(self):
+            return json.loads(self.text)
 
     with pytest.raises(Exception) as err:
         result = tapo.responseIsOK(AttributeDict())
