@@ -64,7 +64,7 @@ class Tapo:
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
             return self.stok
-        raise Exception("Invalid authentication data.")
+        raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res):
         if res.status_code != 200:
@@ -127,7 +127,7 @@ class Tapo:
         weekY=0,
     ):
         if len(label) >= 16:
-            raise Exception("Error: Label cannot be longer than 16 characters.")
+            raise Exception("Error: Label cannot be longer than 16 characters")
         elif len(label) == 0:
             labelEnabled = False
         if (
@@ -144,9 +144,7 @@ class Tapo:
             or weekY > 10000
             or weekY < 0
         ):
-            raise Exception(
-                "Error: Incorrect corrdinates, must be between 0 and 10000."
-            )
+            raise Exception("Error: Incorrect corrdinates, must be between 0 and 10000")
         data = {
             "method": "set",
             "OSD": {
@@ -238,6 +236,9 @@ class Tapo:
     def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True):
         alarm_mode = []
 
+        if not soundEnabled and not lightEnabled:
+            raise Exception("You need to use at least sound or light for alarm")
+
         if soundEnabled:
             alarm_mode.append("sound")
         if lightEnabled:
@@ -291,7 +292,7 @@ class Tapo:
 
     def setDayNightMode(self, inf_type):
         if inf_type not in ["off", "on", "auto"]:
-            raise Exception("Invalid inf_type, can be off, on or auto.")
+            raise Exception("Invalid inf_type, can be off, on or auto")
         return self.performRequest(
             {
                 "method": "multipleRequest",
@@ -319,7 +320,7 @@ class Tapo:
             elif sensitivity == "low":
                 data["motion_detection"]["motion_det"]["digital_sensitivity"] = "20"
             else:
-                raise Exception("Invalid sensitivity, can be low, normal or high.")
+                raise Exception("Invalid sensitivity, can be low, normal or high")
 
         return self.performRequest(data)
 
@@ -356,7 +357,7 @@ class Tapo:
 
     def deletePreset(self, presetID):
         if not str(presetID) in self.presets:
-            raise Exception("Preset " + str(presetID) + " is not set in the app.")
+            raise Exception("Preset " + str(presetID) + " is not set in the app")
 
         self.performRequest(
             {"method": "do", "preset": {"remove_preset": {"id": [presetID]}}}
@@ -365,7 +366,7 @@ class Tapo:
 
     def setPreset(self, presetID):
         if not str(presetID) in self.presets:
-            raise Exception("Preset " + str(presetID) + " is not set in the app.")
+            raise Exception("Preset " + str(presetID) + " is not set in the app")
         return self.performRequest(
             {"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}}
         )
