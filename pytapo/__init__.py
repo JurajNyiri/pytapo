@@ -33,9 +33,9 @@ class Tapo:
         if (
             self.basicInfo["device_info"]["basic_info"]["device_model"]
             in DEVICES_WITH_NO_PRESETS
-        ):
+        ):  # pragma: no cover
             self.presets = {}
-        else:
+        else:  # pragma: no cover
             self.presets = self.getPresets()
 
     def getHostURL(self):
@@ -72,7 +72,7 @@ class Tapo:
             )
         try:
             data = json.loads(res.text)
-            return res and data and data["error_code"] == 0
+            return data["error_code"] == 0
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
