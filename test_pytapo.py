@@ -1,6 +1,7 @@
 import os
 import pytest
 import json
+import time
 from pytapo import Tapo
 
 user = os.environ.get("PYTAPO_USER")
@@ -425,3 +426,37 @@ def test_setAlarm():
         "sound" in origAlarm["alarm_mode"],
         "light" in origAlarm["alarm_mode"],
     )
+
+
+def test_moveMotor():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+    result = tapo.moveMotor(0, 0)
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+    assert result["error_code"] == 0
+
+
+def test_moveMotorStep():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+    result1 = tapo.moveMotorStep(10)
+    time.sleep(5)
+    result2 = tapo.moveMotorStep(190)
+    time.sleep(5)
+
+    with pytest.raises(Exception) as err:
+        tapo.moveMotorStep(360)
+    assert "Angle must be in a range 0 <= angle < 360" in str(err.value)
+    with pytest.raises(Exception) as err:
+        tapo.moveMotorStep(-1)
+    assert "Angle must be in a range 0 <= angle < 360" in str(err.value)
+
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+    assert result1["error_code"] == 0
+    assert result2["error_code"] == 0
