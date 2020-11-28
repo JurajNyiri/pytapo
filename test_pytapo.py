@@ -296,7 +296,6 @@ def test_setOsd_failure():
 def test_getModuleSpec():
     tapo = Tapo(host, user, password)
     result = tapo.getModuleSpec()
-    print(result)
     assert "function" in result
     assert "module_spec" in result["function"]
     assert result["error_code"] == 0
