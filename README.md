@@ -1,4 +1,5 @@
 # PyTapo
+
 Python library for communication with Tapo Cameras
 
 ## Install:
@@ -10,6 +11,7 @@ python3 -m pip install pytapo
 ## Usage examples:
 
 ### Initiate library:
+
 ```
 from pytapo import Tapo
 
@@ -22,6 +24,41 @@ tapo = Tapo(host, user, password)
 print(tapo.getBasicInfo())
 ```
 
+
+## Contributions:
+
+Contributions to pytapo are welcomed.
+
+By creating a PR you acknowledge and agree that you are not breaking any TOS, law and/or have a permission to provide and share the code changes.
+
+Owner of this repository is not legally responsible for any PRs or code changes to this project created by 3rd parties.
+
+When you make a new change to the code base, make sure to have 100% unit test coverage, see below for more information about tests.
+
+### Test instructions
+
+Set the following environment variables:
+
+`PYTAPO_USER` - user you set in Advanced Settings -> Camera Account
+
+`PYTAPO_PASSWORD` - password you set in Advanced Settings -> Camera Account
+
+`PYTAPO_IP` - ip of the camera, example: 192.168.1.52
+
+Install `pre-commit` and `tox` from pip.
+
+Run `pre-commit install` and `pre-commit install -t pre-push`.
+
+Then run `tox` to run all the tests.
+
+Linters are ran on every commit.
+
+Tests are ran on push. 
+
+Your camera may do all the actions supported by this library, including, but not limited to, move, change privacy mode and reboot while tests are running. Camera does not format SD card during tests.
+
+After the tests are done, your camera should be in the initial state.
+
 ## Thank you
 
 - [Dale Pavey](https://research.nccgroup.com/2020/07/31/lights-camera-hacked-an-insight-into-the-world-of-popular-ip-cameras/) from NCC Group for the initial research on the Tapo C200
@@ -31,7 +68,7 @@ print(tapo.getBasicInfo())
 
 # Disclaimer
 
-Pytapo is an unofficial module for achieving interoperability with Tapo cameras. 
+Pytapo is an unofficial module for achieving interoperability with Tapo cameras.
 
 Author is in no way affiliated with Tp-Link or Tapo.
 
