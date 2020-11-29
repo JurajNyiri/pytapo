@@ -8,7 +8,7 @@ import json
 import requests
 import urllib3
 
-from .const import ERROR_CODES, DEVICES_WITH_NO_PRESETS
+from .const import ERROR_CODES
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -32,13 +32,16 @@ class Tapo:
         self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
 
         self.basicInfo = self.getBasicInfo()
-        if (
-            self.basicInfo["device_info"]["basic_info"]["device_model"]
-            in DEVICES_WITH_NO_PRESETS
-        ):  # pragma: no cover
+        self.presets = self.isSupportingPresets()
+        if not self.presets:
             self.presets = {}
-        else:  # pragma: no cover
-            self.presets = self.getPresets()
+
+    def isSupportingPresets(self):
+        try:
+            presets = self.getPresets()
+            return presets
+        except Exception:
+            return False
 
     def getHostURL(self):
         return "https://{host}/stok={stok}/ds".format(host=self.host, stok=self.stok)

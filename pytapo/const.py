@@ -7,6 +7,3 @@ ERROR_CODES = {
     "-40105": "Method does not exist",
     "-40101": "Parameter to set does not exist",
 }
-DEVICE_MODEL_C100 = "C100"
-DEVICE_MODEL_C200 = "C200"
-DEVICES_WITH_NO_PRESETS = [DEVICE_MODEL_C100]
