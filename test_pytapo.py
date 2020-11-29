@@ -3,11 +3,16 @@ import pytest
 import json
 import time
 from pytapo import Tapo
+import mock
 
 user = os.environ.get("PYTAPO_USER")
 password = os.environ.get("PYTAPO_PASSWORD")
 invalidPassword = "{password}_invalid".format(password=password)
 host = os.environ.get("PYTAPO_IP")
+
+"""
+util functions for unit tests
+"""
 
 
 def setOsd(tapo, values):
@@ -41,6 +46,15 @@ def setOsd(tapo, values):
         int(data["origWeekY"]),
     )
     return data
+
+
+def getPresetsMock(classObj):
+    raise Exception("Mock exception")
+
+
+"""
+unit tests below
+"""
 
 
 def test_refreshStok_success():
@@ -625,3 +639,11 @@ def test_reboot():
     tapo = Tapo(host, user, password)
     result = tapo.reboot()
     assert result["error_code"] == 0
+
+
+def test_no_presets():
+    with mock.patch.object(Tapo, "getPresets", new=getPresetsMock):
+        tapo = Tapo(host, user, password)
+        tapo.refreshStok()
+
+    assert tapo.presets == {}
