@@ -7,6 +7,7 @@ import json
 
 import requests
 import urllib3
+import socket
 
 from .const import ERROR_CODES
 
@@ -14,10 +15,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Tapo:
-    def __init__(self, host, user, password):
+    def __init__(self, host, user, password, cloudPassword=""):
         self.host = host
         self.user = user
         self.password = password
+        self.cloudPassword = cloudPassword
         self.stok = False
         self.headers = {
             "Host": self.host,
@@ -29,12 +31,131 @@ class Tapo:
             "requestByApp": "true",
             "Content-Type": "application/json; charset=UTF-8",
         }
+        self.streamHeaders = {
+            "Host": self.host,
+            "Content-Type": "multipart/mixed; boundary=--client-stream-boundary--",
+        }
         self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
+        self.hashedCloudPassword = (
+            hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
+        )
 
         self.basicInfo = self.getBasicInfo()
         self.presets = self.isSupportingPresets()
         if not self.presets:
             self.presets = {}
+
+    def generate_nonce(bits, randomness=None):
+        "todo: This could be stronger"
+        return "a9h5b7i3j2y8c0a6"
+
+    def printHeaders(self, response):
+        headers = self.socket_extractHeaders(response)
+        for key in headers:
+            print(key + ": " + headers[key])
+
+    def openConnection(self):
+        port = 8800
+
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        message = b"POST /stream HTTP/1.1\r\n"
+        message += (
+            b"Content-Type: multipart/mixed; boundary=--client-stream-boundary--\r\n"
+        )
+        message += b"\r\n"
+
+        client.connect((self.host, port))
+        client.send(message)
+        response = client.recv(4096)
+        statusCode = self.socket_getStatusCode(response)
+        headers = self.socket_extractHeaders(response)
+        if statusCode == 401 and "WWW-Authenticate" in headers:
+            digestProperties = self.digest_extract(headers["WWW-Authenticate"])
+            authorizationHeader = self.digest_createAuthenticationHeader(
+                digestProperties
+            )
+            message = b"POST /stream HTTP/1.1\r\n"
+            message += b"Content-Type: multipart/mixed;"
+            message += b"boundary=--client-stream-boundary--\r\n"
+            message += b"Connection: keep-alive\r\n"
+            message += b"Content-Length: -1\r\n"
+            message += b"Authorization: " + str.encode(authorizationHeader) + b"\r\n"
+            message += b"\r\n"
+
+            client.send(message)
+
+            response = client.recv(4096)
+
+            if self.socket_getStatusCode(response) == 200:
+                return client
+
+        raise Exception("Authentication via sockets failed")
+
+    def socket_extractHeaders(self, response):
+        returnHeaders = {}
+        responseHeaders = response.decode("UTF-8").split("\r\n")
+        for header in responseHeaders:
+            headerData = header.split(": ")
+            if len(headerData) == 2 and headerData[0] != "":
+                returnHeaders[headerData[0]] = headerData[1]
+
+        return returnHeaders
+
+    def socket_getStatusCode(self, response):
+        responseHeaders = response.decode("UTF-8").split("\r\n")
+        for header in responseHeaders:
+            headerData = header.split(": ")
+            if len(headerData) == 1 and headerData[0] != "":
+                return int(headerData[0].split(" ")[1])
+
+    def digest_extract(self, digest):
+        returnProperties = {}
+        digest = digest.replace("Digest ", "")
+        digest = digest.split(",")
+        for property in digest:
+            split = property.split("=")
+            returnProperties[split[0]] = split[1].replace('"', "")
+        return returnProperties
+
+    def digest_createAuthenticationHeader(self, digestProperties):
+        nc = "00000001"  # todo increment this
+        cnonce = self.generate_nonce()
+
+        HA1decrypted = str.encode(
+            "admin" + ":" + digestProperties["realm"] + ":" + self.hashedCloudPassword
+        )
+        HA2decrypted = str.encode("POST" + ":" + "/stream")
+        HA1 = hashlib.md5(HA1decrypted).hexdigest()
+        HA2 = hashlib.md5(HA2decrypted).hexdigest()
+
+        digestResponseDecrypted = str.encode(
+            HA1
+            + ":"
+            + digestProperties["nonce"]
+            + ":"
+            + nc
+            + ":"
+            + cnonce
+            + ":"
+            + digestProperties["qop"]
+            + ":"
+            + HA2
+        )
+        digestResponse = hashlib.md5(digestResponseDecrypted).hexdigest()
+
+        AuthorizationHeader = 'Digest username="admin",'
+        AuthorizationHeader += 'realm="' + digestProperties["realm"] + '",'
+        AuthorizationHeader += 'uri="/stream",'
+        AuthorizationHeader += "algorithm=MD5,"
+        AuthorizationHeader += 'nonce="' + digestProperties["nonce"] + '",'
+        AuthorizationHeader += "nc=" + nc + ","
+        AuthorizationHeader += 'cnonce="' + cnonce + '",'
+        AuthorizationHeader += "qop=" + digestProperties["qop"] + ","
+        AuthorizationHeader += 'response="' + digestResponse + '",'
+        AuthorizationHeader += 'opaque="' + digestProperties["opaque"] + '"'
+
+        return AuthorizationHeader
 
     def isSupportingPresets(self):
         try:
@@ -45,6 +166,9 @@ class Tapo:
 
     def getHostURL(self):
         return "https://{host}/stok={stok}/ds".format(host=self.host, stok=self.stok)
+
+    def getStreamURL(self):
+        return "{host}:8800".format(host=self.host)
 
     def ensureAuthenticated(self):
         if not self.stok:
