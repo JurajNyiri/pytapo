@@ -54,6 +54,35 @@ class Tapo:
         for key in headers:
             print(key + ": " + headers[key])
 
+    def socket_query(self, client, query, additionalHeaders={}):
+        query = json.dumps(query)
+        message = b"----client-stream-boundary--\r\n"
+        message += b"Content-Type: application/json\r\n"
+        message += b"Content-Length: " + str.encode(str(len(query))) + b"\r\n"
+        for header in additionalHeaders:
+            message += (
+                str.encode(header)
+                + b": "
+                + str.encode(str(additionalHeaders[header]))
+                + b"\r\n"
+            )
+        message += b"\r\n"
+        message += str.encode(query) + b"\r\n"
+
+        print(message)
+
+        print("sending...")
+        client.send(message)
+        print("sent!")
+        while True:
+            # todo: end the cycle
+            print("...")
+            print(client.recv(4096))
+
+        print("OK")
+
+        return client
+
     def openConnection(self):
         port = 8800
 
@@ -64,10 +93,13 @@ class Tapo:
             b"Content-Type: multipart/mixed; boundary=--client-stream-boundary--\r\n"
         )
         message += b"\r\n"
-
+        print("openConnection - 1")
         client.connect((self.host, port))
+        print("openConnection - 2")
         client.send(message)
+        print("openConnection - 3")
         response = client.recv(4096)
+        print("openConnection - 4")
         statusCode = self.socket_getStatusCode(response)
         headers = self.socket_extractHeaders(response)
         if statusCode == 401 and "WWW-Authenticate" in headers:
@@ -443,7 +475,32 @@ class Tapo:
                     ]
                 },
             }
-        )["result"]["responses"][0]
+        )["result"]["responses"][0]["result"]["user_id"]
+
+    def getRecordings(self, date):
+        return self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "searchVideoOfDay",
+                            "params": {
+                                "playback": {
+                                    "search_video_utility": {
+                                        "channel": 0,
+                                        "date": date,
+                                        "end_index": 99,
+                                        "id": self.getUserID(),
+                                        "start_index": 0,
+                                    }
+                                }
+                            },
+                        }
+                    ]
+                },
+            }
+        )["result"]["responses"][0]["result"]["playback"]["search_video_results"]
 
     def getCommonImage(self):
         return self.performRequest(
