@@ -55,30 +55,26 @@ class Tapo:
             print(key + ": " + headers[key])
 
     def socket_query(self, client, query, additionalHeaders={}):
-        query = json.dumps(query)
+        query = str.encode(json.dumps(query).replace(" ", ""))
         message = b"----client-stream-boundary--\r\n"
         message += b"Content-Type: application/json\r\n"
         message += b"Content-Length: " + str.encode(str(len(query))) + b"\r\n"
         for header in additionalHeaders:
             message += (
-                str.encode(header)
-                + b": "
-                + str.encode(str(additionalHeaders[header]))
-                + b"\r\n"
+                str.encode(header) + b": " + str.encode(str(additionalHeaders[header]))
             )
-        message += b"\r\n"
-        message += str.encode(query) + b"\r\n"
+        message += b"\r\n\r\n"
 
-        print(message)
+        message += query
+        message += b"\r\n"
+
+        # print(message)
 
         print("sending...")
         client.send(message)
         print("sent!")
-        while True:
-            # todo: end the cycle
-            print("...")
-            print(client.recv(4096))
 
+        print(client.recv(4096))
         print("OK")
 
         return client
