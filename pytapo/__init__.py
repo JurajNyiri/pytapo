@@ -3,6 +3,7 @@
 #
 
 import hashlib
+import select
 import json
 
 import requests
@@ -56,6 +57,7 @@ class Tapo:
             print(key + ": " + headers[key])
 
     def socket_query(self, client, query, additionalHeaders={}):
+        client.setblocking(0)
         query = str.encode(json.dumps(query).replace(" ", ""))
         message = b"----client-stream-boundary--\r\n"
         message += b"Content-Type: application/json\r\n"
@@ -65,20 +67,22 @@ class Tapo:
                 str.encode(header) + b": " + str.encode(str(additionalHeaders[header]))
             )
         message += b"\r\n\r\n"
-
         message += query
         message += b"\r\n"
 
-        print(message)
-
-        print("sending...")
         client.send(message)
-        print("sent!")
 
-        print(client.recv(4096))
-        print("OK")
+        data = bytearray()
+        finished = 0
+        while finished != 2:
+            ready = select.select([client], [], [], 1)
+            if ready[0]:
+                finished = 0
+                chunk = client.recv(4096)
+                data.extend(chunk)
+            finished += 1
 
-        return client
+        return data
 
     def openConnection(self):
         port = 8800
@@ -123,12 +127,16 @@ class Tapo:
 
     def socket_extractHeaders(self, response):
         returnHeaders = {}
-        responseHeaders = response.decode("UTF-8").split("\r\n")
-        for header in responseHeaders:
-            headerData = header.split(": ")
-            if len(headerData) == 2 and headerData[0] != "":
-                returnHeaders[headerData[0]] = headerData[1]
-
+        try:
+            responseHeaders = (
+                response.decode("UTF-8").split("\r\n\r\n")[0].split("\r\n")
+            )
+            for header in responseHeaders:
+                headerData = header.split(": ")
+                if len(headerData) == 2 and headerData[0] != "":
+                    returnHeaders[headerData[0]] = headerData[1]
+        except Exception:
+            pass
         return returnHeaders
 
     def socket_getStatusCode(self, response):
