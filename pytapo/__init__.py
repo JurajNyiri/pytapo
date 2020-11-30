@@ -430,6 +430,21 @@ class Tapo:
             }
         )
 
+    def getUserID(self):
+        return self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "getUserID",
+                            "params": {"system": {"get_user_id": "null"}},
+                        }
+                    ]
+                },
+            }
+        )["result"]["responses"][0]
+
     def getCommonImage(self):
         return self.performRequest(
             {
