@@ -21,6 +21,7 @@ class Tapo:
         self.password = password
         self.cloudPassword = cloudPassword
         self.stok = False
+        self.userID = False
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -68,7 +69,7 @@ class Tapo:
         message += query
         message += b"\r\n"
 
-        # print(message)
+        print(message)
 
         print("sending...")
         client.send(message)
@@ -459,19 +460,21 @@ class Tapo:
         )
 
     def getUserID(self):
-        return self.performRequest(
-            {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "getUserID",
-                            "params": {"system": {"get_user_id": "null"}},
-                        }
-                    ]
-                },
-            }
-        )["result"]["responses"][0]["result"]["user_id"]
+        if not self.userID:
+            self.userID = self.performRequest(
+                {
+                    "method": "multipleRequest",
+                    "params": {
+                        "requests": [
+                            {
+                                "method": "getUserID",
+                                "params": {"system": {"get_user_id": "null"}},
+                            }
+                        ]
+                    },
+                }
+            )["result"]["responses"][0]["result"]["user_id"]
+        return self.userID
 
     def getRecordings(self, date):
         return self.performRequest(
