@@ -5,6 +5,7 @@
 import hashlib
 import select
 import json
+import re
 
 import requests
 import urllib3
@@ -72,14 +73,24 @@ class Tapo:
 
         client.send(message)
 
-        data = bytearray()
+        data = ""
         finished = 0
         while finished != 2:
             ready = select.select([client], [], [], 1)
             if ready[0]:
                 finished = 0
                 chunk = client.recv(4096)
-                data.extend(chunk)
+                chunk = chunk.decode("ISO-8859-1")
+                data += chunk
+
+            data = data.replace("----device-stream-boundary--", "")
+            data = data.replace("Content-Type: application/json", "")
+            data = data.replace("Content-Type: video/mp2t", "")
+            data = re.sub(r"Content-Length: [0-9]+", "", data)
+            data = re.sub(r"X-If-Encrypt: [0-9]+", "", data)
+            data = re.sub(r"X-Session-Id: [0-9]+", "", data)
+            data = re.sub(r"X-Data-Sequence: [0-9]+", "", data)
+            data = data.replace("\r\n", "")
             finished += 1
 
         return data
@@ -129,7 +140,7 @@ class Tapo:
         returnHeaders = {}
         try:
             responseHeaders = (
-                response.decode("UTF-8").split("\r\n\r\n")[0].split("\r\n")
+                response.decode("ISO-8859-1").split("\r\n\r\n")[0].split("\r\n")
             )
             for header in responseHeaders:
                 headerData = header.split(": ")
@@ -140,7 +151,7 @@ class Tapo:
         return returnHeaders
 
     def socket_getStatusCode(self, response):
-        responseHeaders = response.decode("UTF-8").split("\r\n")
+        responseHeaders = response.decode("ISO-8859-1").split("\r\n")
         for header in responseHeaders:
             headerData = header.split(": ")
             if len(headerData) == 1 and headerData[0] != "":

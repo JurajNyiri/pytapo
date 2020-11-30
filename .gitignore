@@ -8,3 +8,4 @@ dist
 pytapo.egg-info
 htmlcov
 .coverage
+output
