@@ -58,6 +58,9 @@ class Tapo:
             print(key + ": " + headers[key])
 
     def socket_query(self, client, query, additionalHeaders={}):
+        if additionalHeaders is None:
+            additionalHeaders = {}
+
         client.setblocking(0)
         query = str.encode(json.dumps(query).replace(" ", ""))
         message = b"----client-stream-boundary--\r\n"
@@ -73,16 +76,46 @@ class Tapo:
 
         client.send(message)
 
-        data = ""
+        data = b""
+        content_length = None
+        content_start = None
+        content_session = None
+        content_type = None
+
+        content_session_regex = br"X-Session-Id:\s*(-?[0-9]+)"
+        content_length_regex = br"Content-Length:\s*(-?[0-9]+)"
+        content_type_regex = br"Content-Type:\s*([a-z\/1-9]+)"
+
         finished = 0
         while finished != 2:
             ready = select.select([client], [], [], 1)
             if ready[0]:
                 finished = 0
                 chunk = client.recv(4096)
-                chunk = chunk.decode("ISO-8859-1")
                 data += chunk
+            if not b"\r\n" * 2 in data:
+                continue
 
+            if (content_length is None or content_start is None) or True:
+                content_start = data.index(b"\r\n" * 2) + 4
+                # if not match_content_length:
+                #    raise Exception("Content-Length header not found in response")
+                # if not match_content_type:
+                #    raise Exception("Content-Type header not found in response")
+                content_session = re.findall(content_session_regex, data)
+                content_length = re.findall(content_length_regex, data)
+                content_type = re.findall(content_type_regex, data)
+
+                # print(content_length)
+                # print(content_type)
+                # print(content_session)
+
+            # if content_length is not None and content_start is not None:
+            # noinspection PyUnresolvedReferences
+            # if len(data) >= content_start + content_length:
+            # break
+            #    pass
+            """
             data = data.replace("----device-stream-boundary--", "")
             data = data.replace("Content-Type: application/json", "")
             data = data.replace("Content-Type: video/mp2t", "")
@@ -91,8 +124,12 @@ class Tapo:
             data = re.sub(r"X-Session-Id: [0-9]+", "", data)
             data = re.sub(r"X-Data-Sequence: [0-9]+", "", data)
             data = data.replace("\r\n", "")
+            """
             finished += 1
-
+        # print(data)
+        print(content_type)
+        print(content_session)
+        print(len(content_session))
         return data
 
     def openConnection(self):
