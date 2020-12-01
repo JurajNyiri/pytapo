@@ -14,7 +14,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/JurajNyiri/pytapo",
     packages=setuptools.find_packages(),
-    install_requires=["requests", "urllib3"],
+    install_requires=["requests", "urllib3", "pycrypto"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
