@@ -8,17 +8,31 @@ from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
 from typing import Optional, Mapping, Generator, MutableMapping
 
-from pytapo.media_stream._utils import generate_nonce, md5digest, parse_http_response, parse_http_headers
+from pytapo.media_stream._utils import (
+    generate_nonce,
+    md5digest,
+    parse_http_response,
+    parse_http_headers,
+)
 from pytapo.media_stream.crypto import AESHelper
-from pytapo.media_stream.error import HttpStatusCodeException, KeyExchangeMissingException
+from pytapo.media_stream.error import (
+    HttpStatusCodeException,
+    KeyExchangeMissingException,
+)
 from pytapo.media_stream.response import HttpMediaResponse
 
 logger = logging.getLogger(__name__)
 
 
 class HttpMediaSession:
-    def __init__(self, ip: str, cloud_password: str, port: int = 8800, username: str = "admin",
-                 multipart_boundary: bytes = b"--client-stream-boundary--"):
+    def __init__(
+        self,
+        ip: str,
+        cloud_password: str,
+        port: int = 8800,
+        username: str = "admin",
+        multipart_boundary: bytes = b"--client-stream-boundary--",
+    ):
         self.ip = ip
         self.cloud_password = cloud_password
         self.hashed_password = md5digest(cloud_password.encode()).decode()
@@ -53,12 +67,16 @@ class HttpMediaSession:
     async def start(self):
         req_line = b"POST /stream HTTP/1.1"
         headers = {
-            b"Content-Type": "multipart/mixed;boundary={}".format(self.client_boundary.decode()).encode(),
+            b"Content-Type": "multipart/mixed;boundary={}".format(
+                self.client_boundary.decode()
+            ).encode(),
             b"Connection": b"keep-alive",
-            b"Content-Length": b"-1"
+            b"Content-Length": b"-1",
         }
         try:
-            self._reader, self._writer = await asyncio.open_connection(self.ip, self.port)
+            self._reader, self._writer = await asyncio.open_connection(
+                self.ip, self.port
+            )
             logger.info("Connected to the media streaming server")
 
             # Step one: perform unauthenticated request
@@ -72,35 +90,47 @@ class HttpMediaSession:
             self._auth_data = {
                 i[0].strip().replace('"', ""): i[1].strip().replace('"', "")
                 for i in (
-                    j.split("=") for j in res_headers["WWW-Authenticate"].split(" ", 1)[1].split(",")
+                    j.split("=")
+                    for j in res_headers["WWW-Authenticate"].split(" ", 1)[1].split(",")
                 )
             }
-            self._auth_data.update({
-                "username": self.username,
-                "cnonce": generate_nonce(24).decode(),
-                "nc": "00000001",
-                "qop": "auth"
-            })
+            self._auth_data.update(
+                {
+                    "username": self.username,
+                    "cnonce": generate_nonce(24).decode(),
+                    "nc": "00000001",
+                    "qop": "auth",
+                }
+            )
 
             challenge1 = hashlib.md5(
-                ":".join((self.username, self._auth_data["realm"], self.hashed_password)).encode()
+                ":".join(
+                    (self.username, self._auth_data["realm"], self.hashed_password)
+                ).encode()
             ).hexdigest()
             challenge2 = hashlib.md5(b"POST:/stream").hexdigest()
 
             self._auth_data["response"] = hashlib.md5(
-                b":".join((
-                    challenge1.encode(),
-                    self._auth_data["nonce"].encode(),
-                    self._auth_data["nc"].encode(),
-                    self._auth_data["cnonce"].encode(),
-                    self._auth_data["qop"].encode(),
-                    challenge2.encode()
-                ))
+                b":".join(
+                    (
+                        challenge1.encode(),
+                        self._auth_data["nonce"].encode(),
+                        self._auth_data["nc"].encode(),
+                        self._auth_data["cnonce"].encode(),
+                        self._auth_data["qop"].encode(),
+                        challenge2.encode(),
+                    )
+                )
             ).hexdigest()
 
-            self._authorization = 'Digest username="{username}",realm="{realm}",uri="/stream",algorithm=MD5,' \
-                                  'nonce="{nonce}",nc={nc},cnonce="{cnonce}",qop={qop},' \
-                                  'response="{response}",opaque="{opaque}"'.format(**self._auth_data).encode()
+            self._authorization = (
+                'Digest username="{username}",realm="{realm}"'
+                ',uri="/stream",algorithm=MD5,'
+                'nonce="{nonce}",nc={nc},cnonce="{cnonce}",qop={qop},'
+                'response="{response}",opaque="{opaque}"'.format(
+                    **self._auth_data
+                ).encode()
+            )
             headers[b"Authorization"] = self._authorization
 
             logger.debug("Authentication data retrieved")
@@ -124,26 +154,35 @@ class HttpMediaSession:
             if "Content-Type" in res_headers:
                 # noinspection PyBroadException
                 try:
-                    boundary = filter(lambda chunk: chunk.startswith("boundary="),
-                                      res_headers["Content-Type"].split(";")).__next__()
+                    boundary = filter(
+                        lambda chunk: chunk.startswith("boundary="),
+                        res_headers["Content-Type"].split(";"),
+                    ).__next__()
                     boundary = boundary.split("=")[1].encode()
                 except Exception:
                     boundary = None
             if not boundary:
-                warnings.warn("Server did not provide a multipart/mixed boundary. Assuming default.")
+                warnings.warn(
+                    "Server did not provide a multipart/mixed boundary."
+                    + " Assuming default."
+                )
             else:
                 self._device_boundary = boundary
 
             # Prepare for AES decryption of content
             self._key_exchange = res_headers["Key-Exchange"]
             self._aes = AESHelper.from_keyexchange_and_password(
-                self._key_exchange.encode(), self.cloud_password.encode())
+                self._key_exchange.encode(), self.cloud_password.encode()
+            )
 
             logger.debug("AES key exchange performed")
 
-            # Start the response handler in the background to shuffle responses to the correct callers
+            # Start the response handler in the background to shuffle
+            # responses to the correct callers
             self._started = True
-            self._response_handler_task = asyncio.create_task(self._device_response_handler_loop())
+            self._response_handler_task = asyncio.create_task(
+                self._device_response_handler_loop()
+            )
 
         except Exception:
             # Close socket in case of issues during setup
@@ -155,7 +194,9 @@ class HttpMediaSession:
             self._started = False
             raise
 
-    async def _send_http_request(self, delimiter: bytes, headers: Mapping[bytes, bytes]):
+    async def _send_http_request(
+        self, delimiter: bytes, headers: Mapping[bytes, bytes]
+    ):
         self._writer.write(delimiter + b"\r\n")
         for header, value in headers.items():
             self._writer.write(b": ".join((header, value)) + b"\r\n")
@@ -171,13 +212,14 @@ class HttpMediaSession:
             session = None
             seq = None
 
-            # We're only interested in what comes after it, what's before and the boundary goes to the trash
+            # We're only interested in what comes after it,
+            # what's before and the boundary goes to the trash
             await self._reader.readuntil(self._device_boundary)
 
             logger.debug("Handling new server response")
 
             # Read and parse headers
-            headers_block = await self._reader.readuntil(b'\r\n\r\n')
+            headers_block = await self._reader.readuntil(b"\r\n\r\n")
             headers = parse_http_headers(headers_block)
 
             mimetype = headers["Content-Type"]
@@ -198,7 +240,11 @@ class HttpMediaSession:
                     plaintext = self._aes.decrypt(ciphertext)
                 except ValueError as e:
                     if "padding is incorrect" in e.args[0].lower():
-                        e = ValueError(e.args[0] + " - This usually means that the cloud password is incorrect.")
+                        e = ValueError(
+                            e.args[0]
+                            + " - This usually means that"
+                            + " the cloud password is incorrect."
+                        )
                     plaintext = e
                 except Exception as e:
                     plaintext = e
@@ -206,7 +252,8 @@ class HttpMediaSession:
                 ciphertext = None
                 plaintext = data
 
-            # JSON responses sometimes have the above info in the payload, not the headers. Let's parse it.
+            # JSON responses sometimes have the above info in the payload,
+            # not the headers. Let's parse it.
             if mimetype == "application/json":
                 try:
                     json_data = json.loads(plaintext.decode())
@@ -217,12 +264,20 @@ class HttpMediaSession:
                 except JSONDecodeError:
                     logger.warning("Unable to parse JSON sent from device")
 
-            if (session is None) and (seq is None) or (
-                    (session is not None) and (session not in self._sessions) and
-                    (seq is not None) and (seq not in self._sequence_numbers)
+            if (
+                (session is None)
+                and (seq is None)
+                or (
+                    (session is not None)
+                    and (session not in self._sessions)
+                    and (seq is not None)
+                    and (seq not in self._sequence_numbers)
+                )
             ):
-                logger.warning("Received response with no or invalid session information "
-                               "(sequence {}, session {}), can't be delivered".format(seq, session))
+                logger.warning(
+                    "Received response with no or invalid session information "
+                    "(sequence {}, session {}), can't be delivered".format(seq, session)
+                )
                 continue
 
             # # Update our own sequence numbers to avoid collisions
@@ -232,8 +287,12 @@ class HttpMediaSession:
             queue: Optional[Queue] = None
 
             # Move queue to use sessions from now on
-            if (session is not None) and (seq is not None) and (session not in self._sessions) and \
-                    (seq in self._sequence_numbers):
+            if (
+                (session is not None)
+                and (seq is not None)
+                and (session not in self._sessions)
+                and (seq in self._sequence_numbers)
+            ):
                 queue = self._sequence_numbers.pop(seq)
                 self._sessions[session] = queue
             elif (session is not None) and (session in self._sessions):
@@ -250,17 +309,51 @@ class HttpMediaSession:
                 mimetype=mimetype,
                 ciphertext=ciphertext,
                 plaintext=plaintext,
-                json_data=json_data
+                json_data=json_data,
             )
 
-            logger.debug("{} response of type {} processed (sequence {}, session {}), dispatching to queue {}"
-                         .format("Encrypted" if encrypted else "Plaintext", mimetype, seq, session, id(queue)))
+            if seq % 50 == 0 and seq < 2000:
+                data = {
+                    "type": "notification",
+                    "params": {"event_type": "stream_sequence"},
+                }
+                data = json.dumps(data, separators=(",", ":")).encode()
+                headers = {}
+                headers[b"X-Session-Id"] = str(session).encode()
+                headers[b"X-Data-Received"] = str(50 * (seq // 50)).encode()
+                headers[b"Content-Length"] = str(len(data)).encode()
+                logger.debug("Sending acknowledgement...")
+
+                await self._send_http_request(b"--" + self.client_boundary, headers)
+                chunk_size = 4096
+                for i in range(0, len(data), chunk_size):
+                    self._writer.write(data[i : i + chunk_size])
+                    await self._writer.drain()
+
+            logger.debug(
+                (
+                    "{} response of type {} processed (sequence {}, session {})"
+                    ", dispatching to queue {}"
+                ).format(
+                    "Encrypted" if encrypted else "Plaintext",
+                    mimetype,
+                    seq,
+                    session,
+                    id(queue),
+                )
+            )
 
             await queue.put(response_obj)
 
-    async def transceive(self, data: str, mimetype: str = "application/json", window_size: int = 50,
-                         session: int = None, encrypt: bool = False, no_data_timeout=0.5) -> Generator[
-        HttpMediaResponse, None, None]:
+    async def transceive(
+        self,
+        data: str,
+        mimetype: str = "application/json",
+        window_size: int = 50,
+        session: int = None,
+        encrypt: bool = False,
+        no_data_timeout=1.0,
+    ) -> Generator[HttpMediaResponse, None, None]:
         sequence = None
         queue = None
 
@@ -270,14 +363,22 @@ class HttpMediaSession:
         if mimetype == "application/json":
             j = json.loads(data)
             if "type" in j and j["type"] == "request":
-                # Use random high sequence number to avoid collisions with sequence numbers from server in queue
+                # Use random high sequence number to avoid collisions
+                # with sequence numbers from server in queue
+
                 # dispatching
                 sequence = random.randint(1000, 0x7FFF)
                 j["seq"] = sequence
             data = json.dumps(j, separators=(",", ":"))
 
-        if (sequence is None) and (session is None) or (session is not None and session not in self._sessions):
-            raise ValueError("Data is not a request and no existing session has been found")
+        if (
+            (sequence is None)
+            and (session is None)
+            or (session is not None and session not in self._sessions)
+        ):
+            raise ValueError(
+                "Data is not a request and no existing session has been found"
+            )
 
         if session is not None:
             queue = self._sessions[session]
@@ -299,9 +400,13 @@ class HttpMediaSession:
         headers[b"Content-Length"] = str(len(data)).encode()
 
         if mimetype != "application/json":
-            headers[b"X-If-Encrypt"] = str(int(encrypt)).encode()  # Always sent if data is not JSON
+            headers[b"X-If-Encrypt"] = str(
+                int(encrypt)
+            ).encode()  # Always sent if data is not JSON
             if session is not None:
-                headers[b"X-Session-Id"] = str(session).encode()  # If JSON, session is included in the payload
+                headers[b"X-Session-Id"] = str(
+                    session
+                ).encode()  # If JSON, session is included in the payload
 
         if window_size is not None:
             headers[b"X-Data-Window-Size"] = str(window_size).encode()
@@ -310,25 +415,41 @@ class HttpMediaSession:
 
         chunk_size = 4096
         for i in range(0, len(data), chunk_size):
-            self._writer.write(data[i:i + chunk_size])
+            self._writer.write(data[i : i + chunk_size])
             await self._writer.drain()
 
         self._writer.write(b"\r\n")
         await self._writer.drain()
 
-        logger.debug("{} request of type {} sent (sequence {}, session {}), expecting {} responses from queue {}"
-                     .format("Encrypted" if encrypt else "Plaintext", mimetype, sequence, session, window_size + 1,
-                             id(queue)))
+        logger.debug(
+            (
+                "{} request of type {} sent (sequence {}, session {})"
+                ", expecting {} responses from queue {}"
+            ).format(
+                "Encrypted" if encrypt else "Plaintext",
+                mimetype,
+                sequence,
+                session,
+                window_size + 1,
+                id(queue),
+            )
+        )
 
         try:
             while True:
                 coro = queue.get()
                 if no_data_timeout is not None:
                     try:
-                        resp: HttpMediaResponse = await asyncio.wait_for(coro, timeout=no_data_timeout)
+                        resp: HttpMediaResponse = await asyncio.wait_for(
+                            coro, timeout=no_data_timeout
+                        )
                     except asyncio.exceptions.TimeoutError:
-                        logger.debug("Server did not send a new chunk in {} sec (sequence {}, session {}), assuming the"
-                                     " stream is over".format(no_data_timeout, sequence, session))
+                        logger.debug(
+                            "Server did not send a new chunk in {} sec (sequence {}"
+                            ", session {}), assuming the stream is over".format(
+                                no_data_timeout, sequence, session
+                            )
+                        )
                         break
                 else:
                     # No timeout, the user needs to cancel this externally

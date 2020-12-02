@@ -2,8 +2,17 @@ from typing import Mapping, Optional
 
 
 class HttpMediaResponse:
-    def __init__(self, seq: Optional[int], session: Optional[int], headers: Mapping[str, str], encrypted: bool,
-                 mimetype: str, ciphertext: Optional[bytes], plaintext: bytes, json_data):
+    def __init__(
+        self,
+        seq: Optional[int],
+        session: Optional[int],
+        headers: Mapping[str, str],
+        encrypted: bool,
+        mimetype: str,
+        ciphertext: Optional[bytes],
+        plaintext: bytes,
+        json_data,
+    ):
         self.seq = seq
         self.session = session
         self.headers = headers

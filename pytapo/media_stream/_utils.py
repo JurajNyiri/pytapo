@@ -15,10 +15,7 @@ def generate_nonce(length: int) -> bytes:
 def parse_http_headers(data: bytes) -> Mapping[str, str]:
     return {
         i[0].strip(): i[1].strip()
-        for i in (
-            j.split(":", 1)
-            for j in data.decode().strip().split("\r\n")
-        )
+        for i in (j.split(":", 1) for j in data.decode().strip().split("\r\n"))
     }
 
 

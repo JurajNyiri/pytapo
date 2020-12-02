@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class AESHelper:
-
     def __init__(self, username: bytes, nonce: bytes, cloud_password: bytes):
         if not nonce:
             raise NonceMissingException()
@@ -28,14 +27,16 @@ class AESHelper:
         logger.debug("AES cipher set up correctly")
 
     @classmethod
-    def from_keyexchange_and_password(cls, key_exchange: AnyStr, cloud_password: AnyStr):
+    def from_keyexchange_and_password(
+        cls, key_exchange: AnyStr, cloud_password: AnyStr
+    ):
         if type(cloud_password) == str:
             cloud_password = cloud_password.encode()
         if type(key_exchange) == str:
             key_exchange = key_exchange.encode()
 
         key_exchange = {
-            i[0].strip().replace(b'"', b''): i[1].strip().replace(b'"', b'')
+            i[0].strip().replace(b'"', b""): i[1].strip().replace(b'"', b"")
             for i in (j.split(b"=", 1) for j in key_exchange.split(b" "))
         }
 
