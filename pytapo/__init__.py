@@ -3,13 +3,10 @@
 #
 
 import hashlib
-import select
 import json
-import re
 
 import requests
 import urllib3
-import socket
 
 from .const import ERROR_CODES
 
@@ -34,10 +31,6 @@ class Tapo:
             "requestByApp": "true",
             "Content-Type": "application/json; charset=UTF-8",
         }
-        self.streamHeaders = {
-            "Host": self.host,
-            "Content-Type": "multipart/mixed; boundary=--client-stream-boundary--",
-        }
         self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
         self.hashedCloudPassword = (
             hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
@@ -47,200 +40,6 @@ class Tapo:
         self.presets = self.isSupportingPresets()
         if not self.presets:
             self.presets = {}
-
-    def generate_nonce(bits, randomness=None):
-        "todo: This could be stronger"
-        return "a9h5b7i3j2y8c0a6"
-
-    def printHeaders(self, response):
-        headers = self.socket_extractHeaders(response)
-        for key in headers:
-            print(key + ": " + headers[key])
-
-    def socket_query(self, client, query, additionalHeaders={}):
-        if additionalHeaders is None:
-            additionalHeaders = {}
-
-        client.setblocking(0)
-        query = str.encode(json.dumps(query).replace(" ", ""))
-        message = b"----client-stream-boundary--\r\n"
-        message += b"Content-Type: application/json\r\n"
-        message += b"Content-Length: " + str.encode(str(len(query))) + b"\r\n"
-        for header in additionalHeaders:
-            message += (
-                str.encode(header) + b": " + str.encode(str(additionalHeaders[header]))
-            )
-        message += b"\r\n\r\n"
-        message += query
-        message += b"\r\n"
-
-        client.send(message)
-
-        data = b""
-        content_length = None
-        content_start = None
-        content_session = None
-        content_type = None
-
-        content_session_regex = br"X-Session-Id:\s*(-?[0-9]+)"
-        content_length_regex = br"Content-Length:\s*(-?[0-9]+)"
-        content_type_regex = br"Content-Type:\s*([a-z\/1-9]+)"
-
-        finished = 0
-        while finished != 2:
-            ready = select.select([client], [], [], 1)
-            if ready[0]:
-                finished = 0
-                chunk = client.recv(4096)
-                data += chunk
-            if not b"\r\n" * 2 in data:
-                continue
-
-            if (content_length is None or content_start is None) or True:
-                content_start = data.index(b"\r\n" * 2) + 4
-                # if not match_content_length:
-                #    raise Exception("Content-Length header not found in response")
-                # if not match_content_type:
-                #    raise Exception("Content-Type header not found in response")
-                content_session = re.findall(content_session_regex, data)
-                content_length = re.findall(content_length_regex, data)
-                content_type = re.findall(content_type_regex, data)
-
-                # print(content_length)
-                # print(content_type)
-                # print(content_session)
-
-            # if content_length is not None and content_start is not None:
-            # noinspection PyUnresolvedReferences
-            # if len(data) >= content_start + content_length:
-            # break
-            #    pass
-            """
-            data = data.replace("----device-stream-boundary--", "")
-            data = data.replace("Content-Type: application/json", "")
-            data = data.replace("Content-Type: video/mp2t", "")
-            data = re.sub(r"Content-Length: [0-9]+", "", data)
-            data = re.sub(r"X-If-Encrypt: [0-9]+", "", data)
-            data = re.sub(r"X-Session-Id: [0-9]+", "", data)
-            data = re.sub(r"X-Data-Sequence: [0-9]+", "", data)
-            data = data.replace("\r\n", "")
-            """
-            finished += 1
-        # print(data)
-        print(content_type)
-        print(content_session)
-        print(len(content_session))
-        return data
-
-    def openConnection(self):
-        port = 8800
-
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        message = b"POST /stream HTTP/1.1\r\n"
-        message += (
-            b"Content-Type: multipart/mixed; boundary=--client-stream-boundary--\r\n"
-        )
-        message += b"\r\n"
-        print("openConnection - 1")
-        client.connect((self.host, port))
-        print("openConnection - 2")
-        client.send(message)
-        print("openConnection - 3")
-        response = client.recv(4096)
-        print("openConnection - 4")
-        statusCode = self.socket_getStatusCode(response)
-        headers = self.socket_extractHeaders(response)
-        if statusCode == 401 and "WWW-Authenticate" in headers:
-            digestProperties = self.digest_extract(headers["WWW-Authenticate"])
-            authorizationHeader = self.digest_createAuthenticationHeader(
-                digestProperties
-            )
-            message = b"POST /stream HTTP/1.1\r\n"
-            message += b"Content-Type: multipart/mixed;"
-            message += b"boundary=--client-stream-boundary--\r\n"
-            message += b"Connection: keep-alive\r\n"
-            message += b"Content-Length: -1\r\n"
-            message += b"Authorization: " + str.encode(authorizationHeader) + b"\r\n"
-            message += b"\r\n"
-
-            client.send(message)
-
-            response = client.recv(4096)
-
-            if self.socket_getStatusCode(response) == 200:
-                return client
-
-        raise Exception("Authentication via sockets failed")
-
-    def socket_extractHeaders(self, response):
-        returnHeaders = {}
-        try:
-            responseHeaders = (
-                response.decode("ISO-8859-1").split("\r\n\r\n")[0].split("\r\n")
-            )
-            for header in responseHeaders:
-                headerData = header.split(": ")
-                if len(headerData) == 2 and headerData[0] != "":
-                    returnHeaders[headerData[0]] = headerData[1]
-        except Exception:
-            pass
-        return returnHeaders
-
-    def socket_getStatusCode(self, response):
-        responseHeaders = response.decode("ISO-8859-1").split("\r\n")
-        for header in responseHeaders:
-            headerData = header.split(": ")
-            if len(headerData) == 1 and headerData[0] != "":
-                return int(headerData[0].split(" ")[1])
-
-    def digest_extract(self, digest):
-        returnProperties = {}
-        digest = digest.replace("Digest ", "")
-        digest = digest.split(",")
-        for property in digest:
-            split = property.split("=")
-            returnProperties[split[0]] = split[1].replace('"', "")
-        return returnProperties
-
-    def digest_createAuthenticationHeader(self, digestProperties):
-        nc = "00000001"  # todo increment this
-        cnonce = self.generate_nonce()
-
-        HA1decrypted = str.encode(
-            "admin" + ":" + digestProperties["realm"] + ":" + self.hashedCloudPassword
-        )
-        HA2decrypted = str.encode("POST" + ":" + "/stream")
-        HA1 = hashlib.md5(HA1decrypted).hexdigest()
-        HA2 = hashlib.md5(HA2decrypted).hexdigest()
-
-        digestResponseDecrypted = str.encode(
-            HA1
-            + ":"
-            + digestProperties["nonce"]
-            + ":"
-            + nc
-            + ":"
-            + cnonce
-            + ":"
-            + digestProperties["qop"]
-            + ":"
-            + HA2
-        )
-        digestResponse = hashlib.md5(digestResponseDecrypted).hexdigest()
-
-        AuthorizationHeader = 'Digest username="admin",'
-        AuthorizationHeader += 'realm="' + digestProperties["realm"] + '",'
-        AuthorizationHeader += 'uri="/stream",'
-        AuthorizationHeader += "algorithm=MD5,"
-        AuthorizationHeader += 'nonce="' + digestProperties["nonce"] + '",'
-        AuthorizationHeader += "nc=" + nc + ","
-        AuthorizationHeader += 'cnonce="' + cnonce + '",'
-        AuthorizationHeader += "qop=" + digestProperties["qop"] + ","
-        AuthorizationHeader += 'response="' + digestResponse + '",'
-        AuthorizationHeader += 'opaque="' + digestProperties["opaque"] + '"'
-
-        return AuthorizationHeader
 
     def isSupportingPresets(self):
         try:
