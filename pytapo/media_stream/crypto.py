@@ -1,9 +1,12 @@
 import hashlib
+import logging
 from typing import AnyStr
 
 from Crypto.Cipher import AES
 
 from pytapo.media_stream.error import NonceMissingException
+
+logger = logging.getLogger(__name__)
 
 
 class AESHelper:
@@ -16,6 +19,8 @@ class AESHelper:
         key = hashlib.md5(nonce + b":" + cloud_password).digest()
         iv = hashlib.md5(username + b":" + nonce).digest()
         self._cipher = AES.new(key, AES.MODE_CBC, iv)
+
+        logger.debug("AES cipher set up correctly")
 
     @classmethod
     def from_keyexchange_and_password(cls, key_exchange: AnyStr, cloud_password: AnyStr):

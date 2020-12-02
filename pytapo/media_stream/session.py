@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import warnings
 from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
@@ -10,6 +11,8 @@ from pytapo.media_stream._utils import generate_nonce, md5digest, parse_http_res
 from pytapo.media_stream.crypto import AESHelper
 from pytapo.media_stream.error import HttpStatusCodeException, KeyExchangeMissingException
 from pytapo.media_stream.response import HttpMediaResponse
+
+logger = logging.getLogger(__name__)
 
 
 class HttpMediaSession:
@@ -56,6 +59,7 @@ class HttpMediaSession:
         }
         try:
             self._reader, self._writer = await asyncio.open_connection(self.ip, self.port)
+            logger.info("Connected to the media streaming server")
 
             # Step one: perform unauthenticated request
             await self._send_http_request(req_line, headers)
@@ -99,6 +103,8 @@ class HttpMediaSession:
                                   'response="{response}",opaque="{opaque}"'.format(**self._auth_data).encode()
             headers[b"Authorization"] = self._authorization
 
+            logger.debug("Authentication data retrieved")
+
             # Step two: start actual communication
             await self._send_http_request(req_line, headers)
 
@@ -133,6 +139,8 @@ class HttpMediaSession:
             self._aes = AESHelper.from_keyexchange_and_password(
                 self._key_exchange.encode(), self.cloud_password.encode())
 
+            logger.debug("AES key exchange performed")
+
             # Start the response handler in the background to shuffle responses to the correct callers
             self._started = True
             self._response_handler_task = asyncio.create_task(self._device_response_handler_loop())
@@ -157,12 +165,16 @@ class HttpMediaSession:
         await self._writer.drain()
 
     async def _device_response_handler_loop(self):
+        logger.debug("Response handler is running")
+
         while self._started:
             session = None
             seq = None
 
             # We're only interested in what comes after it, what's before and the boundary goes to the trash
             await self._reader.readuntil(self._device_boundary)
+
+            logger.debug("Handling new server response")
 
             # Read and parse headers
             headers_block = await self._reader.readuntil(b'\r\n\r\n')
@@ -179,7 +191,7 @@ class HttpMediaSession:
 
             # Now we know the content length, let's read it and decrypt it
             json_data = None
-            data = await self._reader.read(length)
+            data = await self._reader.readexactly(length)
             if encrypted:
                 ciphertext = data
                 plaintext = self._aes.decrypt(ciphertext)
@@ -196,13 +208,13 @@ class HttpMediaSession:
                     if "params" in json_data and "session_id" in json_data["params"]:
                         session = int(json_data["params"]["session_id"])
                 except JSONDecodeError:
-                    warnings.warn("Unable to parse JSON sent from device")
+                    logger.warning("Unable to parse JSON sent from device")
 
             if (session is None) and (seq is None) or (
                     (session is not None) and (session not in self._sessions) and
                     (seq is not None) and (seq not in self._sequence_numbers)
             ):
-                warnings.warn("Received response with no or invalid session information, can't be delivered")
+                logger.warning("Received response with no or invalid session information, can't be delivered")
                 continue
 
             # # Update our own sequence numbers to avoid collisions
@@ -232,6 +244,10 @@ class HttpMediaSession:
                 plaintext=plaintext,
                 json_data=json_data
             )
+
+            logger.debug("{} response of type {} processed (sequence {}, session {}), dispatching to queue {}"
+                         .format("Encrypted" if encrypted else "Plaintext", mimetype, seq, session, id(queue)))
+
             await queue.put(response_obj)
 
     async def transceive(self, data: str, mimetype: str = "application/json", window_size: int = 1,
@@ -290,8 +306,13 @@ class HttpMediaSession:
         self._writer.write(b"\r\n")
         await self._writer.drain()
 
+        logger.debug("{} request of type {} sent (sequence {}, session {}), expecting {} responses from queue {}"
+                     .format("Encrypted" if encrypt else "Plaintext", mimetype, sequence, session, window_size + 1,
+                             id(queue)))
+
         for i in range(window_size + 1):
             resp: HttpMediaResponse = await queue.get()
+            logger.debug("Got one response from queue {}".format(id(queue)))
             if resp.session is not None:
                 session = resp.session
             yield resp
