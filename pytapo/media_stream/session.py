@@ -258,7 +258,7 @@ class HttpMediaSession:
 
             await queue.put(response_obj)
 
-    async def transceive(self, data: str, mimetype: str = "application/json", window_size: int = 1,
+    async def transceive(self, data: str, mimetype: str = "application/json", window_size: int = 50,
                          session: int = None, encrypt: bool = False, no_data_timeout=0.5) -> Generator[
         HttpMediaResponse, None, None]:
         sequence = None
