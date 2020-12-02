@@ -3,6 +3,7 @@ import logging
 from typing import AnyStr
 
 from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 from pytapo.media_stream.error import NonceMissingException
 
@@ -40,7 +41,7 @@ class AESHelper:
         return cls(key_exchange[b"username"], key_exchange[b"nonce"], cloud_password)
 
     def decrypt(self, data: bytes) -> bytes:
-        return self._cipher.decrypt(data)
+        return unpad(self._cipher.decrypt(data), 16, style="pkcs7")
 
     def encrypt(self, data: bytes) -> bytes:
-        return self._cipher.encrypt(data)
+        return self._cipher.encrypt(pad(data, 16, style="pkcs7"))
