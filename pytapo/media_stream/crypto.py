@@ -17,8 +17,12 @@ class AESHelper:
             raise NonceMissingException()
         self.nonce = nonce
 
-        key = hashlib.md5(nonce + b":" + cloud_password).digest()
+        hashed_pwd = hashlib.md5(cloud_password).hexdigest().upper().encode()
+        key = hashlib.md5(nonce + b":" + hashed_pwd).digest()
         iv = hashlib.md5(username + b":" + nonce).digest()
+
+        print(f"AES key: {key.hex()}, iv: {iv.hex()}")
+
         self._cipher = AES.new(key, AES.MODE_CBC, iv)
 
         logger.debug("AES cipher set up correctly")
