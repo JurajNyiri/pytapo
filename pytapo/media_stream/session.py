@@ -29,11 +29,13 @@ class HttpMediaSession:
         self,
         ip: str,
         cloud_password: str,
+        window_size=50,
         port: int = 8800,
         username: str = "admin",
         multipart_boundary: bytes = b"--client-stream-boundary--",
     ):
         self.ip = ip
+        self.window_size = window_size
         self.cloud_password = cloud_password
         self.hashed_password = md5digest(cloud_password.encode()).decode()
         self.port = port
@@ -216,7 +218,7 @@ class HttpMediaSession:
             # what's before and the boundary goes to the trash
             await self._reader.readuntil(self._device_boundary)
 
-            logger.debug("Handling new server response")
+            # logger.debug("Handling new server response")
 
             # Read and parse headers
             headers_block = await self._reader.readuntil(b"\r\n\r\n")
@@ -312,7 +314,7 @@ class HttpMediaSession:
                 json_data=json_data,
             )
 
-            if seq % 50 == 0 and seq < 2000:
+            if seq % self.window_size == 0 and seq < 2000:  # seq < 2000 is temp
                 data = {
                     "type": "notification",
                     "params": {"event_type": "stream_sequence"},
@@ -320,7 +322,9 @@ class HttpMediaSession:
                 data = json.dumps(data, separators=(",", ":")).encode()
                 headers = {}
                 headers[b"X-Session-Id"] = str(session).encode()
-                headers[b"X-Data-Received"] = str(50 * (seq // 50)).encode()
+                headers[b"X-Data-Received"] = str(
+                    self.window_size * (seq // self.window_size)
+                ).encode()
                 headers[b"Content-Length"] = str(len(data)).encode()
                 logger.debug("Sending acknowledgement...")
 
@@ -330,6 +334,8 @@ class HttpMediaSession:
                     self._writer.write(data[i : i + chunk_size])
                     await self._writer.drain()
 
+            logger.debug(mimetype)
+            """
             logger.debug(
                 (
                     "{} response of type {} processed (sequence {}, session {})"
@@ -342,6 +348,7 @@ class HttpMediaSession:
                     id(queue),
                 )
             )
+            """
 
             await queue.put(response_obj)
 
@@ -349,7 +356,6 @@ class HttpMediaSession:
         self,
         data: str,
         mimetype: str = "application/json",
-        window_size: int = 50,
         session: int = None,
         encrypt: bool = False,
         no_data_timeout=1.0,
@@ -408,8 +414,8 @@ class HttpMediaSession:
                     session
                 ).encode()  # If JSON, session is included in the payload
 
-        if window_size is not None:
-            headers[b"X-Data-Window-Size"] = str(window_size).encode()
+        if self.window_size is not None:
+            headers[b"X-Data-Window-Size"] = str(self.window_size).encode()
 
         await self._send_http_request(b"--" + self.client_boundary, headers)
 
@@ -430,7 +436,7 @@ class HttpMediaSession:
                 mimetype,
                 sequence,
                 session,
-                window_size + 1,
+                self.window_size + 1,
                 id(queue),
             )
         )
@@ -454,7 +460,7 @@ class HttpMediaSession:
                 else:
                     # No timeout, the user needs to cancel this externally
                     resp: HttpMediaResponse = await coro
-                logger.debug("Got one response from queue {}".format(id(queue)))
+                # logger.debug("Got one response from queue {}".format(id(queue)))
                 if resp.session is not None:
                     session = resp.session
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
