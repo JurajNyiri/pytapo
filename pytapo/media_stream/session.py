@@ -227,7 +227,7 @@ class HttpMediaSession:
             # Move queue to use sessions from now on
             if (session is not None) and (seq is not None) and (session not in self._sessions) and \
                     (seq in self._sequence_numbers):
-                queue = self._sequence_numbers[seq]
+                queue = self._sequence_numbers.pop(seq)
                 self._sessions[session] = queue
             elif (session is not None) and (session in self._sessions):
                 queue = self._sessions[session]
