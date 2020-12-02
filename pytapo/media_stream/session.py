@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import warnings
 from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
@@ -38,7 +39,6 @@ class HttpMediaSession:
         self._reader: Optional[StreamReader] = None
         self._writer: Optional[StreamWriter] = None
 
-        self._seq_counter = 0
         self._sequence_numbers: MutableMapping[int, Queue] = {}
         self._sessions: MutableMapping[int, Queue] = {}
 
@@ -214,7 +214,8 @@ class HttpMediaSession:
                     (session is not None) and (session not in self._sessions) and
                     (seq is not None) and (seq not in self._sequence_numbers)
             ):
-                logger.warning("Received response with no or invalid session information, can't be delivered")
+                logger.warning("Received response with no or invalid session information "
+                               "(sequence {}, session {}), can't be delivered".format(seq, session))
                 continue
 
             # # Update our own sequence numbers to avoid collisions
@@ -261,8 +262,9 @@ class HttpMediaSession:
         if mimetype == "application/json":
             j = json.loads(data)
             if "type" in j and j["type"] == "request":
-                self._seq_counter += 1
-                sequence = self._seq_counter
+                # Use random high sequence number to avoid collisions with sequence numbers from server in queue
+                # dispatching
+                sequence = random.randint(1000, 0x7FFF)
                 j["seq"] = sequence
             data = json.dumps(j, separators=(",", ":"))
 
