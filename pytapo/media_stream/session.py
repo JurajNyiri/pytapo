@@ -252,7 +252,8 @@ class HttpMediaSession:
             await queue.put(response_obj)
 
     async def transceive(self, data: str, mimetype: str = "application/json", window_size: int = 1,
-                         session: int = None, encrypt: bool = False) -> Generator[HttpMediaResponse, None, None]:
+                         session: int = None, encrypt: bool = False, no_data_timeout=0.2) -> Generator[
+        HttpMediaResponse, None, None]:
         sequence = None
         queue = None
 
@@ -312,15 +313,28 @@ class HttpMediaSession:
                      .format("Encrypted" if encrypt else "Plaintext", mimetype, sequence, session, window_size + 1,
                              id(queue)))
 
-        for i in range(window_size + 1):
-            resp: HttpMediaResponse = await queue.get()
-            logger.debug("Got one response from queue {}".format(id(queue)))
-            if resp.session is not None:
-                session = resp.session
-            yield resp
+        try:
+            while True:
+                coro = queue.get()
+                if no_data_timeout is not None:
+                    try:
+                        resp: HttpMediaResponse = await asyncio.wait_for(coro, timeout=no_data_timeout)
+                    except asyncio.exceptions.TimeoutError:
+                        logger.debug("Server did not send a new chunk in {} sec (sequence {}, session {}), assuming the"
+                                     " stream is over".format(no_data_timeout, sequence, session))
+                        break
+                else:
+                    # No timeout, the user needs to cancel this externally
+                    resp: HttpMediaResponse = await coro
+                logger.debug("Got one response from queue {}".format(id(queue)))
+                if resp.session is not None:
+                    session = resp.session
+                yield resp
 
-        if session in self._sessions:
-            del self._sessions[session]
+        finally:
+            # Ensure the queue is deleted even if the coroutine is canceled externally
+            if session in self._sessions:
+                del self._sessions[session]
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
