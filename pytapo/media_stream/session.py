@@ -194,7 +194,14 @@ class HttpMediaSession:
             data = await self._reader.readexactly(length)
             if encrypted:
                 ciphertext = data
-                plaintext = self._aes.decrypt(ciphertext)
+                try:
+                    plaintext = self._aes.decrypt(ciphertext)
+                except ValueError as e:
+                    if "padding is incorrect" in e.args[0].lower():
+                        e = ValueError(e.args[0] + " - This usually means that the cloud password is incorrect.")
+                    plaintext = e
+                except Exception as e:
+                    plaintext = e
             else:
                 ciphertext = None
                 plaintext = data
@@ -252,7 +259,7 @@ class HttpMediaSession:
             await queue.put(response_obj)
 
     async def transceive(self, data: str, mimetype: str = "application/json", window_size: int = 1,
-                         session: int = None, encrypt: bool = False, no_data_timeout=0.2) -> Generator[
+                         session: int = None, encrypt: bool = False, no_data_timeout=0.5) -> Generator[
         HttpMediaResponse, None, None]:
         sequence = None
         queue = None
@@ -329,6 +336,8 @@ class HttpMediaSession:
                 logger.debug("Got one response from queue {}".format(id(queue)))
                 if resp.session is not None:
                     session = resp.session
+                if resp.encrypted and isinstance(resp.plaintext, Exception):
+                    raise resp.plaintext
                 yield resp
 
         finally:
