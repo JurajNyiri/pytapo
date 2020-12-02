@@ -9,6 +9,7 @@ import requests
 import urllib3
 
 from .const import ERROR_CODES
+from .media_stream.session import HttpMediaSession
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -115,6 +116,9 @@ class Tapo:
                     + " Response:"
                     + json.dumps(data)
                 )
+
+    def getMediaSession(self):
+        return HttpMediaSession(self.host, self.cloudPassword)
 
     def getOsd(self):
         return self.performRequest(
