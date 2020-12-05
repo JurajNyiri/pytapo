@@ -635,6 +635,54 @@ def test_preset():
         tapo.setPrivacyMode(True)
 
 
+def test_imageFlipVertical():
+    tapo = Tapo(host, user, password)
+    origImageFlipVertical = tapo.getImageFlipVertical()
+
+    tapo.setImageFlipVertical(True)
+    assert tapo.getImageFlipVertical()
+
+    tapo.setImageFlipVertical(False)
+    assert not tapo.getImageFlipVertical()
+
+    tapo.setImageFlipVertical(origImageFlipVertical)
+    assert tapo.getImageFlipVertical() == origImageFlipVertical
+
+
+def test_lightFrequencyMode():
+    tapo = Tapo(host, user, password)
+    origLightFrequency = tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
+
+    tapo.setLightFrequencyMode("50")
+    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "50"
+
+    tapo.setLightFrequencyMode("60")
+    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "60"
+
+    tapo.setLightFrequencyMode("auto")
+    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "auto"
+
+    tapo.setLightFrequencyMode(origLightFrequency)
+    assert (
+        tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
+        == origLightFrequency
+    )
+
+
+def test_lensDistortionCorrection():
+    tapo = Tapo(host, user, password)
+    origLensDistortionCorrection = tapo.getLensDistortionCorrection()
+
+    tapo.setLensDistortionCorrection(True)
+    assert tapo.getLensDistortionCorrection()
+
+    tapo.setLensDistortionCorrection(False)
+    assert not tapo.getLensDistortionCorrection()
+
+    tapo.setLensDistortionCorrection(origLensDistortionCorrection)
+    assert tapo.getLensDistortionCorrection() == origLensDistortionCorrection
+
+
 def test_reboot():
     tapo = Tapo(host, user, password)
     result = tapo.reboot()
