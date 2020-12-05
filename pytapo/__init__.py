@@ -118,7 +118,7 @@ class Tapo:
                 )
 
     def getMediaSession(self):
-        return HttpMediaSession(self.host, self.cloudPassword)
+        return HttpMediaSession(self.host, self.cloudPassword)  # pragma: no cover
 
     def getOsd(self):
         return self.performRequest(
@@ -438,30 +438,32 @@ class Tapo:
         return data["image"]["switch"]["ldc"] == "on"
 
     def setLensDistortionCorrection(self, enable):
-        return self.performRequest({
-            "method": "set",
-            "image": {"switch": {"ldc": "on" if enable else "off"}}
-        })
+        return self.performRequest(
+            {"method": "set", "image": {"switch": {"ldc": "on" if enable else "off"}}}
+        )
 
     def getImageFlipVertical(self):
         data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
         return data["image"]["switch"]["flip_type"] == "center"
 
     def setImageFlipVertical(self, enable):
-        return self.performRequest({
-            "method": "set",
-            "image": {"switch": {"flip_type": "center" if enable else "off"}}
-        })
+        return self.performRequest(
+            {
+                "method": "set",
+                "image": {"switch": {"flip_type": "center" if enable else "off"}},
+            }
+        )
 
     def setLightFrequencyMode(self, mode):
         allowed_modes = ["auto", "50", "60"]
         if mode not in allowed_modes:
-            raise Exception("Light frequency mode must be one of {}".format(allowed_modes))
+            raise Exception(
+                "Light frequency mode must be one of {}".format(allowed_modes)
+            )
 
-        return self.performRequest({
-            "method": "set",
-            "image": {"common": {"light_freq_mode": mode}}
-        })
+        return self.performRequest(
+            {"method": "set", "image": {"common": {"light_freq_mode": mode}}}
+        )
 
     @staticmethod
     def getErrorMessage(errorCode):

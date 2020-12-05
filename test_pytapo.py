@@ -649,26 +649,6 @@ def test_imageFlipVertical():
     assert tapo.getImageFlipVertical() == origImageFlipVertical
 
 
-def test_lightFrequencyMode():
-    tapo = Tapo(host, user, password)
-    origLightFrequency = tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
-
-    tapo.setLightFrequencyMode("50")
-    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "50"
-
-    tapo.setLightFrequencyMode("60")
-    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "60"
-
-    tapo.setLightFrequencyMode("auto")
-    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "auto"
-
-    tapo.setLightFrequencyMode(origLightFrequency)
-    assert (
-        tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
-        == origLightFrequency
-    )
-
-
 def test_lensDistortionCorrection():
     tapo = Tapo(host, user, password)
     origLensDistortionCorrection = tapo.getLensDistortionCorrection()
@@ -683,15 +663,57 @@ def test_lensDistortionCorrection():
     assert tapo.getLensDistortionCorrection() == origLensDistortionCorrection
 
 
-def test_reboot():
-    tapo = Tapo(host, user, password)
-    result = tapo.reboot()
-    assert result["error_code"] == 0
-
-
 def test_no_presets():
     with mock.patch.object(Tapo, "getPresets", new=getPresetsMock):
         tapo = Tapo(host, user, password)
         tapo.refreshStok()
 
     assert tapo.presets == {}
+
+
+def test_getStreamURL():
+    tapo = Tapo(host, user, password)
+    streamURL = tapo.getStreamURL()
+    assert streamURL == "{host}:8800".format(host=host)
+
+
+def test_getUserID():
+    tapo = Tapo(host, user, password)
+    userID = tapo.getUserID()
+    assert isinstance(userID, int)
+
+
+def test_getRecordings():
+    tapo = Tapo(host, user, password)
+    result = tapo.getRecordings("20200101")
+    assert isinstance(result, list)
+
+
+def test_lightFrequencyMode():
+    tapo = Tapo(host, user, password)
+    origLightFrequency = tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
+
+    tapo.setLightFrequencyMode("50")
+    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "50"
+
+    tapo.setLightFrequencyMode("60")
+    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "60"
+
+    tapo.setLightFrequencyMode("auto")
+    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "auto"
+
+    with pytest.raises(Exception) as err:
+        tapo.setLightFrequencyMode("invalid")
+    assert "Light frequency mode must be one of" in str(err.value)
+
+    tapo.setLightFrequencyMode(origLightFrequency)
+    assert (
+        tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
+        == origLightFrequency
+    )
+
+
+def test_reboot():
+    tapo = Tapo(host, user, password)
+    result = tapo.reboot()
+    assert result["error_code"] == 0

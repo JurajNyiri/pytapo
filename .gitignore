@@ -1,6 +1,6 @@
 *.pyc
 __pycache__
-tmp.py
+tmp*.py
 .tox
 build
 dist
