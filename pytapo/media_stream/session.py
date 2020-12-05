@@ -218,7 +218,7 @@ class HttpMediaSession:
             # what's before and the boundary goes to the trash
             await self._reader.readuntil(self._device_boundary)
 
-            # logger.debug("Handling new server response")
+            logger.debug("Handling new server response")
 
             # Read and parse headers
             headers_block = await self._reader.readuntil(b"\r\n\r\n")
@@ -334,8 +334,6 @@ class HttpMediaSession:
                     self._writer.write(data[i : i + chunk_size])
                     await self._writer.drain()
 
-            logger.debug(mimetype)
-            """
             logger.debug(
                 (
                     "{} response of type {} processed (sequence {}, session {})"
@@ -348,7 +346,6 @@ class HttpMediaSession:
                     id(queue),
                 )
             )
-            """
 
             await queue.put(response_obj)
 
@@ -460,7 +457,7 @@ class HttpMediaSession:
                 else:
                     # No timeout, the user needs to cancel this externally
                     resp: HttpMediaResponse = await coro
-                # logger.debug("Got one response from queue {}".format(id(queue)))
+                logger.debug("Got one response from queue {}".format(id(queue)))
                 if resp.session is not None:
                     session = resp.session
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
