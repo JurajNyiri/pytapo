@@ -35,8 +35,6 @@ class HttpMediaSession:
         multipart_boundary: bytes = b"--client-stream-boundary--",
     ):
         self.ip = ip
-        self.startedPlay: bool = False
-        self.requestedPlay: bool = False
         self.window_size = window_size
         self.cloud_password = cloud_password
         self.hashed_password = md5digest(cloud_password.encode()).decode()
@@ -268,30 +266,6 @@ class HttpMediaSession:
                 except JSONDecodeError:
                     logger.warning("Unable to parse JSON sent from device")
 
-            if seq == 1:
-                data = {
-                    "type": "request",
-                    "seq": 3,
-                    "params": {
-                        "play": {"start_time": "1606781157", "scale": "1/1"},
-                        "method": "do",
-                    },
-                }
-                data = json.dumps(data, separators=(",", ":")).encode()
-                headers = {
-                    b"Content-Type": "application/json".encode(),
-                }
-                headers[b"X-Session-Id"] = str(session).encode()
-                headers[b"Content-Length"] = str(len(data)).encode()
-                logger.debug("Sending request to play...")
-                self.requestedPlay = True
-
-                await self._send_http_request(b"--" + self.client_boundary, headers)
-                chunk_size = 4096
-                for i in range(0, len(data), chunk_size):
-                    self._writer.write(data[i : i + chunk_size])
-                    await self._writer.drain()
-
             if (
                 (session is None)
                 and (seq is None)
@@ -340,7 +314,7 @@ class HttpMediaSession:
                 json_data=json_data,
             )
 
-            if seq % self.window_size == 0 and seq < 6500:  # seq < 2000 is temp
+            if seq % self.window_size == 0 and seq < 2000:  # seq < 2000 is temp
                 data = {
                     "type": "notification",
                     "params": {"event_type": "stream_sequence"},
@@ -360,9 +334,7 @@ class HttpMediaSession:
                     self._writer.write(data[i : i + chunk_size])
                     await self._writer.drain()
 
-            if mimetype == "application/json" and self.requestedPlay:
-                self.startedPlay = True
-                print("OK")
+            logger.debug(mimetype)
             """
             logger.debug(
                 (
@@ -377,8 +349,8 @@ class HttpMediaSession:
                 )
             )
             """
-            if self.startedPlay:
-                await queue.put(response_obj)
+
+            await queue.put(response_obj)
 
     async def transceive(
         self,
@@ -386,7 +358,7 @@ class HttpMediaSession:
         mimetype: str = "application/json",
         session: int = None,
         encrypt: bool = False,
-        no_data_timeout=10.0,
+        no_data_timeout=1.0,
     ) -> Generator[HttpMediaResponse, None, None]:
         sequence = None
         queue = None
