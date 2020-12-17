@@ -479,6 +479,11 @@ def test_moveMotorStep():
     assert result2["error_code"] == 0
 
 
+def test_calibrateMotor():
+    tapo = Tapo(host, user, password)
+    tapo.calibrateMotor()
+
+
 def test_setLEDEnabled():
     tapo = Tapo(host, user, password)
     origLedEnabled = tapo.getLED()["enabled"] == "on"
