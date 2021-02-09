@@ -479,12 +479,6 @@ def test_moveMotorStep():
     assert result2["error_code"] == 0
 
 
-def test_calibrateMotor():
-    tapo = Tapo(host, user, password)
-    result = tapo.calibrateMotor()
-    assert result["error_code"] == 0
-
-
 def test_setLEDEnabled():
     tapo = Tapo(host, user, password)
     origLedEnabled = tapo.getLED()["enabled"] == "on"
@@ -639,6 +633,12 @@ def test_preset():
 
     if origPrivacyModeEnabled:
         tapo.setPrivacyMode(True)
+
+
+def test_calibrateMotor():
+    tapo = Tapo(host, user, password)
+    result = tapo.calibrateMotor()
+    assert result["error_code"] == 0
 
 
 def test_reboot():
