@@ -171,7 +171,7 @@ class Tapo:
         if len(label) >= 16:
             raise Exception("Error: Label cannot be longer than 16 characters")
         elif len(label) == 0:
-            labelEnabled = False
+            data["OSD"]["label_info_1"]["enabled"] = "off"
         else:
             data["OSD"]["label_info_1"]["text"] = label
         if (
@@ -278,10 +278,7 @@ class Tapo:
 
     def moveMotor(self, x, y):
         return self.performRequest(
-            {
-                "method": "do",
-                "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}},
-            }
+            {"method": "do", "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}
         )
 
     def moveMotorStep(self, angle):
@@ -289,10 +286,7 @@ class Tapo:
             raise Exception("Angle must be in a range 0 <= angle < 360")
 
         return self.performRequest(
-            {
-                "method": "do",
-                "motor": {"movestep": {"direction": str(angle)}},
-            }
+            {"method": "do", "motor": {"movestep": {"direction": str(angle)}}}
         )
 
     def calibrateMotor(self):
@@ -315,10 +309,7 @@ class Tapo:
         if inf_type not in ["off", "on", "auto"]:
             raise Exception("Invalid inf_type, can be off, on or auto")
         return self.performRequest(
-            {
-                "method": "set",
-                "image": {"common": {"inf_type": inf_type}},
-            }
+            {"method": "set", "image": {"common": {"inf_type": inf_type}}}
         )
 
     def getUserID(self):
@@ -364,12 +355,7 @@ class Tapo:
         )["result"]["responses"][0]["result"]["playback"]["search_video_results"]
 
     def getCommonImage(self):
-        return self.performRequest(
-            {
-                "method": "get",
-                "image": {"name": "common"},
-            }
-        )
+        return self.performRequest({"method": "get", "image": {"name": "common"}})
 
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
