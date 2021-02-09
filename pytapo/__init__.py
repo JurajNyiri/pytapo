@@ -148,7 +148,11 @@ class Tapo:
                     "display": "ntnb",
                     "size": "auto",
                 },
-                "label_info_1": {"enabled": "on", "x_coor": labelX, "y_coor": labelY},
+                "label_info_1": {
+                    "enabled": "on" if labelEnabled else "off",
+                    "x_coor": labelX,
+                    "y_coor": labelY,
+                },
             },
         }
 
