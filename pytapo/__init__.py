@@ -295,6 +295,9 @@ class Tapo:
             }
         )
 
+    def calibrateMotor(self):
+        return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
+
     def format(self):
         return self.performRequest(
             {"method": "do", "harddisk_manage": {"format_hd": "1"}}
