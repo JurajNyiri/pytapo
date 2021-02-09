@@ -24,7 +24,6 @@ tapo = Tapo(host, user, password)
 print(tapo.getBasicInfo())
 ```
 
-
 ## Contributions:
 
 Contributions to pytapo are welcomed.
@@ -53,7 +52,7 @@ Then run `tox` to run all the tests.
 
 Linters are ran on every commit.
 
-Tests are ran on push. 
+Tests are ran on push.
 
 Your camera may do all the actions supported by this library, including, but not limited to, move, change privacy mode and reboot while tests are running. Camera does not format SD card during tests.
 
@@ -65,6 +64,7 @@ After the tests are done, your camera should be in the initial state.
 - [likaci](https://github.com/likaci) and [his github repository](https://github.com/likaci/mercury-ipc-control) for the research on the Mercury camera on which tapo is based
 - [Tim Zhang](https://github.com/ttimasdf) for additional research for Mercury camera on [his github repository](https://github.com/ttimasdf/mercury-ipc-control)
 - [Gábor Szabados](https://github.com/GSzabados) for doing research and gathering all the information above in [Home Assistant Community forum](https://community.home-assistant.io/t/use-pan-tilt-function-for-tp-link-tapo-c200-from-home-assistant/170143/18)
+- [Davide Depau](https://github.com/Depau) for additional [research](https://md.depau.eu/s/r1Ys_oWoP) of the cameras and work on pytapo library
 
 # Disclaimer
 

@@ -9,16 +9,19 @@ import requests
 import urllib3
 
 from .const import ERROR_CODES
+from .media_stream.session import HttpMediaSession
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Tapo:
-    def __init__(self, host, user, password):
+    def __init__(self, host, user, password, cloudPassword=""):
         self.host = host
         self.user = user
         self.password = password
+        self.cloudPassword = cloudPassword
         self.stok = False
+        self.userID = False
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -30,6 +33,9 @@ class Tapo:
             "Content-Type": "application/json; charset=UTF-8",
         }
         self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
+        self.hashedCloudPassword = (
+            hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
+        )
 
         self.basicInfo = self.getBasicInfo()
         self.presets = self.isSupportingPresets()
@@ -45,6 +51,9 @@ class Tapo:
 
     def getHostURL(self):
         return "https://{host}/stok={stok}/ds".format(host=self.host, stok=self.stok)
+
+    def getStreamURL(self):
+        return "{host}:8800".format(host=self.host)
 
     def ensureAuthenticated(self):
         if not self.stok:
@@ -107,6 +116,9 @@ class Tapo:
                     + " Response:"
                     + json.dumps(data)
                 )
+
+    def getMediaSession(self):
+        return HttpMediaSession(self.host, self.cloudPassword)  # pragma: no cover
 
     def getOsd(self):
         return self.performRequest(
@@ -300,6 +312,48 @@ class Tapo:
             {"method": "set", "image": {"common": {"inf_type": inf_type}}}
         )
 
+    def getUserID(self):
+        if not self.userID:
+            self.userID = self.performRequest(
+                {
+                    "method": "multipleRequest",
+                    "params": {
+                        "requests": [
+                            {
+                                "method": "getUserID",
+                                "params": {"system": {"get_user_id": "null"}},
+                            }
+                        ]
+                    },
+                }
+            )["result"]["responses"][0]["result"]["user_id"]
+        return self.userID
+
+    def getRecordings(self, date):
+        return self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "searchVideoOfDay",
+                            "params": {
+                                "playback": {
+                                    "search_video_utility": {
+                                        "channel": 0,
+                                        "date": date,
+                                        "end_index": 99,
+                                        "id": self.getUserID(),
+                                        "start_index": 0,
+                                    }
+                                }
+                            },
+                        }
+                    ]
+                },
+            }
+        )["result"]["responses"][0]["result"]["playback"]["search_video_results"]
+
     def getCommonImage(self):
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
@@ -366,6 +420,38 @@ class Tapo:
             raise Exception("Preset " + str(presetID) + " is not set in the app")
         return self.performRequest(
             {"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}}
+        )
+
+    def getLensDistortionCorrection(self):
+        data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
+        return data["image"]["switch"]["ldc"] == "on"
+
+    def setLensDistortionCorrection(self, enable):
+        return self.performRequest(
+            {"method": "set", "image": {"switch": {"ldc": "on" if enable else "off"}}}
+        )
+
+    def getImageFlipVertical(self):
+        data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
+        return data["image"]["switch"]["flip_type"] == "center"
+
+    def setImageFlipVertical(self, enable):
+        return self.performRequest(
+            {
+                "method": "set",
+                "image": {"switch": {"flip_type": "center" if enable else "off"}},
+            }
+        )
+
+    def setLightFrequencyMode(self, mode):
+        allowed_modes = ["auto", "50", "60"]
+        if mode not in allowed_modes:
+            raise Exception(
+                "Light frequency mode must be one of {}".format(allowed_modes)
+            )
+
+        return self.performRequest(
+            {"method": "set", "image": {"common": {"light_freq_mode": mode}}}
         )
 
     @staticmethod
