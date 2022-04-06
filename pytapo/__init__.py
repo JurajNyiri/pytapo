@@ -460,3 +460,22 @@ class Tapo:
             return str(ERROR_CODES[str(errorCode)])
         else:
             return str(errorCode)
+
+    def isUpdateAvailable(self):
+        return self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "checkFirmwareVersionByCloud",
+                            "params": {"cloud_config": {"check_fw_version": "null"}},
+                        },
+                        {
+                            "method": "getCloudConfig",
+                            "params": {"cloud_config": {"name": ["upgrade_info"]}},
+                        },
+                    ]
+                },
+            }
+        )
