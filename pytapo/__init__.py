@@ -461,6 +461,7 @@ class Tapo:
         else:
             return str(errorCode)
 
+    # test returned value
     def isUpdateAvailable(self):
         return self.performRequest(
             {
@@ -479,3 +480,20 @@ class Tapo:
                 },
             }
         )
+
+    # test returned value during update
+    def getFirmwareUpdateStatus(self):
+        return self.performRequest(
+            {"method": "get", "cloud_config": {"name": "upgrade_status"}}
+        )
+
+    # todo: test functionality
+    def startFirmwareUpgrade(self):
+        try:
+            started = self.performRequest(
+                {"method": "do", "cloud_config": {"fw_download": "null"}}
+            )
+            print(started)
+            print(self.getFirmwareUpdateStatus())
+        except Exception:
+            raise Exception("No new firmware available.")
