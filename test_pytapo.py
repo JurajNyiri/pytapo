@@ -496,40 +496,32 @@ def test_setLEDEnabled():
     assert (result["enabled"] == "on") == origLedEnabled
 
 
-def test_getCommonImage():
-    tapo = Tapo(host, user, password)
-    result = tapo.getCommonImage()
-    assert result["error_code"] == 0
-    assert "image" in result
-    assert "common" in result["image"]
-
-
 def test_setDayNightMode():
     tapo = Tapo(host, user, password)
-    origDayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    origDayNightMode = tapo.getDayNightMode()
     result = tapo.setDayNightMode("off")
     assert result["error_code"] == 0
-    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    dayNightMode = tapo.getDayNightMode()
     assert dayNightMode == "off"
     result = tapo.setDayNightMode("on")
     assert result["error_code"] == 0
-    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    dayNightMode = tapo.getDayNightMode()
     assert dayNightMode == "on"
     result = tapo.setDayNightMode("auto")
     assert result["error_code"] == 0
-    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    dayNightMode = tapo.getDayNightMode()
     assert dayNightMode == "auto"
     result = tapo.setDayNightMode("off")
     assert result["error_code"] == 0
-    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    dayNightMode = tapo.getDayNightMode()
     assert dayNightMode == "off"
     result = tapo.setDayNightMode(origDayNightMode)
     assert result["error_code"] == 0
-    dayNightMode = tapo.getCommonImage()["image"]["common"]["inf_type"]
+    dayNightMode = tapo.getDayNightMode()
     assert dayNightMode == origDayNightMode
     with pytest.raises(Exception) as err:
         tapo.setDayNightMode("unsupported")
-    assert "Invalid inf_type, can be off, on or auto" in str(err.value)
+    assert "Day night mode must be one of ['off', 'on', 'auto']" in str(err.value)
 
 
 def test_setMotionDetection():
@@ -649,6 +641,20 @@ def test_imageFlipVertical():
     assert tapo.getImageFlipVertical() == origImageFlipVertical
 
 
+def test_forceWhiteLampState():
+    tapo = Tapo(host, user, password)
+    origForceWhiteLampState = tapo.getForceWhitelampState()
+
+    tapo.setForceWhitelampState(True)
+    assert tapo.getForceWhitelampState()
+
+    tapo.setForceWhitelampState(False)
+    assert not tapo.getForceWhitelampState()
+
+    tapo.setForceWhitelampState(origForceWhiteLampState)
+    assert tapo.getForceWhitelampState() == origForceWhiteLampState
+
+
 def test_lensDistortionCorrection():
     tapo = Tapo(host, user, password)
     origLensDistortionCorrection = tapo.getLensDistortionCorrection()
@@ -691,26 +697,23 @@ def test_getRecordings():
 
 def test_lightFrequencyMode():
     tapo = Tapo(host, user, password)
-    origLightFrequency = tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
+    origLightFrequency = tapo.getLightFrequencyMode()
 
     tapo.setLightFrequencyMode("50")
-    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "50"
+    assert tapo.getLightFrequencyMode()
 
     tapo.setLightFrequencyMode("60")
-    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "60"
+    assert tapo.getLightFrequencyMode()
 
     tapo.setLightFrequencyMode("auto")
-    assert tapo.getCommonImage()["image"]["common"]["light_freq_mode"] == "auto"
+    assert tapo.getLightFrequencyMode()
 
     with pytest.raises(Exception) as err:
         tapo.setLightFrequencyMode("invalid")
     assert "Light frequency mode must be one of" in str(err.value)
 
     tapo.setLightFrequencyMode(origLightFrequency)
-    assert (
-        tapo.getCommonImage()["image"]["common"]["light_freq_mode"]
-        == origLightFrequency
-    )
+    assert tapo.getLightFrequencyMode() == origLightFrequency
 
 
 def test_calibrateMotor():
