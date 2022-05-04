@@ -7,6 +7,7 @@ import json
 
 import requests
 import urllib3
+from warnings import warn
 
 from .const import ERROR_CODES
 from .media_stream.session import HttpMediaSession
@@ -346,6 +347,10 @@ class Tapo:
                 },
             }
         )["result"]["responses"][0]["result"]["playback"]["search_video_results"]
+
+    def getCommonImage(self):
+        warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
+        return self.performRequest({"method": "get", "image": {"name": "common"}})
 
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {

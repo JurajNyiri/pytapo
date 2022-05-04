@@ -496,6 +496,14 @@ def test_setLEDEnabled():
     assert (result["enabled"] == "on") == origLedEnabled
 
 
+def test_getCommonImage():
+    tapo = Tapo(host, user, password)
+    result = tapo.getCommonImage()
+    assert result["error_code"] == 0
+    assert "image" in result
+    assert "common" in result["image"]
+
+
 def test_setDayNightMode():
     tapo = Tapo(host, user, password)
     origDayNightMode = tapo.getDayNightMode()
