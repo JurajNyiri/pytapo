@@ -9,3 +9,4 @@ pytapo.egg-info
 htmlcov
 .coverage
 output
+.DS_Store

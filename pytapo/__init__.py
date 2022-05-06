@@ -7,6 +7,7 @@ import json
 
 import requests
 import urllib3
+from warnings import warn
 
 from .const import ERROR_CODES
 from .media_stream.session import HttpMediaSession
@@ -111,10 +112,9 @@ class Tapo:
                 return self.performRequest(requestData, True)
             else:
                 raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
+                    "Error: {}, Response: {}".format(
+                        self.getErrorMessage(data["error_code"]), json.dumps(data)
+                    )
                 )
 
     def getMediaSession(self):
@@ -305,13 +305,6 @@ class Tapo:
             }
         )
 
-    def setDayNightMode(self, inf_type):
-        if inf_type not in ["off", "on", "auto"]:
-            raise Exception("Invalid inf_type, can be off, on or auto")
-        return self.performRequest(
-            {"method": "set", "image": {"common": {"inf_type": inf_type}}}
-        )
-
     def getUserID(self):
         if not self.userID:
             self.userID = self.performRequest(
@@ -330,7 +323,7 @@ class Tapo:
         return self.userID
 
     def getRecordings(self, date):
-        return self.performRequest(
+        result = self.performRequest(
             {
                 "method": "multipleRequest",
                 "params": {
@@ -352,9 +345,13 @@ class Tapo:
                     ]
                 },
             }
-        )["result"]["responses"][0]["result"]["playback"]["search_video_results"]
+        )["result"]["responses"][0]["result"]
+        if "playback" not in result:
+            raise Exception("Video playback is not supported by this camera")
+        return result["playback"]["search_video_results"]
 
     def getCommonImage(self):
+        warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
     def setMotionDetection(self, enabled, sensitivity=False):
@@ -407,7 +404,7 @@ class Tapo:
 
     def deletePreset(self, presetID):
         if not str(presetID) in self.presets:
-            raise Exception("Preset " + str(presetID) + " is not set in the app")
+            raise Exception("Preset {} is not set in the app".format(str(presetID)))
 
         self.performRequest(
             {"method": "do", "preset": {"remove_preset": {"id": [presetID]}}}
@@ -417,31 +414,65 @@ class Tapo:
 
     def setPreset(self, presetID):
         if not str(presetID) in self.presets:
-            raise Exception("Preset " + str(presetID) + " is not set in the app")
+            raise Exception("Preset {} is not set in the app".format(str(presetID)))
         return self.performRequest(
             {"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}}
         )
 
-    def getLensDistortionCorrection(self):
+    # Switches
+
+    def __getImageSwitch(self, switch: str) -> str:
         data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
-        return data["image"]["switch"]["ldc"] == "on"
+        switches = data["image"]["switch"]
+        if switch not in switches:
+            raise Exception("Switch {} is not supported by this camera".format(switch))
+        return switches[switch]
 
-    def setLensDistortionCorrection(self, enable):
-        return self.performRequest(
-            {"method": "set", "image": {"switch": {"ldc": "on" if enable else "off"}}}
-        )
-
-    def getImageFlipVertical(self):
-        data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
-        return data["image"]["switch"]["flip_type"] == "center"
-
-    def setImageFlipVertical(self, enable):
+    def __setImageSwitch(self, switch: str, value: str):
         return self.performRequest(
             {
                 "method": "set",
-                "image": {"switch": {"flip_type": "center" if enable else "off"}},
+                "image": {"switch": {switch: value}},
             }
         )
+
+    def getLensDistortionCorrection(self):
+        return self.__getImageSwitch("ldc") == "on"
+
+    def setLensDistortionCorrection(self, enable):
+        return self.__setImageSwitch("ldc", "on" if enable else "off")
+
+    def getImageFlipVertical(self):
+        return self.__getImageSwitch("flip_type") == "center"
+
+    def setImageFlipVertical(self, enable):
+        return self.__setImageSwitch("flip_type", "center" if enable else "off")
+
+    def getForceWhitelampState(self) -> bool:
+        return self.__getImageSwitch("force_wtl_state") == "on"
+
+    def setForceWhitelampState(self, enable: bool):
+        return self.__setImageSwitch("force_wtl_state", "on" if enable else "off")
+
+    # Common
+
+    def __getImageCommon(self, field: str) -> str:
+        data = self.performRequest({"method": "get", "image": {"name": "common"}})
+        fields = data["image"]["common"]
+        if field not in fields:
+            raise Exception("Field {} is not supported by this camera".format(field))
+        return fields[field]
+
+    def __setImageCommon(self, field: str, value: str):
+        return self.performRequest(
+            {
+                "method": "set",
+                "image": {"common": {field: value}},
+            }
+        )
+
+    def getLightFrequencyMode(self) -> str:
+        return self.__getImageCommon("light_freq_mode")
 
     def setLightFrequencyMode(self, mode):
         allowed_modes = ["auto", "50", "60"]
@@ -449,10 +480,16 @@ class Tapo:
             raise Exception(
                 "Light frequency mode must be one of {}".format(allowed_modes)
             )
+        return self.__setImageCommon("light_freq_mode", mode)
 
-        return self.performRequest(
-            {"method": "set", "image": {"common": {"light_freq_mode": mode}}}
-        )
+    def getDayNightMode(self) -> str:
+        return self.__getImageCommon("inf_type")
+
+    def setDayNightMode(self, mode):
+        allowed_modes = ["off", "on", "auto"]
+        if mode not in allowed_modes:
+            raise Exception("Day night mode must be one of {}".format(allowed_modes))
+        return self.__setImageCommon("inf_type", mode)
 
     @staticmethod
     def getErrorMessage(errorCode):
