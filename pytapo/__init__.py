@@ -112,10 +112,9 @@ class Tapo:
                 return self.performRequest(requestData, True)
             else:
                 raise Exception(
-                    "Error: "
-                    + self.getErrorMessage(data["error_code"])
-                    + " Response:"
-                    + json.dumps(data)
+                    "Error: {}, Response: {}".format(
+                        self.getErrorMessage(data["error_code"]), json.dumps(data)
+                    )
                 )
 
     def getMediaSession(self):
@@ -324,7 +323,7 @@ class Tapo:
         return self.userID
 
     def getRecordings(self, date):
-        return self.performRequest(
+        result = self.performRequest(
             {
                 "method": "multipleRequest",
                 "params": {
@@ -346,7 +345,10 @@ class Tapo:
                     ]
                 },
             }
-        )["result"]["responses"][0]["result"]["playback"]["search_video_results"]
+        )["result"]["responses"][0]["result"]
+        if "playback" not in result:
+            raise Exception("Video playback is not supported by this camera")
+        return result["playback"]["search_video_results"]
 
     def getCommonImage(self):
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
@@ -402,7 +404,7 @@ class Tapo:
 
     def deletePreset(self, presetID):
         if not str(presetID) in self.presets:
-            raise Exception("Preset " + str(presetID) + " is not set in the app")
+            raise Exception("Preset {} is not set in the app".format(str(presetID)))
 
         self.performRequest(
             {"method": "do", "preset": {"remove_preset": {"id": [presetID]}}}
@@ -412,7 +414,7 @@ class Tapo:
 
     def setPreset(self, presetID):
         if not str(presetID) in self.presets:
-            raise Exception("Preset " + str(presetID) + " is not set in the app")
+            raise Exception("Preset {} is not set in the app".format(str(presetID)))
         return self.performRequest(
             {"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}}
         )
@@ -421,7 +423,10 @@ class Tapo:
 
     def __getImageSwitch(self, switch: str) -> str:
         data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
-        return data["image"]["switch"][switch]
+        switches = data["image"]["switch"]
+        if switch not in switches:
+            raise Exception("Switch {} is not supported by this camera".format(switch))
+        return switches[switch]
 
     def __setImageSwitch(self, switch: str, value: str):
         return self.performRequest(
@@ -453,7 +458,10 @@ class Tapo:
 
     def __getImageCommon(self, field: str) -> str:
         data = self.performRequest({"method": "get", "image": {"name": "common"}})
-        return data["image"]["common"][field]
+        fields = data["image"]["common"]
+        if field not in fields:
+            raise Exception("Field {} is not supported by this camera".format(field))
+        return fields[field]
 
     def __setImageCommon(self, field: str, value: str):
         return self.performRequest(
