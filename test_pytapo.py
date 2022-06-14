@@ -722,7 +722,7 @@ def test_startStopManualAlarm():
     tapo = Tapo(host, user, password)
     result = tapo.startManualAlarm()
     assert result["error_code"] == 0
-    result = tapo.startManualAlarm()
+    result = tapo.stopManualAlarm()
     assert result["error_code"] == 0
 
 
