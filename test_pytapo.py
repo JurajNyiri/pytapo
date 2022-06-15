@@ -718,6 +718,14 @@ def test_calibrateMotor():
     tapo.calibrateMotor()
 
 
+def test_startStopManualAlarm():
+    tapo = Tapo(host, user, password)
+    result = tapo.startManualAlarm()
+    assert result["error_code"] == 0
+    result = tapo.stopManualAlarm()
+    assert result["error_code"] == 0
+
+
 def test_reboot():
     tapo = Tapo(host, user, password)
     result = tapo.reboot()
