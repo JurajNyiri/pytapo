@@ -491,6 +491,22 @@ class Tapo:
             raise Exception("Day night mode must be one of {}".format(allowed_modes))
         return self.__setImageCommon("inf_type", mode)
 
+    def startManualAlarm(self):
+        return self.performRequest(
+            {
+                "method": "do",
+                "msg_alarm": {"manual_msg_alarm": {"action": "start"}},
+            }
+        )
+
+    def stopManualAlarm(self):
+        return self.performRequest(
+            {
+                "method": "do",
+                "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},
+            }
+        )
+
     @staticmethod
     def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
