@@ -479,6 +479,58 @@ def test_moveMotorStep():
     assert result2["error_code"] == 0
 
 
+def test_moveMotorClockWise():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+    result = tapo.moveMotorClockWise()
+    time.sleep(5)
+
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+    assert result["error_code"] == 0
+
+
+def test_moveMotorCounterClockWise():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+    result = tapo.moveMotorCounterClockWise()
+    time.sleep(5)
+
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+    assert result["error_code"] == 0
+
+
+def test_moveMotorVertical():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+    result = tapo.moveMotorVertical()
+    time.sleep(5)
+
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+    assert result["error_code"] == 0
+
+
+def test_moveMotorHorizontal():
+    tapo = Tapo(host, user, password)
+    origPrivacyModeEnabled = tapo.getPrivacyMode()["enabled"] == "on"
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(False)
+    result = tapo.moveMotorHorizontal()
+    time.sleep(5)
+
+    if origPrivacyModeEnabled:
+        tapo.setPrivacyMode(True)
+    assert result["error_code"] == 0
+
+
 def test_setLEDEnabled():
     tapo = Tapo(host, user, password)
     origLedEnabled = tapo.getLED()["enabled"] == "on"
