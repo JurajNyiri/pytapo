@@ -290,16 +290,16 @@ class Tapo:
         )
 
     def moveMotorClockWise(self):
-        self.moveMotorStep(0)
+        return self.moveMotorStep(0)
 
     def moveMotorCounterClockWise(self):
-        self.moveMotorStep(180)
+        return self.moveMotorStep(180)
 
     def moveMotorVertical(self):
-        self.moveMotorStep(90)
+        return self.moveMotorStep(90)
 
     def moveMotorHorizontal(self):
-        self.moveMotorStep(270)
+        return self.moveMotorStep(270)
 
     def calibrateMotor(self):
         return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
@@ -366,10 +366,6 @@ class Tapo:
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
-    def getSdCardInfo(self):
-        return self.performRequest(
-            {"method": "get", "sd_manage": {"table": ["sd_info"]}}
-        )
 
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
