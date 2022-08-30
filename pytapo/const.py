@@ -6,4 +6,5 @@ ERROR_CODES = {
     "-40106": "Parameter to get/do does not exist",
     "-40105": "Method does not exist",
     "-40101": "Parameter to set does not exist",
+    "-40209": "Invalid login credentials",
 }

@@ -10,3 +10,4 @@ htmlcov
 .coverage
 output
 .DS_Store
+.vscode

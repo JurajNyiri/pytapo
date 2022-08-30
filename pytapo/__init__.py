@@ -289,6 +289,18 @@ class Tapo:
             {"method": "do", "motor": {"movestep": {"direction": str(angle)}}}
         )
 
+    def moveMotorClockWise(self):
+        return self.moveMotorStep(0)
+
+    def moveMotorCounterClockWise(self):
+        return self.moveMotorStep(180)
+
+    def moveMotorVertical(self):
+        return self.moveMotorStep(90)
+
+    def moveMotorHorizontal(self):
+        return self.moveMotorStep(270)
+
     def calibrateMotor(self):
         return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
 
@@ -353,6 +365,7 @@ class Tapo:
     def getCommonImage(self):
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
+
 
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
