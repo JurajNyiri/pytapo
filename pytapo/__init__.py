@@ -594,8 +594,7 @@ class Tapo:
                 },
             }
         )
+        returnData = {}
         for result in results["result"]["responses"]:
-            print(result)
-            print("")
-        #  {"method": "get", "cloud_config": {"name": "upgrade_status"}}
-        return None
+            returnData[result["method"]] = result["result"]
+        return returnData
