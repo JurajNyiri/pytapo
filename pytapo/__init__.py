@@ -366,7 +366,6 @@ class Tapo:
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
-
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
             "method": "set",
@@ -443,10 +442,7 @@ class Tapo:
 
     def __setImageSwitch(self, switch: str, value: str):
         return self.performRequest(
-            {
-                "method": "set",
-                "image": {"switch": {switch: value}},
-            }
+            {"method": "set", "image": {"switch": {switch: value}},}
         )
 
     def getLensDistortionCorrection(self):
@@ -478,10 +474,7 @@ class Tapo:
 
     def __setImageCommon(self, field: str, value: str):
         return self.performRequest(
-            {
-                "method": "set",
-                "image": {"common": {field: value}},
-            }
+            {"method": "set", "image": {"common": {field: value}},}
         )
 
     def getLightFrequencyMode(self) -> str:
@@ -506,18 +499,12 @@ class Tapo:
 
     def startManualAlarm(self):
         return self.performRequest(
-            {
-                "method": "do",
-                "msg_alarm": {"manual_msg_alarm": {"action": "start"}},
-            }
+            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "start"}},}
         )
 
     def stopManualAlarm(self):
         return self.performRequest(
-            {
-                "method": "do",
-                "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},
-            }
+            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},}
         )
 
     @staticmethod
@@ -526,3 +513,89 @@ class Tapo:
             return str(ERROR_CODES[str(errorCode)])
         else:
             return str(errorCode)
+
+    def getFirmwareUpdateStatus(self):
+        return self.performRequest(
+            {"method": "get", "cloud_config": {"name": "upgrade_status"}}
+        )
+
+    def isUpdateAvailable(self):
+        return self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "checkFirmwareVersionByCloud",
+                            "params": {"cloud_config": {"check_fw_version": "null"}},
+                        },
+                        {
+                            "method": "getCloudConfig",
+                            "params": {"cloud_config": {"name": ["upgrade_info"]}},
+                        },
+                    ]
+                },
+            }
+        )
+
+    def startFirmwareUpgrade(self):
+        try:
+            self.performRequest(
+                {"method": "do", "cloud_config": {"fw_download": "null"}}
+            )
+        except Exception:
+            raise Exception("No new firmware available.")
+
+    # Used for purposes of HomeAssistant-Tapo-Control
+    # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
+    def getMost(self):
+        results = self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "getDeviceInfo",
+                            "params": {"device_info": {"name": ["basic_info"]}},
+                        },
+                        {
+                            "method": "getDetectionConfig",
+                            "params": {"motion_detection": {"name": ["motion_det"]}},
+                        },
+                        {
+                            "method": "getLensMaskConfig",
+                            "params": {"lens_mask": {"name": ["lens_mask_info"]}},
+                        },
+                        {
+                            "method": "getLdc",
+                            "params": {"image": {"name": ["switch", "common"]}},
+                        },
+                        {
+                            "method": "getLastAlarmInfo",
+                            "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                        },
+                        {
+                            "method": "getLedStatus",
+                            "params": {"led": {"name": ["config"]}},
+                        },
+                        {
+                            "method": "getTargetTrackConfig",
+                            "params": {"target_track": {"name": ["target_track_info"]}},
+                        },
+                        {
+                            "method": "getPresetConfig",
+                            "params": {"preset": {"name": ["preset"]}},
+                        },
+                        {
+                            "method": "getFirmwareUpdateStatus",
+                            "params": {"cloud_config": {"name": "upgrade_status"}},
+                        },
+                    ]
+                },
+            }
+        )
+        for result in results["result"]["responses"]:
+            print(result)
+            print("")
+        #  {"method": "get", "cloud_config": {"name": "upgrade_status"}}
+        return None
