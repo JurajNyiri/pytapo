@@ -596,5 +596,8 @@ class Tapo:
         )
         returnData = {}
         for result in results["result"]["responses"]:
-            returnData[result["method"]] = result["result"]
+            if result["error_code"] == 0:
+                returnData[result["method"]] = result["result"]
+            else:
+                returnData[result["method"]] = False
         return returnData
