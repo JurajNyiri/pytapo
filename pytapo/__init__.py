@@ -118,7 +118,10 @@ class Tapo:
                 )
 
     def getMediaSession(self):
-        return HttpMediaSession(self.host, self.cloudPassword)  # pragma: no cover
+        encrypted = self.getMediaEncrypt()
+        return HttpMediaSession(
+            self.host, self.cloudPassword, encrypted["enabled"] == "on"
+        )  # pragma: no cover
 
     def getOsd(self):
         return self.performRequest(
@@ -605,6 +608,10 @@ class Tapo:
                         {
                             "method": "getMediaEncrypt",
                             "params": {"cet": {"name": ["media_encrypt"]}},
+                        },
+                        {
+                            "method": "getConnectionType",
+                            "params": {"network": {"get_connection_type": []}},
                         },
                     ]
                 },

@@ -29,6 +29,7 @@ class HttpMediaSession:
         self,
         ip: str,
         cloud_password: str,
+        mediaEncrypted: bool,
         window_size=50,
         port: int = 8800,
         username: str = "admin",
@@ -37,6 +38,7 @@ class HttpMediaSession:
         self.ip = ip
         self.window_size = window_size
         self.cloud_password = cloud_password
+        self.mediaEncrypted = mediaEncrypted
         self.hashed_password = md5digest(cloud_password.encode()).decode()
         self.port = port
         self.username = username
@@ -226,7 +228,22 @@ class HttpMediaSession:
 
             mimetype = headers["Content-Type"]
             length = int(headers["Content-Length"])
-            encrypted = bool(int(headers["X-If-Encrypt"]))
+            print("")
+            print("")
+            print("")
+            print("")
+            print("")
+            print(bool(int(headers["X-If-Encrypt"])))
+            print("")
+            print("")
+            print("")
+            print("")
+            print("")
+            if not self.mediaEncrypted:
+                encrypted = False
+            else:
+                encrypted = bool(int(headers["X-If-Encrypt"]))
+            # encrypted = bool(int(headers["X-If-Encrypt"]))  # temp
 
             if "X-Session-Id" in headers:
                 session = int(headers["X-Session-Id"])
@@ -235,12 +252,19 @@ class HttpMediaSession:
 
             # Now we know the content length, let's read it and decrypt it
             json_data = None
+            # print("TEST0")
             data = await self._reader.readexactly(length)
             if encrypted:
                 ciphertext = data
+                # print("TEST1")
                 try:
+                    # print("lolo")
+                    # print(ciphertext)
                     plaintext = self._aes.decrypt(ciphertext)
+                    # print("lala")
+                    # print(plaintext)
                 except ValueError as e:
+                    # print(e)
                     if "padding is incorrect" in e.args[0].lower():
                         e = ValueError(
                             e.args[0]
@@ -251,6 +275,7 @@ class HttpMediaSession:
                 except Exception as e:
                     plaintext = e
             else:
+                # print("ELSE")
                 ciphertext = None
                 plaintext = data
 
@@ -314,7 +339,9 @@ class HttpMediaSession:
                 json_data=json_data,
             )
 
-            if seq % self.window_size == 0 and seq < 2000:  # seq < 2000 is temp
+            if seq % self.window_size == 0 and (
+                seq < 2000
+            ):  # seq < 2000 or True is temp
                 data = {
                     "type": "notification",
                     "params": {"event_type": "stream_sequence"},
