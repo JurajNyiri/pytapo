@@ -201,6 +201,10 @@ class Tapo:
         data = {"method": "get", "lens_mask": {"name": ["lens_mask_info"]}}
         return self.performRequest(data)["lens_mask"]["lens_mask_info"]
 
+    def getMediaEncrypt(self):
+        data = {"method": "get", "cet": {"name": ["media_encrypt"]}}
+        return self.performRequest(data)["cet"]["media_encrypt"]
+
     def getMotionDetection(self):
         data = {"method": "get", "motion_detection": {"name": ["motion_det"]}}
         return self.performRequest(data)["motion_detection"]["motion_det"]
@@ -248,6 +252,14 @@ class Tapo:
                 "lens_mask": {
                     "lens_mask_info": {"enabled": "on" if enabled else "off"}
                 },
+            }
+        )
+
+    def setMediaEncrypt(self, enabled):
+        return self.performRequest(
+            {
+                "method": "set",
+                "cet": {"media_encrypt": {"enabled": "on" if enabled else "off"}},
             }
         )
 
@@ -589,6 +601,10 @@ class Tapo:
                         {
                             "method": "getFirmwareUpdateStatus",
                             "params": {"cloud_config": {"name": "upgrade_status"}},
+                        },
+                        {
+                            "method": "getMediaEncrypt",
+                            "params": {"cet": {"name": ["media_encrypt"]}},
                         },
                     ]
                 },
