@@ -4,6 +4,7 @@ import json
 import logging
 import random
 import warnings
+import time
 from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
 from typing import Optional, Mapping, Generator, MutableMapping
@@ -35,6 +36,7 @@ class HttpMediaSession:
         username: str = "admin",
         multipart_boundary: bytes = b"--client-stream-boundary--",
     ):
+        self.sentAudio = False
         self.ip = ip
         self.window_size = window_size
         self.cloud_password = cloud_password
@@ -339,7 +341,7 @@ class HttpMediaSession:
                 and seq % self.window_size == 0
                 and (seq < 2000)
             ):  # seq < 2000 is temp
-                # print("sending ack")
+                print("sending ack")
                 data = {
                     "type": "notification",
                     "params": {"event_type": "stream_sequence"},
@@ -381,7 +383,7 @@ class HttpMediaSession:
         mimetype: str = "application/json",
         session: int = None,
         encrypt: bool = False,
-        no_data_timeout=1.0,
+        no_data_timeout=60,
     ) -> Generator[HttpMediaResponse, None, None]:
         sequence = None
         queue = None
@@ -490,7 +492,37 @@ class HttpMediaSession:
                     session = resp.session
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
                     raise resp.plaintext
-                # print(resp.plaintext)
+                print(resp.plaintext)
+                while True:
+                    if not self.sentAudio:
+                        print("Read")
+                        with open(
+                            "sample2.mp2", mode="rb"
+                        ) as file:  # b is important -> binary
+                            fileContent = file.read(1510)
+                        data = fileContent
+                        data = self._aes.encrypt(data)
+                        headers = {}
+                        headers[b"Content-Type"] = str("audio/mp2t").encode()
+                        headers[b"X-Session-Id"] = str(session).encode()
+                        headers[b"Content-Length"] = str(len(data)).encode()
+                        headers[b"X-If-Encrypt"] = b"1"
+                        print(headers)
+
+                        await self._send_http_request(
+                            b"--" + self.client_boundary, headers
+                        )
+                        chunk_size = 4096
+                        for i in range(0, len(data), chunk_size):
+                            # print(data[i : i + chunk_size])
+                            self._writer.write(data[i : i + chunk_size])
+                            await self._writer.drain()
+
+                        self._writer.write(b"\r\n")
+                        await self._writer.drain()
+
+                        time.sleep(0.2)
+                        print("sending payload")
                 yield resp
 
         finally:
