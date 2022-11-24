@@ -11,13 +11,29 @@ logger = logging.getLogger(__name__)
 
 
 class AESHelper:
-    def __init__(self, username: bytes, nonce: bytes, cloud_password: bytes):
+    def __init__(
+        self,
+        username: bytes,
+        nonce: bytes,
+        cloud_password: bytes,
+        super_secret_key: bytes,
+    ):
         if not nonce:
             raise NonceMissingException()
         self.nonce = nonce
 
         hashed_pwd = hashlib.md5(cloud_password).hexdigest().upper().encode()
-        key = hashlib.md5(nonce + b":" + hashed_pwd).digest()
+        if username == b"none":
+            print("Detected turned off media encryption, using super secret key.")
+            if super_secret_key == b"":
+                raise Exception(
+                    "Media encryption is off and super secret key is not set."
+                )
+            key = hashlib.md5(nonce + b":" + super_secret_key).digest()
+        else:
+            print("Detected turned on media encryption, using cloud password.")
+            key = hashlib.md5(nonce + b":" + hashed_pwd).digest()
+
         iv = hashlib.md5(username + b":" + nonce).digest()
 
         print(f"AES key: {key.hex()}, iv: {iv.hex()}")
@@ -28,7 +44,7 @@ class AESHelper:
 
     @classmethod
     def from_keyexchange_and_password(
-        cls, key_exchange: AnyStr, cloud_password: AnyStr
+        cls, key_exchange: AnyStr, cloud_password: AnyStr, super_secret_key: AnyStr
     ):
         if type(cloud_password) == str:
             cloud_password = cloud_password.encode()
@@ -43,7 +59,12 @@ class AESHelper:
         if b"nonce" not in key_exchange:
             raise NonceMissingException()
 
-        return cls(key_exchange[b"username"], key_exchange[b"nonce"], cloud_password)
+        return cls(
+            key_exchange[b"username"],
+            key_exchange[b"nonce"],
+            cloud_password,
+            super_secret_key,
+        )
 
     def decrypt(self, data: bytes) -> bytes:
         return unpad(self._cipher.decrypt(data), 16, style="pkcs7")

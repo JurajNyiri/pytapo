@@ -16,11 +16,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Tapo:
-    def __init__(self, host, user, password, cloudPassword=""):
+    def __init__(self, host, user, password, cloudPassword="", superSecretKey=""):
         self.host = host
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
+        self.superSecretKey = superSecretKey
         self.stok = False
         self.userID = False
         self.headers = {
@@ -118,9 +119,8 @@ class Tapo:
                 )
 
     def getMediaSession(self):
-        encrypted = self.getMediaEncrypt()
         return HttpMediaSession(
-            self.host, self.cloudPassword, encrypted["enabled"] == "on"
+            self.host, self.cloudPassword, self.superSecretKey
         )  # pragma: no cover
 
     def getOsd(self):

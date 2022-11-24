@@ -29,7 +29,7 @@ class HttpMediaSession:
         self,
         ip: str,
         cloud_password: str,
-        mediaEncrypted: bool,
+        super_secret_key: str,
         window_size=50,
         port: int = 8800,
         username: str = "admin",
@@ -38,7 +38,7 @@ class HttpMediaSession:
         self.ip = ip
         self.window_size = window_size
         self.cloud_password = cloud_password
-        self.mediaEncrypted = mediaEncrypted
+        self.super_secret_key = super_secret_key
         self.hashed_password = md5digest(cloud_password.encode()).decode()
         self.port = port
         self.username = username
@@ -176,7 +176,9 @@ class HttpMediaSession:
             # Prepare for AES decryption of content
             self._key_exchange = res_headers["Key-Exchange"]
             self._aes = AESHelper.from_keyexchange_and_password(
-                self._key_exchange.encode(), self.cloud_password.encode()
+                self._key_exchange.encode(),
+                self.cloud_password.encode(),
+                self.super_secret_key.encode(),
             )
 
             logger.debug("AES key exchange performed")
@@ -228,22 +230,7 @@ class HttpMediaSession:
 
             mimetype = headers["Content-Type"]
             length = int(headers["Content-Length"])
-            print("")
-            print("")
-            print("")
-            print("")
-            print("")
-            print(bool(int(headers["X-If-Encrypt"])))
-            print("")
-            print("")
-            print("")
-            print("")
-            print("")
-            if not self.mediaEncrypted:
-                encrypted = False
-            else:
-                encrypted = bool(int(headers["X-If-Encrypt"]))
-            # encrypted = bool(int(headers["X-If-Encrypt"]))  # temp
+            encrypted = bool(int(headers["X-If-Encrypt"]))
 
             if "X-Session-Id" in headers:
                 session = int(headers["X-Session-Id"])
@@ -261,6 +248,8 @@ class HttpMediaSession:
                     # print("lolo")
                     # print(ciphertext)
                     plaintext = self._aes.decrypt(ciphertext)
+                    # if length == 384:
+                    # print(plaintext)
                     # print("lala")
                     # print(plaintext)
                 except ValueError as e:
