@@ -24,19 +24,19 @@ class AESHelper:
 
         hashed_pwd = hashlib.md5(cloud_password).hexdigest().upper().encode()
         if username == b"none":
-            print("Detected turned off media encryption, using super secret key.")
+            logger.debug(
+                "Detected turned off media encryption, using super secret key."
+            )
             if super_secret_key == b"":
                 raise Exception(
                     "Media encryption is off and super secret key is not set."
                 )
             key = hashlib.md5(nonce + b":" + super_secret_key).digest()
         else:
-            print("Detected turned on media encryption, using cloud password.")
+            logger.debug("Detected turned on media encryption, using cloud password.")
             key = hashlib.md5(nonce + b":" + hashed_pwd).digest()
 
         iv = hashlib.md5(username + b":" + nonce).digest()
-
-        print(f"AES key: {key.hex()}, iv: {iv.hex()}")
 
         self._cipher = AES.new(key, AES.MODE_CBC, iv)
 

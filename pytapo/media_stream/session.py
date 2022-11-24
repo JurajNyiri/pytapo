@@ -224,9 +224,12 @@ class HttpMediaSession:
 
             logger.debug("Handling new server response")
 
+            # print("got response")
+
             # Read and parse headers
             headers_block = await self._reader.readuntil(b"\r\n\r\n")
             headers = parse_http_headers(headers_block)
+            # print(headers)
 
             mimetype = headers["Content-Type"]
             length = int(headers["Content-Length"])
@@ -242,6 +245,7 @@ class HttpMediaSession:
             # print("TEST0")
             data = await self._reader.readexactly(length)
             if encrypted:
+                # print("encrypted")
                 ciphertext = data
                 # print("TEST1")
                 try:
@@ -264,19 +268,21 @@ class HttpMediaSession:
                 except Exception as e:
                     plaintext = e
             else:
-                # print("ELSE")
+                # print("plaintext")
                 ciphertext = None
                 plaintext = data
-
+            # print(plaintext)
             # JSON responses sometimes have the above info in the payload,
             # not the headers. Let's parse it.
             if mimetype == "application/json":
                 try:
                     json_data = json.loads(plaintext.decode())
                     if "seq" in json_data:
+                        # print("Setting seq")
                         seq = json_data["seq"]
                     if "params" in json_data and "session_id" in json_data["params"]:
                         session = int(json_data["params"]["session_id"])
+                        # print("Setting session")
                 except JSONDecodeError:
                     logger.warning("Unable to parse JSON sent from device")
 
@@ -328,9 +334,12 @@ class HttpMediaSession:
                 json_data=json_data,
             )
 
-            if seq % self.window_size == 0 and (
-                seq < 2000
-            ):  # seq < 2000 or True is temp
+            if (
+                seq is not None  # never ack live stream
+                and seq % self.window_size == 0
+                and (seq < 2000)
+            ):  # seq < 2000 is temp
+                # print("sending ack")
                 data = {
                     "type": "notification",
                     "params": {"event_type": "stream_sequence"},
@@ -347,6 +356,7 @@ class HttpMediaSession:
                 await self._send_http_request(b"--" + self.client_boundary, headers)
                 chunk_size = 4096
                 for i in range(0, len(data), chunk_size):
+                    # print(data[i : i + chunk_size])
                     self._writer.write(data[i : i + chunk_size])
                     await self._writer.drain()
 
@@ -433,7 +443,9 @@ class HttpMediaSession:
         await self._send_http_request(b"--" + self.client_boundary, headers)
 
         chunk_size = 4096
+        # print("Sending:")
         for i in range(0, len(data), chunk_size):
+            # print(data[i : i + chunk_size])
             self._writer.write(data[i : i + chunk_size])
             await self._writer.drain()
 
@@ -478,6 +490,7 @@ class HttpMediaSession:
                     session = resp.session
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
                     raise resp.plaintext
+                # print(resp.plaintext)
                 yield resp
 
         finally:
