@@ -212,6 +212,10 @@ class Tapo:
         data = {"method": "get", "motion_detection": {"name": ["motion_det"]}}
         return self.performRequest(data)["motion_detection"]["motion_det"]
 
+    def getPersonDetection(self):
+        data = {"method": "get", "people_detection": {"name": ["detection"]}}
+        return self.performRequest(data)["people_detection"]["detection"]
+
     def getAlarm(self):
         data = {"method": "get", "msg_alarm": {"name": ["chn1_msg_alarm_info"]}}
         return self.performRequest(data)["msg_alarm"]["chn1_msg_alarm_info"]
@@ -398,6 +402,23 @@ class Tapo:
 
         return self.performRequest(data)
 
+    def setPersonDetection(self, enabled, sensitivity=False):
+        data = {
+            "method": "set",
+            "people_detection": {"detection": {"enabled": "on" if enabled else "off"}},
+        }
+        if sensitivity:
+            if sensitivity == "high":
+                data["people_detection"]["detection"]["sensitivity"] = "80"
+            elif sensitivity == "normal":
+                data["people_detection"]["detection"]["sensitivity"] = "50"
+            elif sensitivity == "low":
+                data["people_detection"]["detection"]["sensitivity"] = "20"
+            else:
+                raise Exception("Invalid sensitivity, can be low, normal or high")
+
+        return self.performRequest(data)
+
     def setAutoTrackTarget(self, enabled):
         return self.performRequest(
             {
@@ -576,6 +597,10 @@ class Tapo:
                         {
                             "method": "getDetectionConfig",
                             "params": {"motion_detection": {"name": ["motion_det"]}},
+                        },
+                        {
+                            "method": "getPersonDetectionConfig",
+                            "params": {"people_detection": {"name": ["detection"]}},
                         },
                         {
                             "method": "getLensMaskConfig",
