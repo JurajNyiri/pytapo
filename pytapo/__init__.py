@@ -288,8 +288,9 @@ class Tapo:
         )["msg_alarm"]["chn1_msg_alarm_info"]
 
     def getLED(self):
-        data = {"method": "get", "led": {"name": ["config"]}}
-        return self.performRequest(data)["led"]["config"]
+        return self.executeFunction("getLedStatus", {"led": {"name": ["config"]}},)[
+            "led"
+        ]["config"]
 
     def getAutoTrackTarget(self):
         data = {"method": "get", "target_track": {"name": ["target_track_info"]}}
