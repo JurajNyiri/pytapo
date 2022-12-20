@@ -96,6 +96,26 @@ class Tapo:
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
+    def executeFunction(self, method, params):
+        data = self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {"requests": [{"method": method, "params": params}]},
+            }
+        )["result"]["responses"][0]
+
+        if "result" in data:
+            return data["result"]
+        else:
+            raise Exception(
+                "Error: {}, Response: {}".format(
+                    data["err_msg"]
+                    if "err_msg" in data
+                    else self.getErrorMessage(data["error_code"]),
+                    json.dumps(data),
+                )
+            )
+
     def performRequest(self, requestData, loginRetry=False):
         self.ensureAuthenticated()
         url = self.getHostURL()
@@ -170,24 +190,10 @@ class Tapo:
 
     # returns empty response for child devices
     def getOsd(self):
-        return self.performRequest(
-            {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "getOsd",
-                            "params": {
-                                "OSD": {
-                                    "name": ["date", "week", "font"],
-                                    "table": ["label_info"],
-                                }
-                            },
-                        }
-                    ]
-                },
-            }
-        )["result"]["responses"][0]["result"]
+        return self.executeFunction(
+            "getOsd",
+            {"OSD": {"name": ["date", "week", "font"], "table": ["label_info"]}},
+        )
 
     def setOsd(
         self,
@@ -260,36 +266,16 @@ class Tapo:
         )
 
     def getPrivacyMode(self):
-        data = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [
-                    {
-                        "method": "getLensMaskConfig",
-                        "params": {"lens_mask": {"name": ["lens_mask_info"]}},
-                    }
-                ]
-            },
-        }
-        return self.performRequest(data)["result"]["responses"][0]["result"][
-            "lens_mask"
-        ]["lens_mask_info"]
+        data = self.executeFunction(
+            "getLensMaskConfig", {"lens_mask": {"name": ["lens_mask_info"]}},
+        )
+        return data["lens_mask"]["lens_mask_info"]
 
     def getMediaEncrypt(self):
-        data = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [
-                    {
-                        "method": "getMediaEncrypt",
-                        "params": {"cet": {"name": ["media_encrypt"]}},
-                    }
-                ]
-            },
-        }
-        return self.performRequest(data)["result"]["responses"][0]["result"]["cet"][
-            "media_encrypt"
-        ]
+        data = self.executeFunction(
+            "getMediaEncrypt", {"cet": {"name": ["media_encrypt"]}},
+        )
+        return data["cet"]["media_encrypt"]
 
     def getMotionDetection(self):
         data = {"method": "get", "motion_detection": {"name": ["motion_det"]}}
@@ -319,19 +305,9 @@ class Tapo:
         return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
 
     def getBasicInfo(self):
-        return self.performRequest(
-            {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "getDeviceInfo",
-                            "params": {"device_info": {"name": ["basic_info"]}},
-                        }
-                    ]
-                },
-            }
-        )["result"]["responses"][0]["result"]
+        return self.executeFunction(
+            "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
+        )
 
     def getTime(self):
         return self.performRequest(
@@ -505,9 +481,7 @@ class Tapo:
         return self.performRequest({"method": "do", "system": {"reboot": "null"}})
 
     def getPresets(self):
-        data = self.performRequest(
-            {"method": "getPresetConfig", "params": {"preset": {"name": ["preset"]}},}
-        )
+        data = self.executeFunction("getPresetConfig", {"preset": {"name": ["preset"]}})
         self.presets = {
             id: data["preset"]["preset"]["name"][key]
             for key, id in enumerate(data["preset"]["preset"]["id"])
