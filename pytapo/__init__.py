@@ -571,7 +571,9 @@ class Tapo:
     # Common
 
     def __getImageCommon(self, field: str) -> str:
-        data = self.performRequest({"method": "get", "image": {"name": "common"}})
+        data = self.executeFunction("getLdc", {"image": {"name": ["common"]}})
+        if "common" not in data["image"]:
+            raise Exception("__getImageCommon is not supported by this camera")
         fields = data["image"]["common"]
         if field not in fields:
             raise Exception("Field {} is not supported by this camera".format(field))
