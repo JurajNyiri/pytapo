@@ -371,6 +371,7 @@ class Tapo:
             {"cet": {"media_encrypt": {"enabled": "on" if enabled else "off"}}},
         )
 
+    # todo child
     def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True):
         alarm_mode = []
 
@@ -396,11 +397,13 @@ class Tapo:
 
         return self.performRequest(data)
 
+    # todo child
     def moveMotor(self, x, y):
         return self.performRequest(
             {"method": "do", "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}
         )
 
+    # todo child
     def moveMotorStep(self, angle):
         if not (0 <= angle < 360):
             raise Exception("Angle must be in a range 0 <= angle < 360")
@@ -421,20 +424,19 @@ class Tapo:
     def moveMotorHorizontal(self):
         return self.moveMotorStep(270)
 
+    # todo child
     def calibrateMotor(self):
         return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
 
+    # todo child
     def format(self):
         return self.performRequest(
             {"method": "do", "harddisk_manage": {"format_hd": "1"}}
         )  # pragma: no cover
 
     def setLEDEnabled(self, enabled):
-        return self.performRequest(
-            {
-                "method": "set",
-                "led": {"config": {"enabled": "on" if enabled else "off"}},
-            }
+        return self.executeFunction(
+            "setLedStatus", {"led": {"config": {"enabled": "on" if enabled else "off"}}}
         )
 
     def getUserID(self):
