@@ -315,6 +315,11 @@ class Tapo:
             },
         )
 
+    def getRotationStatus(self):
+        return self.executeFunction(
+            "getRotationStatus", {"image": {"name": ["switch"]}},
+        )
+
     def getLED(self):
         return self.executeFunction("getLedStatus", {"led": {"name": ["config"]}},)[
             "led"
