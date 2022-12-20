@@ -466,6 +466,7 @@ class Tapo:
             raise Exception("Video playback is not supported by this camera")
         return result["playback"]["search_video_results"]
 
+    # does not work for child devices, function discovery needed
     def getCommonImage(self):
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
@@ -538,7 +539,7 @@ class Tapo:
     # Switches
 
     def __getImageSwitch(self, switch: str) -> str:
-        data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
+        data = self.executeFunction("getLdc", {"image": {"name": ["switch"]}})
         switches = data["image"]["switch"]
         if switch not in switches:
             raise Exception("Switch {} is not supported by this camera".format(switch))
