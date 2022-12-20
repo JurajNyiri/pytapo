@@ -283,8 +283,9 @@ class Tapo:
         )["motion_detection"]["motion_det"]
 
     def getAlarm(self):
-        data = {"method": "get", "msg_alarm": {"name": ["chn1_msg_alarm_info"]}}
-        return self.performRequest(data)["msg_alarm"]["chn1_msg_alarm_info"]
+        return self.executeFunction(
+            "getLastAlarmInfo", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+        )["msg_alarm"]["chn1_msg_alarm_info"]
 
     def getLED(self):
         data = {"method": "get", "led": {"name": ["config"]}}
