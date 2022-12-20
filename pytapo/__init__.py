@@ -222,6 +222,8 @@ class Tapo:
         weekX=0,
         weekY=0,
     ):
+        if self.childID:
+            raise Exception("setOsd not supported for child devices yet")
         data = {
             "method": "set",
             "OSD": {
@@ -364,11 +366,9 @@ class Tapo:
         )
 
     def setMediaEncrypt(self, enabled):
-        return self.performRequest(
-            {
-                "method": "set",
-                "cet": {"media_encrypt": {"enabled": "on" if enabled else "off"}},
-            }
+        return self.executeFunction(
+            "setMediaEncrypt",
+            {"cet": {"media_encrypt": {"enabled": "on" if enabled else "off"}}},
         )
 
     def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True):
