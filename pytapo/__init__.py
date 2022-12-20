@@ -338,8 +338,8 @@ class Tapo:
         )
 
     def getTime(self):
-        return self.performRequest(
-            {"method": "get", "system": {"name": ["clock_status"]}}
+        return self.executeFunction(
+            "getClockStatus", {"system": {"name": "clock_status"}}
         )
 
     def getMotorCapability(self):
