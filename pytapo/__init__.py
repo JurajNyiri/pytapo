@@ -97,12 +97,20 @@ class Tapo:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
     def executeFunction(self, method, params):
-        data = self.performRequest(
-            {
-                "method": "multipleRequest",
-                "params": {"requests": [{"method": method, "params": params}]},
-            }
-        )["result"]["responses"][0]
+        if method == "multipleRequest":
+            data = self.performRequest({"method": "multipleRequest", "params": params})[
+                "result"
+            ]["responses"]
+        else:
+            data = self.performRequest(
+                {
+                    "method": "multipleRequest",
+                    "params": {"requests": [{"method": method, "params": params}]},
+                }
+            )["result"]["responses"][0]
+
+        if type(data) == list:
+            return data
 
         if "result" in data:
             return data["result"]
@@ -287,6 +295,20 @@ class Tapo:
             "getLastAlarmInfo", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
         )["msg_alarm"]["chn1_msg_alarm_info"]
 
+    def getAlarmConfig(self):
+        return self.executeFunction(
+            "multipleRequest",
+            {
+                "requests": [
+                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
+                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
+                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                ]
+            },
+        )
+
     def getLED(self):
         return self.executeFunction("getLedStatus", {"led": {"name": ["config"]}},)[
             "led"
@@ -297,6 +319,7 @@ class Tapo:
             "getTargetTrackConfig", {"target_track": {"name": ["target_track_info"]}}
         )["target_track"]["target_track_info"]
 
+    # does not work for child devices, function discovery needed
     def getAudioSpec(self):
         return self.performRequest(
             {
@@ -305,6 +328,7 @@ class Tapo:
             }
         )
 
+    # does not work for child devices, function discovery needed
     def getVhttpd(self):
         return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
 
