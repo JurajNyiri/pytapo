@@ -278,8 +278,9 @@ class Tapo:
         return data["cet"]["media_encrypt"]
 
     def getMotionDetection(self):
-        data = {"method": "get", "motion_detection": {"name": ["motion_det"]}}
-        return self.performRequest(data)["motion_detection"]["motion_det"]
+        return self.executeFunction(
+            "getDetectionConfig", {"motion_detection": {"name": ["motion_det"]}},
+        )["motion_detection"]["motion_det"]
 
     def getAlarm(self):
         data = {"method": "get", "msg_alarm": {"name": ["chn1_msg_alarm_info"]}}
