@@ -358,13 +358,9 @@ class Tapo:
         return self.performRequest({"method": "get", "motor": {"name": ["capability"]}})
 
     def setPrivacyMode(self, enabled):
-        return self.performRequest(
-            {
-                "method": "set",
-                "lens_mask": {
-                    "lens_mask_info": {"enabled": "on" if enabled else "off"}
-                },
-            }
+        return self.executeFunction(
+            "setLensMaskConfig",
+            {"lens_mask": {"lens_mask_info": {"enabled": "on" if enabled else "off"}}},
         )
 
     def setMediaEncrypt(self, enabled):
