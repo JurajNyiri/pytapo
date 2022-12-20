@@ -342,6 +342,7 @@ class Tapo:
             "getClockStatus", {"system": {"name": "clock_status"}}
         )
 
+    # does not work for child devices, function discovery needed
     def getMotorCapability(self):
         return self.performRequest({"method": "get", "motor": {"name": ["capability"]}})
 
@@ -447,29 +448,20 @@ class Tapo:
         return self.userID
 
     def getRecordings(self, date):
-        result = self.performRequest(
+        result = self.executeFunction(
+            "searchVideoOfDay",
             {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "searchVideoOfDay",
-                            "params": {
-                                "playback": {
-                                    "search_video_utility": {
-                                        "channel": 0,
-                                        "date": date,
-                                        "end_index": 99,
-                                        "id": self.getUserID(),
-                                        "start_index": 0,
-                                    }
-                                }
-                            },
-                        }
-                    ]
-                },
-            }
-        )["result"]["responses"][0]["result"]
+                "playback": {
+                    "search_video_utility": {
+                        "channel": 0,
+                        "date": date,
+                        "end_index": 99,
+                        "id": self.getUserID(),
+                        "start_index": 0,
+                    }
+                }
+            },
+        )
         if "playback" not in result:
             raise Exception("Video playback is not supported by this camera")
         return result["playback"]["search_video_results"]
