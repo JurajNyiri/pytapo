@@ -198,10 +198,16 @@ class Tapo:
 
     # returns empty response for child devices
     def getOsd(self):
-        return self.executeFunction(
-            "getOsd",
-            {"OSD": {"name": ["date", "week", "font"], "table": ["label_info"]}},
-        )
+        # no, asking for all does not work...
+        if self.childID:
+            return self.executeFunction(
+                "getOsd", {"OSD": {"name": ["logo", "date", "label"]}},
+            )
+        else:
+            return self.executeFunction(
+                "getOsd",
+                {"OSD": {"name": ["date", "week", "font"], "table": ["label_info"]}},
+            )
 
     def setOsd(
         self,
@@ -710,8 +716,12 @@ class Tapo:
             }
         )
         returnData = {}
+        # todo finish on child
         for result in results["result"]["responses"]:
-            if result["error_code"] == 0:
+            print(result)
+            if (
+                "error_code" in result and result["error_code"] == 0
+            ) and "result" in result:
                 returnData[result["method"]] = result["result"]
             else:
                 returnData[result["method"]] = False
