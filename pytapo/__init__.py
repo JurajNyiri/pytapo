@@ -293,8 +293,9 @@ class Tapo:
         ]["config"]
 
     def getAutoTrackTarget(self):
-        data = {"method": "get", "target_track": {"name": ["target_track_info"]}}
-        return self.performRequest(data)["target_track"]["target_track_info"]
+        return self.executeFunction(
+            "getTargetTrackConfig", {"target_track": {"name": ["target_track_info"]}}
+        )["target_track"]["target_track_info"]
 
     def getAudioSpec(self):
         return self.performRequest(
