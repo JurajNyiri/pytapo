@@ -622,8 +622,8 @@ class Tapo:
             return str(errorCode)
 
     def getFirmwareUpdateStatus(self):
-        return self.performRequest(
-            {"method": "get", "cloud_config": {"name": "upgrade_status"}}
+        return self.executeFunction(
+            "getFirmwareUpdateStatus", {"cloud_config": {"name": "upgrade_status"}}
         )
 
     def isUpdateAvailable(self):
