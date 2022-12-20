@@ -664,67 +664,84 @@ class Tapo:
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
     def getMost(self):
-        results = self.performRequest(
-            {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "getDeviceInfo",
-                            "params": {"device_info": {"name": ["basic_info"]}},
-                        },
-                        {
-                            "method": "getDetectionConfig",
-                            "params": {"motion_detection": {"name": ["motion_det"]}},
-                        },
-                        {
-                            "method": "getLensMaskConfig",
-                            "params": {"lens_mask": {"name": ["lens_mask_info"]}},
-                        },
-                        {
-                            "method": "getLdc",
-                            "params": {"image": {"name": ["switch", "common"]}},
-                        },
-                        {
-                            "method": "getLastAlarmInfo",
-                            "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
-                        },
-                        {
-                            "method": "getLedStatus",
-                            "params": {"led": {"name": ["config"]}},
-                        },
-                        {
-                            "method": "getTargetTrackConfig",
-                            "params": {"target_track": {"name": ["target_track_info"]}},
-                        },
-                        {
-                            "method": "getPresetConfig",
-                            "params": {"preset": {"name": ["preset"]}},
-                        },
-                        {
-                            "method": "getFirmwareUpdateStatus",
-                            "params": {"cloud_config": {"name": "upgrade_status"}},
-                        },
-                        {
-                            "method": "getMediaEncrypt",
-                            "params": {"cet": {"name": ["media_encrypt"]}},
-                        },
-                        {
-                            "method": "getConnectionType",
-                            "params": {"network": {"get_connection_type": []}},
-                        },
-                    ]
-                },
-            }
-        )
+        requestData = {
+            "method": "multipleRequest",
+            "params": {
+                "requests": [
+                    {
+                        "method": "getDeviceInfo",
+                        "params": {"device_info": {"name": ["basic_info"]}},
+                    },
+                    {
+                        "method": "getDetectionConfig",
+                        "params": {"motion_detection": {"name": ["motion_det"]}},
+                    },
+                    {
+                        "method": "getLensMaskConfig",
+                        "params": {"lens_mask": {"name": ["lens_mask_info"]}},
+                    },
+                    {
+                        "method": "getLdc",
+                        "params": {"image": {"name": ["switch", "common"]}},
+                    },
+                    {
+                        "method": "getLastAlarmInfo",
+                        "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                    },
+                    {
+                        "method": "getLedStatus",
+                        "params": {"led": {"name": ["config"]}},
+                    },
+                    {
+                        "method": "getTargetTrackConfig",
+                        "params": {"target_track": {"name": ["target_track_info"]}},
+                    },
+                    {
+                        "method": "getPresetConfig",
+                        "params": {"preset": {"name": ["preset"]}},
+                    },
+                    {
+                        "method": "getFirmwareUpdateStatus",
+                        "params": {"cloud_config": {"name": "upgrade_status"}},
+                    },
+                    {
+                        "method": "getMediaEncrypt",
+                        "params": {"cet": {"name": ["media_encrypt"]}},
+                    },
+                    {
+                        "method": "getConnectionType",
+                        "params": {"network": {"get_connection_type": []}},
+                    },
+                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
+                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
+                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                    {
+                        "method": "getLightFrequencyInfo",
+                        "params": {"image": {"name": "common"}},
+                    },
+                    {
+                        "method": "getLightFrequencyCapability",
+                        "params": {"image": {"name": "common"}},
+                    },
+                ]
+            },
+        }
+        results = self.performRequest(requestData)
+
         returnData = {}
         # todo finish on child
+        i = 0
         for result in results["result"]["responses"]:
-            print(result)
             if (
                 "error_code" in result and result["error_code"] == 0
             ) and "result" in result:
                 returnData[result["method"]] = result["result"]
             else:
-                returnData[result["method"]] = False
+                if "method" in result:
+                    returnData[result["method"]] = False
+                else:  # some cameras are not returning method for error messages
+                    returnData[requestData["params"]["requests"][i]["method"]] = False
+            i += 1
         return returnData
