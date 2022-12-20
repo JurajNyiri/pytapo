@@ -16,13 +16,17 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Tapo:
-    def __init__(self, host, user, password, cloudPassword=""):
+    def __init__(
+        self, host, user, password, cloudPassword="", superSecretKey="", childID=None
+    ):
         self.host = host
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
+        self.superSecretKey = superSecretKey
         self.stok = False
         self.userID = False
+        self.childID = childID
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -87,19 +91,37 @@ class Tapo:
             )
         try:
             data = res.json()
-            return data["error_code"] == 0
+            if "error_code" not in data or data["error_code"] == 0:
+                return True
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
     def performRequest(self, requestData, loginRetry=False):
         self.ensureAuthenticated()
         url = self.getHostURL()
-        res = requests.post(
-            url, data=json.dumps(requestData), headers=self.headers, verify=False
-        )
-        if self.responseIsOK(res):
-            return res.json()
+        if self.childID:
+            fullRequest = {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "controlChild",
+                            "params": {
+                                "childControl": {
+                                    "device_id": self.childID,
+                                    "request_data": requestData,
+                                }
+                            },
+                        }
+                    ]
+                },
+            }
         else:
+            fullRequest = requestData
+        res = requests.post(
+            url, data=json.dumps(fullRequest), headers=self.headers, verify=False
+        )
+        if not self.responseIsOK(res):
             data = json.loads(res.text)
             #  -40401: Invalid Stok
             if (
@@ -117,16 +139,55 @@ class Tapo:
                     )
                 )
 
+        responseJSON = res.json()
+        # strip away child device stuff to ensure consistent response format for HUB cameras
+        if self.childID:
+            responses = []
+            for response in responseJSON["result"]["responses"]:
+                if "method" in response and response["method"] == "controlChild":
+                    if "response_data" in response["result"]:
+                        responses.append(response["result"]["response_data"])
+                    else:
+                        responses.append(response["result"])
+                else:
+                    responses.append(response["result"])  # not sure if needed
+            responseJSON["result"]["responses"] = responses
+            return responseJSON["result"]["responses"][0]
+        elif self.responseIsOK(res):
+            return responseJSON
+
     def getMediaSession(self):
         return HttpMediaSession(self.host, self.cloudPassword)  # pragma: no cover
 
+    def getChildDevices(self):
+        childDevices = self.performRequest(
+            {
+                "method": "getChildDeviceList",
+                "params": {"childControl": {"start_index": 0}},
+            }
+        )
+        return childDevices["result"]["child_device_list"]
+
+    # returns empty response for child devices
     def getOsd(self):
         return self.performRequest(
             {
-                "method": "get",
-                "OSD": {"name": ["date", "week", "font"], "table": ["label_info"]},
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "getOsd",
+                            "params": {
+                                "OSD": {
+                                    "name": ["date", "week", "font"],
+                                    "table": ["label_info"],
+                                }
+                            },
+                        }
+                    ]
+                },
             }
-        )
+        )["result"]["responses"][0]["result"]
 
     def setOsd(
         self,
@@ -192,14 +253,43 @@ class Tapo:
 
         return self.performRequest(data)
 
+    # does not work for child devices, function discovery needed
     def getModuleSpec(self):
         return self.performRequest(
             {"method": "get", "function": {"name": ["module_spec"]}}
         )
 
     def getPrivacyMode(self):
-        data = {"method": "get", "lens_mask": {"name": ["lens_mask_info"]}}
-        return self.performRequest(data)["lens_mask"]["lens_mask_info"]
+        data = {
+            "method": "multipleRequest",
+            "params": {
+                "requests": [
+                    {
+                        "method": "getLensMaskConfig",
+                        "params": {"lens_mask": {"name": ["lens_mask_info"]}},
+                    }
+                ]
+            },
+        }
+        return self.performRequest(data)["result"]["responses"][0]["result"][
+            "lens_mask"
+        ]["lens_mask_info"]
+
+    def getMediaEncrypt(self):
+        data = {
+            "method": "multipleRequest",
+            "params": {
+                "requests": [
+                    {
+                        "method": "getMediaEncrypt",
+                        "params": {"cet": {"name": ["media_encrypt"]}},
+                    }
+                ]
+            },
+        }
+        return self.performRequest(data)["result"]["responses"][0]["result"]["cet"][
+            "media_encrypt"
+        ]
 
     def getMotionDetection(self):
         data = {"method": "get", "motion_detection": {"name": ["motion_det"]}}
@@ -230,8 +320,18 @@ class Tapo:
 
     def getBasicInfo(self):
         return self.performRequest(
-            {"method": "get", "device_info": {"name": ["basic_info"]}}
-        )
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "getDeviceInfo",
+                            "params": {"device_info": {"name": ["basic_info"]}},
+                        }
+                    ]
+                },
+            }
+        )["result"]["responses"][0]["result"]
 
     def getTime(self):
         return self.performRequest(
@@ -248,6 +348,14 @@ class Tapo:
                 "lens_mask": {
                     "lens_mask_info": {"enabled": "on" if enabled else "off"}
                 },
+            }
+        )
+
+    def setMediaEncrypt(self, enabled):
+        return self.performRequest(
+            {
+                "method": "set",
+                "cet": {"media_encrypt": {"enabled": "on" if enabled else "off"}},
             }
         )
 
@@ -397,7 +505,9 @@ class Tapo:
         return self.performRequest({"method": "do", "system": {"reboot": "null"}})
 
     def getPresets(self):
-        data = self.performRequest({"method": "get", "preset": {"name": ["preset"]}})
+        data = self.performRequest(
+            {"method": "getPresetConfig", "params": {"preset": {"name": ["preset"]}},}
+        )
         self.presets = {
             id: data["preset"]["preset"]["name"][key]
             for key, id in enumerate(data["preset"]["preset"]["id"])
@@ -589,6 +699,14 @@ class Tapo:
                         {
                             "method": "getFirmwareUpdateStatus",
                             "params": {"cloud_config": {"name": "upgrade_status"}},
+                        },
+                        {
+                            "method": "getMediaEncrypt",
+                            "params": {"cet": {"name": ["media_encrypt"]}},
+                        },
+                        {
+                            "method": "getConnectionType",
+                            "params": {"network": {"get_connection_type": []}},
                         },
                     ]
                 },
