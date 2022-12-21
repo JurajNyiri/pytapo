@@ -620,14 +620,15 @@ class Tapo:
         return fields[field]
 
     def __setImageCommon(self, field: str, value: str):
-        return self.performRequest(
-            {"method": "set", "image": {"common": {field: value}},}
+        return self.executeFunction(
+            "setLightFrequencyInfo", {"image": {"common": {field: value}}}
         )
 
     def getLightFrequencyMode(self) -> str:
         return self.__getImageCommon("light_freq_mode")
 
     def setLightFrequencyMode(self, mode):
+        # todo: auto does not work on some child cameras?
         allowed_modes = ["auto", "50", "60"]
         if mode not in allowed_modes:
             raise Exception(
