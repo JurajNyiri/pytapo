@@ -645,11 +645,13 @@ class Tapo:
             raise Exception("Day night mode must be one of {}".format(allowed_modes))
         return self.__setImageCommon("inf_type", mode)
 
+    # does not work for child devices, function discovery needed
     def startManualAlarm(self):
         return self.performRequest(
             {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "start"}},}
         )
 
+    # does not work for child devices, function discovery needed
     def stopManualAlarm(self):
         return self.performRequest(
             {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},}
