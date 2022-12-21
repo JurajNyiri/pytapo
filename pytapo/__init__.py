@@ -572,8 +572,8 @@ class Tapo:
     def setPreset(self, presetID):
         if not str(presetID) in self.presets:
             raise Exception("Preset {} is not set in the app".format(str(presetID)))
-        return self.performRequest(
-            {"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}}
+        return self.executeFunction(
+            "motorMoveToPreset", {"preset": {"goto_preset": {"id": str(presetID)}}}
         )
 
     # Switches
