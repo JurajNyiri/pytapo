@@ -600,7 +600,15 @@ class Tapo:
             return self.__getImageSwitch("flip_type") == "center"
 
     def setImageFlipVertical(self, enable):
-        return self.__setImageSwitch("flip_type", "center" if enable else "off")
+        if self.childID:
+            return self.setRotationStatus("center" if enable else "off")
+        else:
+            return self.__setImageSwitch("flip_type", "center" if enable else "off")
+
+    def setRotationStatus(self, flip_type):
+        return self.executeFunction(
+            "setRotationStatus", {"image": {"switch": {"flip_type": flip_type}}},
+        )
 
     def getForceWhitelampState(self) -> bool:
         return self.__getImageSwitch("force_wtl_state") == "on"
