@@ -506,7 +506,6 @@ class Tapo:
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
-    # todo: enabled does not work on child devices
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
             "motion_detection": {"motion_det": {"enabled": "on" if enabled else "off"}},
@@ -553,11 +552,9 @@ class Tapo:
         return self.presets
 
     def savePreset(self, name):
-        self.performRequest(
-            {
-                "method": "do",
-                "preset": {"set_preset": {"name": str(name), "save_ptz": "1"}},
-            }
+        self.executeFunction(
+            "addMotorPostion",  # yes, there is a typo in function name
+            {"preset": {"set_preset": {"name": str(name), "save_ptz": "1"}}},
         )
         self.getPresets()
         return True
