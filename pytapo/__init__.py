@@ -454,10 +454,9 @@ class Tapo:
     def calibrateMotor(self):
         return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
 
-    # todo child
     def format(self):
-        return self.performRequest(
-            {"method": "do", "harddisk_manage": {"format_hd": "1"}}
+        return self.executeFunction(
+            "formatSdCard", {"harddisk_manage": {"format_hd": "1"}}
         )  # pragma: no cover
 
     def setLEDEnabled(self, enabled):
@@ -759,6 +758,10 @@ class Tapo:
                     {
                         "method": "getLightFrequencyCapability",
                         "params": {"image": {"name": "common"}},
+                    },
+                    {
+                        "method": "getChildDeviceList",
+                        "params": {"childControl": {"start_index": 0}},
                     },
                 ]
             },
