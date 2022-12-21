@@ -586,9 +586,7 @@ class Tapo:
         return switches[switch]
 
     def __setImageSwitch(self, switch: str, value: str):
-        return self.performRequest(
-            {"method": "set", "image": {"switch": {switch: value}},}
-        )
+        return self.executeFunction("setLdc", {"image": {"switch": {switch: value}}})
 
     def getLensDistortionCorrection(self):
         return self.__getImageSwitch("ldc") == "on"
