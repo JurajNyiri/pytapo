@@ -532,13 +532,13 @@ class Tapo:
         return self.executeFunction("setDetectionConfig", data)
 
     def setAutoTrackTarget(self, enabled):
-        return self.performRequest(
+        return self.executeFunction(
+            "setTargetTrackConfig",
             {
-                "method": "set",
                 "target_track": {
                     "target_track_info": {"enabled": "on" if enabled else "off"}
-                },
-            }
+                }
+            },
         )
 
     def reboot(self):
