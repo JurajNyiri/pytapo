@@ -520,7 +520,15 @@ class Tapo:
                 data["motion_detection"]["motion_det"]["digital_sensitivity"] = "20"
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
-
+        # child devices always need digital_sensitivity setting
+        if (
+            self.childID
+            and "digital_sensitivity" not in data["motion_detection"]["motion_det"]
+        ):
+            currentData = self.getMotionDetection()
+            data["motion_detection"]["motion_det"]["digital_sensitivity"] = currentData[
+                "digital_sensitivity"
+            ]
         return self.executeFunction("setDetectionConfig", data)
 
     def setAutoTrackTarget(self, enabled):
