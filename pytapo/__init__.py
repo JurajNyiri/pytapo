@@ -542,7 +542,7 @@ class Tapo:
         )
 
     def reboot(self):
-        return self.performRequest({"method": "do", "system": {"reboot": "null"}})
+        return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
 
     def getPresets(self):
         data = self.executeFunction("getPresetConfig", {"preset": {"name": ["preset"]}})
