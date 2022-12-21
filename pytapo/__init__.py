@@ -506,9 +506,9 @@ class Tapo:
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
+    # todo: enabled does not work on child devices
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
-            "method": "set",
             "motion_detection": {"motion_det": {"enabled": "on" if enabled else "off"}},
         }
         if sensitivity:
@@ -521,7 +521,7 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
-        return self.performRequest(data)
+        return self.executeFunction("setDetectionConfig", data)
 
     def setAutoTrackTarget(self, enabled):
         return self.performRequest(
