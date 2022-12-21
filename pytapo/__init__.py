@@ -594,7 +594,10 @@ class Tapo:
         return self.__setImageSwitch("ldc", "on" if enable else "off")
 
     def getImageFlipVertical(self):
-        return self.__getImageSwitch("flip_type") == "center"
+        if self.childID:
+            return self.getRotationStatus()["image"]["switch"]["flip_type"] == "center"
+        else:
+            return self.__getImageSwitch("flip_type") == "center"
 
     def setImageFlipVertical(self, enable):
         return self.__setImageSwitch("flip_type", "center" if enable else "off")
@@ -762,6 +765,10 @@ class Tapo:
                     {
                         "method": "getChildDeviceList",
                         "params": {"childControl": {"start_index": 0}},
+                    },
+                    {
+                        "method": "getRotationStatus",
+                        "params": {"image": {"name": ["switch"]}},
                     },
                 ]
             },
