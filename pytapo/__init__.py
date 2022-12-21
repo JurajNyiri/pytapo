@@ -299,9 +299,24 @@ class Tapo:
         )["motion_detection"]["motion_det"]
 
     def getAlarm(self):
-        return self.executeFunction(
-            "getLastAlarmInfo", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
-        )["msg_alarm"]["chn1_msg_alarm_info"]
+        # ensure reverse compatibility, simulate the same response for children devices
+        if self.childID:
+            data = self.getAlarmConfig()
+
+            # replace "siren" with "sound", some cameras call it siren, some sound
+            for i in range(len(data[0]["result"]["alarm_mode"])):
+                if data[0]["result"]["alarm_mode"][i] == "siren":
+                    data[0]["result"]["alarm_mode"][i] = "sound"
+            return {
+                "alarm_type": "0",
+                "light_type": "0",
+                "enabled": data[0]["result"]["enabled"],
+                "alarm_mode": data[0]["result"]["alarm_mode"],
+            }
+        else:
+            return self.executeFunction(
+                "getLastAlarmInfo", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+            )["msg_alarm"]["chn1_msg_alarm_info"]
 
     def getAlarmConfig(self):
         return self.executeFunction(
@@ -379,23 +394,34 @@ class Tapo:
             raise Exception("You need to use at least sound or light for alarm")
 
         if soundEnabled:
-            alarm_mode.append("sound")
+            if self.childID:
+                alarm_mode.append("siren")
+            else:
+                alarm_mode.append("sound")
         if lightEnabled:
             alarm_mode.append("light")
 
-        data = {
-            "method": "set",
-            "msg_alarm": {
-                "chn1_msg_alarm_info": {
-                    "alarm_type": "0",
+        if self.childID:
+            data = {
+                "msg_alarm": {
                     "enabled": "on" if enabled else "off",
-                    "light_type": "0",
                     "alarm_mode": alarm_mode,
                 }
-            },
-        }
-
-        return self.performRequest(data)
+            }
+            return self.executeFunction("setAlarmConfig", data)
+        else:
+            data = {
+                "method": "set",
+                "msg_alarm": {
+                    "chn1_msg_alarm_info": {
+                        "alarm_type": "0",
+                        "enabled": "on" if enabled else "off",
+                        "light_type": "0",
+                        "alarm_mode": alarm_mode,
+                    }
+                },
+            }
+            return self.performRequest(data)
 
     # todo child
     def moveMotor(self, x, y):
