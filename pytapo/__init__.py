@@ -9,7 +9,7 @@ import requests
 import urllib3
 from warnings import warn
 
-from .const import ERROR_CODES
+from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -124,7 +124,7 @@ class Tapo:
                 )
             )
 
-    def performRequest(self, requestData, loginRetry=False):
+    def performRequest(self, requestData, loginRetryCount=0):
         self.ensureAuthenticated()
         url = self.getHostURL()
         if self.childID:
@@ -156,10 +156,10 @@ class Tapo:
                 data
                 and "error_code" in data
                 and data["error_code"] == -40401
-                and not loginRetry
+                and loginRetryCount < MAX_LOGIN_RETRIES
             ):
                 self.refreshStok()
-                return self.performRequest(requestData, True)
+                return self.performRequest(requestData, loginRetryCount + 1)
             else:
                 raise Exception(
                     "Error: {}, Response: {}".format(
@@ -593,6 +593,45 @@ class Tapo:
     def setLensDistortionCorrection(self, enable):
         return self.__setImageSwitch("ldc", "on" if enable else "off")
 
+    def getDayNightMode(self) -> str:
+        if self.childID:
+            rawValue = self.getNightVisionModeConfig()["image"]["switch"][
+                "night_vision_mode"
+            ]
+            if rawValue == "inf_night_vision":
+                return "off"
+            elif rawValue == "wtl_night_vision":
+                return "on"
+            elif rawValue == "md_night_vision":
+                return "auto"
+        else:
+            return self.__getImageCommon("inf_type")
+
+    def setDayNightMode(self, mode):
+        allowed_modes = ["off", "on", "auto"]
+        if mode not in allowed_modes:
+            raise Exception("Day night mode must be one of {}".format(allowed_modes))
+        if self.childID:
+            if mode == "off":
+                return self.setNightVisionModeConfig("inf_night_vision")
+            elif mode == "on":
+                return self.setNightVisionModeConfig("wtl_night_vision")
+            elif mode == "auto":
+                return self.setNightVisionModeConfig("md_night_vision")
+        else:
+            return self.__setImageCommon("inf_type", mode)
+
+    def getNightVisionModeConfig(self):
+        return self.executeFunction(
+            "getNightVisionModeConfig", {"image": {"name": "switch"}}
+        )
+
+    def setNightVisionModeConfig(self, mode):
+        return self.executeFunction(
+            "setNightVisionModeConfig",
+            {"image": {"switch": {"night_vision_mode": mode}}},
+        )
+
     def getImageFlipVertical(self):
         if self.childID:
             return self.getRotationStatus()["image"]["switch"]["flip_type"] == "center"
@@ -645,15 +684,6 @@ class Tapo:
                 "Light frequency mode must be one of {}".format(allowed_modes)
             )
         return self.__setImageCommon("light_freq_mode", mode)
-
-    def getDayNightMode(self) -> str:
-        return self.__getImageCommon("inf_type")
-
-    def setDayNightMode(self, mode):
-        allowed_modes = ["off", "on", "auto"]
-        if mode not in allowed_modes:
-            raise Exception("Day night mode must be one of {}".format(allowed_modes))
-        return self.__setImageCommon("inf_type", mode)
 
     # does not work for child devices, function discovery needed
     def startManualAlarm(self):
@@ -777,6 +807,10 @@ class Tapo:
                     {
                         "method": "getRotationStatus",
                         "params": {"image": {"name": ["switch"]}},
+                    },
+                    {
+                        "method": "getNightVisionModeConfig",
+                        "params": {"image": {"name": "switch"}},
                     },
                 ]
             },
