@@ -599,9 +599,9 @@ class Tapo:
                 "night_vision_mode"
             ]
             if rawValue == "inf_night_vision":
-                return "off"
-            elif rawValue == "wtl_night_vision":
                 return "on"
+            elif rawValue == "wtl_night_vision":
+                return "off"
             elif rawValue == "md_night_vision":
                 return "auto"
         else:
@@ -612,9 +612,9 @@ class Tapo:
         if mode not in allowed_modes:
             raise Exception("Day night mode must be one of {}".format(allowed_modes))
         if self.childID:
-            if mode == "off":
+            if mode == "on":
                 return self.setNightVisionModeConfig("inf_night_vision")
-            elif mode == "on":
+            elif mode == "off":
                 return self.setNightVisionModeConfig("wtl_night_vision")
             elif mode == "auto":
                 return self.setNightVisionModeConfig("md_night_vision")
