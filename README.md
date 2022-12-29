@@ -24,6 +24,31 @@ tapo = Tapo(host, user, password)
 print(tapo.getBasicInfo())
 ```
 
+## Authentication
+
+Depending on your camera model and firmware version, the authentication method varies.
+
+Normally you should be able to authenticate using the "camera account" created via the Tapo App (Settings > Advanced settings > Camera account).
+
+In case of a similar stack trace:
+
+```
+Traceback (most recent call last):
+  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 41, in __init__
+    self.basicInfo = self.getBasicInfo()
+  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 232, in getBasicInfo
+    return self.performRequest(
+  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 95, in performRequest
+    self.ensureAuthenticated()
+  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 61, in ensureAuthenticated
+    return self.refreshStok()
+  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 80, in refreshStok
+    raise Exception("Invalid authentication data")
+Exception: Invalid authentication data
+```
+
+Attempt to authenticate using `admin` as `user` and your TP-Link cloud account password as `password`.
+
 ## Contributions:
 
 Contributions to pytapo are welcomed.
