@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pytapo",
-    version="2.5",
+    version="2.8.3",
     author="Juraj Nyíri",
     author_email="juraj.nyiri@gmail.com",
     description="Python library for communication with Tapo Cameras",
