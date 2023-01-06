@@ -74,6 +74,16 @@ class Tapo:
         res = requests.post(
             url, data=json.dumps(data), headers=self.headers, verify=False
         )
+        if res.status_code == 401:
+            try:
+                data = res.json()
+                if data["result"]["data"]["code"] == -40411:
+                    raise Exception("Invalid authentication data")
+            except Exception as e:
+                if str(e) == "Invalid authentication data":
+                    raise e
+                else:
+                    pass
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
             return self.stok
