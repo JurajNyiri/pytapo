@@ -306,10 +306,6 @@ class Tapo:
         )
         return data["cet"]["media_encrypt"]
 
-    def getMediaEncrypt(self):
-        data = {"method": "get", "cet": {"name": ["media_encrypt"]}}
-        return self.performRequest(data)["cet"]["media_encrypt"]
-
     def getMotionDetection(self):
         return self.executeFunction(
             "getDetectionConfig", {"motion_detection": {"name": ["motion_det"]}},
