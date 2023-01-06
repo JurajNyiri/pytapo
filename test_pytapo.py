@@ -334,6 +334,15 @@ def test_getMotionDetection():
     assert "digital_sensitivity" in result
 
 
+def test_getPersonDetection():
+    tapo = Tapo(host, user, password)
+    result = tapo.getPersonDetection()
+    assert result[".name"] == "detection"
+    assert result[".type"] == "on_off"
+    assert "enabled" in result
+    assert "sensitivity" in result
+
+
 def test_getAlarm():
     tapo = Tapo(host, user, password)
     result = tapo.getAlarm()
@@ -620,6 +629,44 @@ def test_setMotionDetection():
     result = tapo.getMotionDetection()
     assert result["enabled"] == origMotionDetection["enabled"]
     assert result["sensitivity"] == origMotionDetection["sensitivity"]
+
+
+def test_setPersonDetection():
+    tapo = Tapo(host, user, password)
+    origPersonDetection = tapo.getPersonDetection()
+    origPersonDetectionSensitivity = origPersonDetection["sensitivity"]
+    if origPersonDetectionSensitivity == "medium":
+        origPersonDetectionSensitivity = "normal"
+
+    tapo.setPersonDetection(False)
+    result = tapo.getPersonDetection()
+    assert result["enabled"] == "off"
+    tapo.setPersonDetection(True)
+    result = tapo.getPersonDetection()
+    assert result["enabled"] == "on"
+    tapo.setPersonDetection(False)
+    result = tapo.getPersonDetection()
+    assert result["enabled"] == "off"
+    tapo.setPersonDetection(False, "low")
+    result = tapo.getPersonDetection()
+    assert result["sensitivity"] == "low"
+    tapo.setPersonDetection(False, "normal")
+    result = tapo.getPersonDetection()
+    assert result["sensitivity"] == "medium"
+    tapo.setPersonDetection(False, "high")
+    result = tapo.getPersonDetection()
+    assert result["sensitivity"] == "high"
+
+    with pytest.raises(Exception) as err:
+        tapo.setPersonDetection(False, "unsupported")
+    assert "Invalid sensitivity, can be low, normal or high" in str(err.value)
+
+    tapo.setPersonDetection(
+        origPersonDetection["enabled"] == "on", origPersonDetectionSensitivity
+    )
+    result = tapo.getPersonDetection()
+    assert result["enabled"] == origPersonDetection["enabled"]
+    assert result["sensitivity"] == origPersonDetection["sensitivity"]
 
 
 def test_setAutoTrackTarget():

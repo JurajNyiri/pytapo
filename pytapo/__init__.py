@@ -9,20 +9,24 @@ import requests
 import urllib3
 from warnings import warn
 
-from .const import ERROR_CODES
+from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Tapo:
-    def __init__(self, host, user, password, cloudPassword=""):
+    def __init__(
+        self, host, user, password, cloudPassword="", superSecretKey="", childID=None
+    ):
         self.host = host
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
+        self.superSecretKey = superSecretKey
         self.stok = False
         self.userID = False
+        self.childID = childID
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -84,6 +88,7 @@ class Tapo:
                     raise e
                 else:
                     pass
+
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
             return self.stok
@@ -97,29 +102,75 @@ class Tapo:
             )
         try:
             data = res.json()
-            return data["error_code"] == 0
+            if "error_code" not in data or data["error_code"] == 0:
+                return True
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
-    def performRequest(self, requestData, loginRetry=False):
+    def executeFunction(self, method, params):
+        if method == "multipleRequest":
+            data = self.performRequest({"method": "multipleRequest", "params": params})[
+                "result"
+            ]["responses"]
+        else:
+            data = self.performRequest(
+                {
+                    "method": "multipleRequest",
+                    "params": {"requests": [{"method": method, "params": params}]},
+                }
+            )["result"]["responses"][0]
+
+        if type(data) == list:
+            return data
+
+        if "result" in data:
+            return data["result"]
+        else:
+            raise Exception(
+                "Error: {}, Response: {}".format(
+                    data["err_msg"]
+                    if "err_msg" in data
+                    else self.getErrorMessage(data["error_code"]),
+                    json.dumps(data),
+                )
+            )
+
+    def performRequest(self, requestData, loginRetryCount=0):
         self.ensureAuthenticated()
         url = self.getHostURL()
-        res = requests.post(
-            url, data=json.dumps(requestData), headers=self.headers, verify=False
-        )
-        if self.responseIsOK(res):
-            return res.json()
+        if self.childID:
+            fullRequest = {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "controlChild",
+                            "params": {
+                                "childControl": {
+                                    "device_id": self.childID,
+                                    "request_data": requestData,
+                                }
+                            },
+                        }
+                    ]
+                },
+            }
         else:
+            fullRequest = requestData
+        res = requests.post(
+            url, data=json.dumps(fullRequest), headers=self.headers, verify=False
+        )
+        if not self.responseIsOK(res):
             data = json.loads(res.text)
             #  -40401: Invalid Stok
             if (
                 data
                 and "error_code" in data
                 and data["error_code"] == -40401
-                and not loginRetry
+                and loginRetryCount < MAX_LOGIN_RETRIES
             ):
                 self.refreshStok()
-                return self.performRequest(requestData, True)
+                return self.performRequest(requestData, loginRetryCount + 1)
             else:
                 raise Exception(
                     "Error: {}, Response: {}".format(
@@ -127,16 +178,49 @@ class Tapo:
                     )
                 )
 
-    def getMediaSession(self):
-        return HttpMediaSession(self.host, self.cloudPassword)  # pragma: no cover
+        responseJSON = res.json()
+        # strip away child device stuff to ensure consistent response format for HUB cameras
+        if self.childID:
+            responses = []
+            for response in responseJSON["result"]["responses"]:
+                if "method" in response and response["method"] == "controlChild":
+                    if "response_data" in response["result"]:
+                        responses.append(response["result"]["response_data"])
+                    else:
+                        responses.append(response["result"])
+                else:
+                    responses.append(response["result"])  # not sure if needed
+            responseJSON["result"]["responses"] = responses
+            return responseJSON["result"]["responses"][0]
+        elif self.responseIsOK(res):
+            return responseJSON
 
-    def getOsd(self):
-        return self.performRequest(
+    def getMediaSession(self):
+        return HttpMediaSession(
+            self.host, self.cloudPassword, self.superSecretKey
+        )  # pragma: no cover
+
+    def getChildDevices(self):
+        childDevices = self.performRequest(
             {
-                "method": "get",
-                "OSD": {"name": ["date", "week", "font"], "table": ["label_info"]},
+                "method": "getChildDeviceList",
+                "params": {"childControl": {"start_index": 0}},
             }
         )
+        return childDevices["result"]["child_device_list"]
+
+    # returns empty response for child devices
+    def getOsd(self):
+        # no, asking for all does not work...
+        if self.childID:
+            return self.executeFunction(
+                "getOsd", {"OSD": {"name": ["logo", "date", "label"]}},
+            )
+        else:
+            return self.executeFunction(
+                "getOsd",
+                {"OSD": {"name": ["date", "week", "font"], "table": ["label_info"]}},
+            )
 
     def setOsd(
         self,
@@ -151,6 +235,8 @@ class Tapo:
         weekX=0,
         weekY=0,
     ):
+        if self.childID:
+            raise Exception("setOsd not supported for child devices yet")
         data = {
             "method": "set",
             "OSD": {
@@ -202,31 +288,83 @@ class Tapo:
 
         return self.performRequest(data)
 
+    # does not work for child devices, function discovery needed
     def getModuleSpec(self):
         return self.performRequest(
             {"method": "get", "function": {"name": ["module_spec"]}}
         )
 
     def getPrivacyMode(self):
-        data = {"method": "get", "lens_mask": {"name": ["lens_mask_info"]}}
-        return self.performRequest(data)["lens_mask"]["lens_mask_info"]
+        data = self.executeFunction(
+            "getLensMaskConfig", {"lens_mask": {"name": ["lens_mask_info"]}},
+        )
+        return data["lens_mask"]["lens_mask_info"]
+
+    def getMediaEncrypt(self):
+        data = self.executeFunction(
+            "getMediaEncrypt", {"cet": {"name": ["media_encrypt"]}},
+        )
+        return data["cet"]["media_encrypt"]
 
     def getMotionDetection(self):
-        data = {"method": "get", "motion_detection": {"name": ["motion_det"]}}
-        return self.performRequest(data)["motion_detection"]["motion_det"]
+        return self.executeFunction(
+            "getDetectionConfig", {"motion_detection": {"name": ["motion_det"]}},
+        )["motion_detection"]["motion_det"]
+
+    def getPersonDetection(self):
+        data = {"method": "get", "people_detection": {"name": ["detection"]}}
+        return self.performRequest(data)["people_detection"]["detection"]
 
     def getAlarm(self):
-        data = {"method": "get", "msg_alarm": {"name": ["chn1_msg_alarm_info"]}}
-        return self.performRequest(data)["msg_alarm"]["chn1_msg_alarm_info"]
+        # ensure reverse compatibility, simulate the same response for children devices
+        if self.childID:
+            data = self.getAlarmConfig()
+
+            # replace "siren" with "sound", some cameras call it siren, some sound
+            for i in range(len(data[0]["result"]["alarm_mode"])):
+                if data[0]["result"]["alarm_mode"][i] == "siren":
+                    data[0]["result"]["alarm_mode"][i] = "sound"
+            return {
+                "alarm_type": "0",
+                "light_type": "0",
+                "enabled": data[0]["result"]["enabled"],
+                "alarm_mode": data[0]["result"]["alarm_mode"],
+            }
+        else:
+            return self.executeFunction(
+                "getLastAlarmInfo", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+            )["msg_alarm"]["chn1_msg_alarm_info"]
+
+    def getAlarmConfig(self):
+        return self.executeFunction(
+            "multipleRequest",
+            {
+                "requests": [
+                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
+                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
+                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                ]
+            },
+        )
+
+    def getRotationStatus(self):
+        return self.executeFunction(
+            "getRotationStatus", {"image": {"name": ["switch"]}},
+        )
 
     def getLED(self):
-        data = {"method": "get", "led": {"name": ["config"]}}
-        return self.performRequest(data)["led"]["config"]
+        return self.executeFunction("getLedStatus", {"led": {"name": ["config"]}},)[
+            "led"
+        ]["config"]
 
     def getAutoTrackTarget(self):
-        data = {"method": "get", "target_track": {"name": ["target_track_info"]}}
-        return self.performRequest(data)["target_track"]["target_track_info"]
+        return self.executeFunction(
+            "getTargetTrackConfig", {"target_track": {"name": ["target_track_info"]}}
+        )["target_track"]["target_track_info"]
 
+    # does not work for child devices, function discovery needed
     def getAudioSpec(self):
         return self.performRequest(
             {
@@ -235,32 +373,37 @@ class Tapo:
             }
         )
 
+    # does not work for child devices, function discovery needed
     def getVhttpd(self):
         return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
 
     def getBasicInfo(self):
-        return self.performRequest(
-            {"method": "get", "device_info": {"name": ["basic_info"]}}
+        return self.executeFunction(
+            "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
         )
 
     def getTime(self):
-        return self.performRequest(
-            {"method": "get", "system": {"name": ["clock_status"]}}
+        return self.executeFunction(
+            "getClockStatus", {"system": {"name": "clock_status"}}
         )
 
+    # does not work for child devices, function discovery needed
     def getMotorCapability(self):
         return self.performRequest({"method": "get", "motor": {"name": ["capability"]}})
 
     def setPrivacyMode(self, enabled):
-        return self.performRequest(
-            {
-                "method": "set",
-                "lens_mask": {
-                    "lens_mask_info": {"enabled": "on" if enabled else "off"}
-                },
-            }
+        return self.executeFunction(
+            "setLensMaskConfig",
+            {"lens_mask": {"lens_mask_info": {"enabled": "on" if enabled else "off"}}},
         )
 
+    def setMediaEncrypt(self, enabled):
+        return self.executeFunction(
+            "setMediaEncrypt",
+            {"cet": {"media_encrypt": {"enabled": "on" if enabled else "off"}}},
+        )
+
+    # todo child
     def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True):
         alarm_mode = []
 
@@ -268,29 +411,42 @@ class Tapo:
             raise Exception("You need to use at least sound or light for alarm")
 
         if soundEnabled:
-            alarm_mode.append("sound")
+            if self.childID:
+                alarm_mode.append("siren")
+            else:
+                alarm_mode.append("sound")
         if lightEnabled:
             alarm_mode.append("light")
 
-        data = {
-            "method": "set",
-            "msg_alarm": {
-                "chn1_msg_alarm_info": {
-                    "alarm_type": "0",
+        if self.childID:
+            data = {
+                "msg_alarm": {
                     "enabled": "on" if enabled else "off",
-                    "light_type": "0",
                     "alarm_mode": alarm_mode,
                 }
-            },
-        }
+            }
+            return self.executeFunction("setAlarmConfig", data)
+        else:
+            data = {
+                "method": "set",
+                "msg_alarm": {
+                    "chn1_msg_alarm_info": {
+                        "alarm_type": "0",
+                        "enabled": "on" if enabled else "off",
+                        "light_type": "0",
+                        "alarm_mode": alarm_mode,
+                    }
+                },
+            }
+            return self.performRequest(data)
 
-        return self.performRequest(data)
-
+    # todo child
     def moveMotor(self, x, y):
         return self.performRequest(
             {"method": "do", "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}
         )
 
+    # todo child
     def moveMotorStep(self, angle):
         if not (0 <= angle < 360):
             raise Exception("Angle must be in a range 0 <= angle < 360")
@@ -311,20 +467,18 @@ class Tapo:
     def moveMotorHorizontal(self):
         return self.moveMotorStep(270)
 
+    # todo child
     def calibrateMotor(self):
         return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
 
     def format(self):
-        return self.performRequest(
-            {"method": "do", "harddisk_manage": {"format_hd": "1"}}
+        return self.executeFunction(
+            "formatSdCard", {"harddisk_manage": {"format_hd": "1"}}
         )  # pragma: no cover
 
     def setLEDEnabled(self, enabled):
-        return self.performRequest(
-            {
-                "method": "set",
-                "led": {"config": {"enabled": "on" if enabled else "off"}},
-            }
+        return self.executeFunction(
+            "setLedStatus", {"led": {"config": {"enabled": "on" if enabled else "off"}}}
         )
 
     def getUserID(self):
@@ -345,40 +499,31 @@ class Tapo:
         return self.userID
 
     def getRecordings(self, date):
-        result = self.performRequest(
+        result = self.executeFunction(
+            "searchVideoOfDay",
             {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "searchVideoOfDay",
-                            "params": {
-                                "playback": {
-                                    "search_video_utility": {
-                                        "channel": 0,
-                                        "date": date,
-                                        "end_index": 99,
-                                        "id": self.getUserID(),
-                                        "start_index": 0,
-                                    }
-                                }
-                            },
-                        }
-                    ]
-                },
-            }
-        )["result"]["responses"][0]["result"]
+                "playback": {
+                    "search_video_utility": {
+                        "channel": 0,
+                        "date": date,
+                        "end_index": 99,
+                        "id": self.getUserID(),
+                        "start_index": 0,
+                    }
+                }
+            },
+        )
         if "playback" not in result:
             raise Exception("Video playback is not supported by this camera")
         return result["playback"]["search_video_results"]
 
+    # does not work for child devices, function discovery needed
     def getCommonImage(self):
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
-            "method": "set",
             "motion_detection": {"motion_det": {"enabled": "on" if enabled else "off"}},
         }
         if sensitivity:
@@ -390,24 +535,49 @@ class Tapo:
                 data["motion_detection"]["motion_det"]["digital_sensitivity"] = "20"
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
+        # child devices always need digital_sensitivity setting
+        if (
+            self.childID
+            and "digital_sensitivity" not in data["motion_detection"]["motion_det"]
+        ):
+            currentData = self.getMotionDetection()
+            data["motion_detection"]["motion_det"]["digital_sensitivity"] = currentData[
+                "digital_sensitivity"
+            ]
+        return self.executeFunction("setDetectionConfig", data)
+
+    def setPersonDetection(self, enabled, sensitivity=False):
+        data = {
+            "method": "set",
+            "people_detection": {"detection": {"enabled": "on" if enabled else "off"}},
+        }
+        if sensitivity:
+            if sensitivity == "high":
+                data["people_detection"]["detection"]["sensitivity"] = "80"
+            elif sensitivity == "normal":
+                data["people_detection"]["detection"]["sensitivity"] = "50"
+            elif sensitivity == "low":
+                data["people_detection"]["detection"]["sensitivity"] = "20"
+            else:
+                raise Exception("Invalid sensitivity, can be low, normal or high")
 
         return self.performRequest(data)
 
     def setAutoTrackTarget(self, enabled):
-        return self.performRequest(
+        return self.executeFunction(
+            "setTargetTrackConfig",
             {
-                "method": "set",
                 "target_track": {
                     "target_track_info": {"enabled": "on" if enabled else "off"}
-                },
-            }
+                }
+            },
         )
 
     def reboot(self):
-        return self.performRequest({"method": "do", "system": {"reboot": "null"}})
+        return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
 
     def getPresets(self):
-        data = self.performRequest({"method": "get", "preset": {"name": ["preset"]}})
+        data = self.executeFunction("getPresetConfig", {"preset": {"name": ["preset"]}})
         self.presets = {
             id: data["preset"]["preset"]["name"][key]
             for key, id in enumerate(data["preset"]["preset"]["id"])
@@ -415,11 +585,9 @@ class Tapo:
         return self.presets
 
     def savePreset(self, name):
-        self.performRequest(
-            {
-                "method": "do",
-                "preset": {"set_preset": {"name": str(name), "save_ptz": "1"}},
-            }
+        self.executeFunction(
+            "addMotorPostion",  # yes, there is a typo in function name
+            {"preset": {"set_preset": {"name": str(name), "save_ptz": "1"}}},
         )
         self.getPresets()
         return True
@@ -428,8 +596,8 @@ class Tapo:
         if not str(presetID) in self.presets:
             raise Exception("Preset {} is not set in the app".format(str(presetID)))
 
-        self.performRequest(
-            {"method": "do", "preset": {"remove_preset": {"id": [presetID]}}}
+        self.executeFunction(
+            "deletePreset", {"preset": {"remove_preset": {"id": [presetID]}}}
         )
         self.getPresets()
         return True
@@ -437,23 +605,21 @@ class Tapo:
     def setPreset(self, presetID):
         if not str(presetID) in self.presets:
             raise Exception("Preset {} is not set in the app".format(str(presetID)))
-        return self.performRequest(
-            {"method": "do", "preset": {"goto_preset": {"id": str(presetID)}}}
+        return self.executeFunction(
+            "motorMoveToPreset", {"preset": {"goto_preset": {"id": str(presetID)}}}
         )
 
     # Switches
 
     def __getImageSwitch(self, switch: str) -> str:
-        data = self.performRequest({"method": "get", "image": {"name": ["switch"]}})
+        data = self.executeFunction("getLdc", {"image": {"name": ["switch"]}})
         switches = data["image"]["switch"]
         if switch not in switches:
             raise Exception("Switch {} is not supported by this camera".format(switch))
         return switches[switch]
 
     def __setImageSwitch(self, switch: str, value: str):
-        return self.performRequest(
-            {"method": "set", "image": {"switch": {switch: value}},}
-        )
+        return self.executeFunction("setLdc", {"image": {"switch": {switch: value}}})
 
     def getLensDistortionCorrection(self):
         return self.__getImageSwitch("ldc") == "on"
@@ -461,11 +627,61 @@ class Tapo:
     def setLensDistortionCorrection(self, enable):
         return self.__setImageSwitch("ldc", "on" if enable else "off")
 
+    def getDayNightMode(self) -> str:
+        if self.childID:
+            rawValue = self.getNightVisionModeConfig()["image"]["switch"][
+                "night_vision_mode"
+            ]
+            if rawValue == "inf_night_vision":
+                return "on"
+            elif rawValue == "wtl_night_vision":
+                return "off"
+            elif rawValue == "md_night_vision":
+                return "auto"
+        else:
+            return self.__getImageCommon("inf_type")
+
+    def setDayNightMode(self, mode):
+        allowed_modes = ["off", "on", "auto"]
+        if mode not in allowed_modes:
+            raise Exception("Day night mode must be one of {}".format(allowed_modes))
+        if self.childID:
+            if mode == "on":
+                return self.setNightVisionModeConfig("inf_night_vision")
+            elif mode == "off":
+                return self.setNightVisionModeConfig("wtl_night_vision")
+            elif mode == "auto":
+                return self.setNightVisionModeConfig("md_night_vision")
+        else:
+            return self.__setImageCommon("inf_type", mode)
+
+    def getNightVisionModeConfig(self):
+        return self.executeFunction(
+            "getNightVisionModeConfig", {"image": {"name": "switch"}}
+        )
+
+    def setNightVisionModeConfig(self, mode):
+        return self.executeFunction(
+            "setNightVisionModeConfig",
+            {"image": {"switch": {"night_vision_mode": mode}}},
+        )
+
     def getImageFlipVertical(self):
-        return self.__getImageSwitch("flip_type") == "center"
+        if self.childID:
+            return self.getRotationStatus()["image"]["switch"]["flip_type"] == "center"
+        else:
+            return self.__getImageSwitch("flip_type") == "center"
 
     def setImageFlipVertical(self, enable):
-        return self.__setImageSwitch("flip_type", "center" if enable else "off")
+        if self.childID:
+            return self.setRotationStatus("center" if enable else "off")
+        else:
+            return self.__setImageSwitch("flip_type", "center" if enable else "off")
+
+    def setRotationStatus(self, flip_type):
+        return self.executeFunction(
+            "setRotationStatus", {"image": {"switch": {"flip_type": flip_type}}},
+        )
 
     def getForceWhitelampState(self) -> bool:
         return self.__getImageSwitch("force_wtl_state") == "on"
@@ -476,21 +692,26 @@ class Tapo:
     # Common
 
     def __getImageCommon(self, field: str) -> str:
-        data = self.performRequest({"method": "get", "image": {"name": "common"}})
+        data = self.executeFunction(
+            "getLightFrequencyInfo", {"image": {"name": "common"}}
+        )
+        if "common" not in data["image"]:
+            raise Exception("__getImageCommon is not supported by this camera")
         fields = data["image"]["common"]
         if field not in fields:
             raise Exception("Field {} is not supported by this camera".format(field))
         return fields[field]
 
     def __setImageCommon(self, field: str, value: str):
-        return self.performRequest(
-            {"method": "set", "image": {"common": {field: value}},}
+        return self.executeFunction(
+            "setLightFrequencyInfo", {"image": {"common": {field: value}}}
         )
 
     def getLightFrequencyMode(self) -> str:
         return self.__getImageCommon("light_freq_mode")
 
     def setLightFrequencyMode(self, mode):
+        # todo: auto does not work on some child cameras?
         allowed_modes = ["auto", "50", "60"]
         if mode not in allowed_modes:
             raise Exception(
@@ -498,20 +719,13 @@ class Tapo:
             )
         return self.__setImageCommon("light_freq_mode", mode)
 
-    def getDayNightMode(self) -> str:
-        return self.__getImageCommon("inf_type")
-
-    def setDayNightMode(self, mode):
-        allowed_modes = ["off", "on", "auto"]
-        if mode not in allowed_modes:
-            raise Exception("Day night mode must be one of {}".format(allowed_modes))
-        return self.__setImageCommon("inf_type", mode)
-
+    # does not work for child devices, function discovery needed
     def startManualAlarm(self):
         return self.performRequest(
             {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "start"}},}
         )
 
+    # does not work for child devices, function discovery needed
     def stopManualAlarm(self):
         return self.performRequest(
             {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},}
@@ -525,8 +739,8 @@ class Tapo:
             return str(errorCode)
 
     def getFirmwareUpdateStatus(self):
-        return self.performRequest(
-            {"method": "get", "cloud_config": {"name": "upgrade_status"}}
+        return self.executeFunction(
+            "getFirmwareUpdateStatus", {"cloud_config": {"name": "upgrade_status"}}
         )
 
     def isUpdateAvailable(self):
@@ -559,55 +773,96 @@ class Tapo:
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
     def getMost(self):
-        results = self.performRequest(
-            {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "getDeviceInfo",
-                            "params": {"device_info": {"name": ["basic_info"]}},
-                        },
-                        {
-                            "method": "getDetectionConfig",
-                            "params": {"motion_detection": {"name": ["motion_det"]}},
-                        },
-                        {
-                            "method": "getLensMaskConfig",
-                            "params": {"lens_mask": {"name": ["lens_mask_info"]}},
-                        },
-                        {
-                            "method": "getLdc",
-                            "params": {"image": {"name": ["switch", "common"]}},
-                        },
-                        {
-                            "method": "getLastAlarmInfo",
-                            "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
-                        },
-                        {
-                            "method": "getLedStatus",
-                            "params": {"led": {"name": ["config"]}},
-                        },
-                        {
-                            "method": "getTargetTrackConfig",
-                            "params": {"target_track": {"name": ["target_track_info"]}},
-                        },
-                        {
-                            "method": "getPresetConfig",
-                            "params": {"preset": {"name": ["preset"]}},
-                        },
-                        {
-                            "method": "getFirmwareUpdateStatus",
-                            "params": {"cloud_config": {"name": "upgrade_status"}},
-                        },
-                    ]
-                },
-            }
-        )
+        requestData = {
+            "method": "multipleRequest",
+            "params": {
+                "requests": [
+                    {
+                        "method": "getDeviceInfo",
+                        "params": {"device_info": {"name": ["basic_info"]}},
+                    },
+                    {
+                        "method": "getDetectionConfig",
+                        "params": {"motion_detection": {"name": ["motion_det"]}},
+                    },
+                    {
+                        "method": "getLensMaskConfig",
+                        "params": {"lens_mask": {"name": ["lens_mask_info"]}},
+                    },
+                    {
+                        "method": "getLdc",
+                        "params": {"image": {"name": ["switch", "common"]}},
+                    },
+                    {
+                        "method": "getLastAlarmInfo",
+                        "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                    },
+                    {
+                        "method": "getLedStatus",
+                        "params": {"led": {"name": ["config"]}},
+                    },
+                    {
+                        "method": "getTargetTrackConfig",
+                        "params": {"target_track": {"name": ["target_track_info"]}},
+                    },
+                    {
+                        "method": "getPresetConfig",
+                        "params": {"preset": {"name": ["preset"]}},
+                    },
+                    {
+                        "method": "getFirmwareUpdateStatus",
+                        "params": {"cloud_config": {"name": "upgrade_status"}},
+                    },
+                    {
+                        "method": "getMediaEncrypt",
+                        "params": {"cet": {"name": ["media_encrypt"]}},
+                    },
+                    {
+                        "method": "getConnectionType",
+                        "params": {"network": {"get_connection_type": []}},
+                    },
+                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
+                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
+                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                    {
+                        "method": "getLightFrequencyInfo",
+                        "params": {"image": {"name": "common"}},
+                    },
+                    {
+                        "method": "getLightFrequencyCapability",
+                        "params": {"image": {"name": "common"}},
+                    },
+                    {
+                        "method": "getChildDeviceList",
+                        "params": {"childControl": {"start_index": 0}},
+                    },
+                    {
+                        "method": "getRotationStatus",
+                        "params": {"image": {"name": ["switch"]}},
+                    },
+                    {
+                        "method": "getNightVisionModeConfig",
+                        "params": {"image": {"name": "switch"}},
+                    },
+                ]
+            },
+        }
+        results = self.performRequest(requestData)
+
         returnData = {}
+        # todo finish on child
+        i = 0
         for result in results["result"]["responses"]:
-            if result["error_code"] == 0:
+            if (
+                "error_code" in result and result["error_code"] == 0
+            ) and "result" in result:
                 returnData[result["method"]] = result["result"]
             else:
-                returnData[result["method"]] = False
+                if "method" in result:
+                    returnData[result["method"]] = False
+                else:  # some cameras are not returning method for error messages
+                    returnData[requestData["params"]["requests"][i]["method"]] = False
+            i += 1
         return returnData

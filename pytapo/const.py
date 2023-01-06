@@ -8,3 +8,4 @@ ERROR_CODES = {
     "-40101": "Parameter to set does not exist",
     "-40209": "Invalid login credentials",
 }
+MAX_LOGIN_RETRIES = 2
