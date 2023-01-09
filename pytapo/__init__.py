@@ -786,6 +786,10 @@ class Tapo:
                         "params": {"motion_detection": {"name": ["motion_det"]}},
                     },
                     {
+                        "method": "getPersonDetectionConfig",
+                        "params": {"people_detection": {"name": ["detection"]}},
+                    },
+                    {
                         "method": "getLensMaskConfig",
                         "params": {"lens_mask": {"name": ["lens_mask_info"]}},
                     },
