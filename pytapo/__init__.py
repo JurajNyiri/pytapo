@@ -312,8 +312,9 @@ class Tapo:
         )["motion_detection"]["motion_det"]
 
     def getPersonDetection(self):
-        data = {"method": "get", "people_detection": {"name": ["detection"]}}
-        return self.performRequest(data)["people_detection"]["detection"]
+        return self.executeFunction(
+            "getPersonDetectionConfig", {"people_detection": {"name": ["detection"]}},
+        )["people_detection"]["detection"]
 
     def getAlarm(self):
         # ensure reverse compatibility, simulate the same response for children devices
@@ -548,8 +549,7 @@ class Tapo:
 
     def setPersonDetection(self, enabled, sensitivity=False):
         data = {
-            "method": "set",
-            "people_detection": {"detection": {"enabled": "on" if enabled else "off"}},
+            "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
             if sensitivity == "high":
@@ -561,7 +561,7 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
-        return self.performRequest(data)
+        return self.executeFunction("setPersonDetectionConfig", data)
 
     def setAutoTrackTarget(self, enabled):
         return self.executeFunction(
