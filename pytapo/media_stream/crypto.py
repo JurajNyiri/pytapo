@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class AESHelper:
+    iv = None
+    key = None
+
     def __init__(
         self,
         username: bytes,
@@ -31,14 +34,14 @@ class AESHelper:
                 raise Exception(
                     "Media encryption is off and super secret key is not set."
                 )
-            key = hashlib.md5(nonce + b":" + super_secret_key).digest()
+            self.key = hashlib.md5(nonce + b":" + super_secret_key).digest()
         else:
             logger.debug("Detected turned on media encryption, using cloud password.")
-            key = hashlib.md5(nonce + b":" + hashed_pwd).digest()
+            self.key = hashlib.md5(nonce + b":" + hashed_pwd).digest()
 
-        iv = hashlib.md5(username + b":" + nonce).digest()
+        self.iv = hashlib.md5(username + b":" + nonce).digest()
 
-        self._cipher = AES.new(key, AES.MODE_CBC, iv)
+        self._cipher = AES.new(self.key, AES.MODE_CBC, iv=self.iv)
 
         logger.debug("AES cipher set up correctly")
 
@@ -66,8 +69,16 @@ class AESHelper:
             super_secret_key,
         )
 
+    def refresh(self):
+        self._cipher = AES.new(self.key, AES.MODE_CBC, iv=self.iv)
+
     def decrypt(self, data: bytes) -> bytes:
-        return unpad(self._cipher.decrypt(data), 16, style="pkcs7")
+        # Cipher IV needs to be refreshed after every decrypt
+        self.refresh()
+        decryptedData = unpad(self._cipher.decrypt(data), 16, style="pkcs7")
+        return decryptedData
 
     def encrypt(self, data: bytes) -> bytes:
+        # todo: maybe refresh is not needed?
+        self.refresh()
         return self._cipher.encrypt(pad(data, 16, style="pkcs7"))
