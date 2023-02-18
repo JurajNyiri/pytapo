@@ -14,8 +14,8 @@ class Convert:
     addedChunks = 0
     lengthLastCalculatedAtChunk = 0
 
-    def __init__(self, REFRESH_LENGTH_EVERY_CHUNKS=100):
-        self.REFRESH_LENGTH_EVERY_CHUNKS = REFRESH_LENGTH_EVERY_CHUNKS
+    def __init__(self):
+        pass
 
     # calculates ideal refresh interval for a real time estimate of downloaded data
     def getRefreshIntervalForLengthEstimate(self):
