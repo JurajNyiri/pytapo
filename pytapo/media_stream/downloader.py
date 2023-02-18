@@ -5,10 +5,11 @@ import json
 
 
 class Downloader:
-    def __init__(self, tapo: Tapo, startTime: int, endTime: int):
+    def __init__(self, tapo: Tapo, startTime: int, endTime: int, padding=5):
         self.tapo = tapo
         self.startTime = startTime
         self.endTime = endTime
+        self.padding = padding
 
     async def download(self):
         convert = Convert()
@@ -57,8 +58,8 @@ class Downloader:
                     detectedLength = convert.getLength()
                     if (
                         detectedLength
-                        # > segmentLength + SECONDS_RECORDING_PADDING
-                        > 10  # temp
+                        > segmentLength + self.padding
+                        # > 10  # temp
                     ):
                         print("Downloaded!" + " " * 20)
                         fileName = "./output/" + str(date) + ".mp4"

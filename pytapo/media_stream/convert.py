@@ -3,6 +3,7 @@ import io
 import av
 import ffmpeg
 import os
+import datetime
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -77,8 +78,10 @@ class Convert:
             file.write(self.writer.getvalue())
             file.close()
 
-            cmd = 'ffmpeg -i "{inputFile}" -y -an "{outputFile}" >/dev/null 2>&1'.format(
-                inputFile=tempFileLocation, outputFile=fileLocation
+            cmd = 'ffmpeg -ss 00:00:00 -i "{inputFile}" -t {videoLength} -y -an "{outputFile}" >/dev/null 2>&1'.format(
+                inputFile=tempFileLocation,
+                outputFile=fileLocation,
+                videoLength=str(datetime.timedelta(seconds=fileLength)),
             )
             os.system(cmd)
 
