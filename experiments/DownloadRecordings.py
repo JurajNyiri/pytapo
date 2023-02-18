@@ -3,12 +3,12 @@ from pytapo.media_stream.downloader import Downloader
 import asyncio
 import os
 
-outputDir = os.environ.get("output")  # directory path where videos will be saved
-date = os.environ.get("date")  # date to download recordings for in format YYYYMMDD
-host = os.environ.get("host")  # change to camera IP
-user = os.environ.get("user")  # your username
-password = os.environ.get("password")  # your password
-password_cloud = os.environ.get("password_cloud")  # set to your cloud password
+outputDir = os.environ.get("OUTPUT")  # directory path where videos will be saved
+date = os.environ.get("DATE")  # date to download recordings for in format YYYYMMDD
+host = os.environ.get("HOST")  # change to camera IP
+user = os.environ.get("USER")  # your username
+password = os.environ.get("PASSWORD")  # your password
+password_cloud = os.environ.get("PASSWORD_CLOUD")  # set to your cloud password
 
 print("Connecting to camera...")
 tapo = Tapo(host, user, password, password_cloud)
