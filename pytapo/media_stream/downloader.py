@@ -80,7 +80,11 @@ class Downloader:
                                 "progress": convert.getLength(),
                                 "total": segmentLength,
                             }
-                            if detectedLength > segmentLength + self.padding:
+                            if (detectedLength > segmentLength + self.padding) or (
+                                retry
+                                and detectedLength
+                                >= segmentLength  # fix for the latest latest recording
+                            ):
                                 downloadedFull = True
                                 currentAction = "Converting"
                                 yield {
@@ -104,11 +108,25 @@ class Downloader:
                             }
                             retry = True
                         else:
-                            currentAction = "Giving up"
-                            yield {
-                                "currentAction": currentAction,
-                                "fileName": fileName,
-                                "progress": 0,
-                                "total": 0,
-                            }
+                            detectedLength = convert.getLength()
+                            if (
+                                detectedLength >= segmentLength - 5
+                            ):  # workaround for weird cases where the recording is a bit shorter than reported
+                                downloadedFull = True
+                                currentAction = "Converting [shorter]"
+                                yield {
+                                    "currentAction": currentAction,
+                                    "fileName": fileName,
+                                    "progress": 0,
+                                    "total": 0,
+                                }
+                                convert.save(fileName, segmentLength)
+                            else:
+                                currentAction = "Giving up"
+                                yield {
+                                    "currentAction": currentAction,
+                                    "fileName": fileName,
+                                    "progress": 0,
+                                    "total": 0,
+                                }
                             downloading = False
