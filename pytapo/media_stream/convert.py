@@ -84,7 +84,7 @@ class Convert:
             file.write(self.audioWriter.getvalue())
             file.close()
 
-            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}"'.format(
+            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile} >/dev/null 2>&1"'.format(
                 inputVideoFile=tempVideoFileLocation,
                 inputAudioFile=tempAudioFileLocation,
                 outputFile=fileLocation,
