@@ -49,6 +49,22 @@ Exception: Invalid authentication data
 
 Attempt to authenticate using `admin` as `user` and your TP-Link cloud account password as `password`.
 
+## Downloading Recordings
+
+Integration supports downloading recordings saved on camera's SD card.
+
+See [example script](https://github.com/JurajNyiri/pytapo/blob/main/experiments/DownloadRecordings.py).
+You need to call it with following ENV values:
+
+- `HOST`: IP Address of your camera
+- `USER`: 3rd party user account name created via the app for the camera
+- `PASSWORD`: 3rd party user account password created via the app for the camera
+- `PASSWORD_CLOUD`: Tapo cloud account password, it is required to access the recordings, everything is still local
+- `OUTPUT`: Directory where you wish to save all the recordings
+- `DATE`: Date for which to download recordings in format of YYYYMMDD, for example 20230221.
+
+You also need to have ffmpeg installed as that is used for converting the streams to watchable file.
+
 ## Contributions:
 
 Contributions to pytapo are welcomed.
