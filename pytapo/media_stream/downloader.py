@@ -67,3 +67,4 @@ class Downloader:
                             "total": segmentLength,
                         }
                         convert.save(fileName, segmentLength, "ffmpeg")
+                        break
