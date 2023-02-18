@@ -106,6 +106,7 @@ After the tests are done, your camera should be in the initial state.
 - [Tim Zhang](https://github.com/ttimasdf) for additional research for Mercury camera on [his github repository](https://github.com/ttimasdf/mercury-ipc-control)
 - [Gábor Szabados](https://github.com/GSzabados) for doing research and gathering all the information above in [Home Assistant Community forum](https://community.home-assistant.io/t/use-pan-tilt-function-for-tp-link-tapo-c200-from-home-assistant/170143/18)
 - [Davide Depau](https://github.com/Depau) for additional [research](https://md.depau.eu/s/r1Ys_oWoP) of the cameras and work on pytapo library
+- [Alex X](https://github.com/AlexxIT) for his incredible work on go2rtc library, and its code for Tapo stream communication which was rewritten to python in order to implement stream-related features of this library
 
 # Disclaimer
 
