@@ -63,6 +63,9 @@ class HttpMediaSession:
         self._sequence_numbers: MutableMapping[int, Queue] = {}
         self._sessions: MutableMapping[int, Queue] = {}
 
+    def set_window_size(self, window_size):
+        self.window_size = window_size
+
     @property
     def started(self) -> bool:
         return self._started
