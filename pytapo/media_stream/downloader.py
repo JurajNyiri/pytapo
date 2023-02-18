@@ -62,7 +62,7 @@ class Downloader:
                 async for resp in mediaSession.transceive(payload):
                     if resp.mimetype == "video/mp2t":
                         dataChunks += 1
-                        convert.write(resp.plaintext)
+                        convert.write(resp.plaintext, resp.audioPayload)
                         detectedLength = convert.getLength()
 
                         yield {
@@ -83,5 +83,6 @@ class Downloader:
                                 "progress": 0,
                                 "total": 0,
                             }
-                            convert.save(fileName, segmentLength, "ffmpeg")
+                            convert.save(fileName, segmentLength)
+
                             break

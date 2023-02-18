@@ -8,6 +8,8 @@ from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
 from typing import Optional, Mapping, Generator, MutableMapping
 
+from rtp import PayloadType
+
 from pytapo.media_stream._utils import (
     generate_nonce,
     md5digest,
@@ -20,6 +22,7 @@ from pytapo.media_stream.error import (
     KeyExchangeMissingException,
 )
 from pytapo.media_stream.response import HttpMediaResponse
+from pytapo.media_stream.tsReader import TSReader
 
 logger = logging.getLogger(__name__)
 
@@ -334,6 +337,7 @@ class HttpMediaSession:
                 ciphertext=ciphertext,
                 plaintext=plaintext,
                 json_data=json_data,
+                audioPayload=b"",
             )
 
             if seq is not None and seq % self.window_size == 0:  # never ack live stream
@@ -383,6 +387,7 @@ class HttpMediaSession:
     ) -> Generator[HttpMediaResponse, None, None]:
         sequence = None
         queue = None
+        tsReader = TSReader()
 
         if mimetype != "application/json" and session is None:
             raise ValueError("Non-JSON streams must always be bound to a session")
@@ -495,6 +500,12 @@ class HttpMediaSession:
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
                     raise resp.plaintext
                 # print(resp.plaintext)
+                tsReader.setBuffer(list(resp.plaintext))
+                pkt = tsReader.getPacket()
+                if pkt:
+                    if pkt.payloadType == PayloadType.PCMA:
+                        resp.audioPayload = pkt.payload
+
                 yield resp
 
         finally:

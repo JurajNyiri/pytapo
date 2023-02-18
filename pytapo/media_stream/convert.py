@@ -13,6 +13,7 @@ class Convert:
     def __init__(self):
         self.stream = None
         self.writer = io.BytesIO()
+        self.audioWriter = io.BytesIO()
         self.known_lengths = {}
         self.addedChunks = 0
         self.lengthLastCalculatedAtChunk = 0
@@ -56,7 +57,8 @@ class Convert:
         output.close()
 
     # cuts and saves the video
-    def save(self, fileLocation, fileLength, method="av"):
+    def save(self, fileLocation, fileLength, method="ffmpeg"):
+        # todo: does not work with audio yet
         if method == "av":
             return self.saveWithAV(fileLocation, fileLength)
         elif method == "ffmpeg-python":
@@ -72,20 +74,26 @@ class Convert:
                 pipe_stdin=True
             )
             print(out)
-        elif method == "ffmpeg":
-            tempFileLocation = fileLocation + ".ts"
-            file = open(tempFileLocation, "wb")
+        elif method == "ffmpeg":  # recommended, fastest and works with audio
+            tempVideoFileLocation = fileLocation + ".ts"
+            file = open(tempVideoFileLocation, "wb")
             file.write(self.writer.getvalue())
             file.close()
+            tempAudioFileLocation = fileLocation + ".alaw"
+            file = open(tempAudioFileLocation, "wb")
+            file.write(self.audioWriter.getvalue())
+            file.close()
 
-            cmd = 'ffmpeg -ss 00:00:00 -i "{inputFile}" -t {videoLength} -y -an "{outputFile}" >/dev/null 2>&1'.format(
-                inputFile=tempFileLocation,
+            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}"'.format(
+                inputVideoFile=tempVideoFileLocation,
+                inputAudioFile=tempAudioFileLocation,
                 outputFile=fileLocation,
                 videoLength=str(datetime.timedelta(seconds=fileLength)),
             )
             os.system(cmd)
 
-            os.remove(tempFileLocation)
+            os.remove(tempVideoFileLocation)
+            os.remove(tempAudioFileLocation)
         else:
             raise Exception("Method not supported")
 
@@ -143,6 +151,6 @@ class Convert:
             bytesPerChunk = lastKnownChunk / lastKnownLength
             return self.addedChunks / bytesPerChunk
 
-    def write(self, data: bytes):
+    def write(self, data: bytes, audioData: bytes):
         self.addedChunks += 1
-        return self.writer.write(data)
+        return self.writer.write(data) and self.audioWriter.write(audioData)

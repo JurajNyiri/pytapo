@@ -11,6 +11,7 @@ class HttpMediaResponse:
         mimetype: str,
         ciphertext: Optional[bytes],
         plaintext: bytes,
+        audioPayload: bytes,
         json_data,
     ):
         self.seq = seq
@@ -21,3 +22,4 @@ class HttpMediaResponse:
         self.ciphertext = ciphertext
         self.plaintext = plaintext
         self.json_data = json_data
+        self.audioPayload = audioPayload
