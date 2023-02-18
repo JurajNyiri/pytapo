@@ -17,7 +17,8 @@ class Convert:
     def __init__(self):
         pass
 
-    def save(self, fileLocation):
+    # cuts and saves the video
+    def save(self, fileLocation, fileLength):
         output = av.open(fileLocation, "w")
         self.openStream()
 
@@ -29,7 +30,21 @@ class Convert:
         out_stream.height = input_stream.codec_context.height
         out_stream.pix_fmt = input_stream.codec_context.pix_fmt
 
+        firstTime = None
         for frame in self.stream.decode(input_stream):
+            if firstTime is None:
+                firstTime = float(frame.pts * input_stream.time_base)
+            currentFrameTime = float(frame.pts * input_stream.time_base)
+            currentLength = currentFrameTime - firstTime
+            if currentLength > fileLength:
+                print("Converted!" + " " * 20)
+                break
+            print(
+                ("Converted: " + str(round(currentLength, 2)) + " / " + str(fileLength))
+                + (" " * 10)
+                + "\r",
+                end="",
+            )
             img_frame = frame.to_image()
             out_frame = av.VideoFrame.from_image(img_frame)
             out_packet = out_stream.encode(out_frame)
