@@ -9,14 +9,12 @@ logging.getLogger("libav").setLevel(logging.ERROR)
 
 
 class Convert:
-    writer = io.BytesIO()
-    stream = None
-    known_lengths = {}
-    addedChunks = 0
-    lengthLastCalculatedAtChunk = 0
-
     def __init__(self):
-        pass
+        self.stream = None
+        self.writer = io.BytesIO()
+        self.known_lengths = {}
+        self.addedChunks = 0
+        self.lengthLastCalculatedAtChunk = 0
 
     def saveWithAV(self, fileLocation, fileLength):
         self.openStream()
@@ -140,7 +138,6 @@ class Convert:
             return self.calculateLength()
         else:
             bytesPerChunk = lastKnownChunk / lastKnownLength
-
             return self.addedChunks / bytesPerChunk
 
     def write(self, data: bytes):
