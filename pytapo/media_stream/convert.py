@@ -66,10 +66,8 @@ class Convert:
             + self.getRefreshIntervalForLengthEstimate()
             or lastKnownLength == 0
         ):
-            print("exact")
             return self.calculateLength()
         else:
-            print("estimate")
             bytesPerChunk = lastKnownChunk / lastKnownLength
 
             return self.addedChunks / bytesPerChunk

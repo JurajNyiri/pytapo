@@ -30,7 +30,7 @@ class HttpMediaSession:
         ip: str,
         cloud_password: str,
         super_secret_key: str,
-        window_size=50,
+        window_size=500,  # 500 is a sweet point for download speed
         port: int = 8800,
         username: str = "admin",
         multipart_boundary: bytes = b"--client-stream-boundary--",
@@ -240,6 +240,8 @@ class HttpMediaSession:
             if "X-Data-Sequence" in headers:
                 seq = int(headers["X-Data-Sequence"])
 
+            # print(headers)
+
             # Now we know the content length, let's read it and decrypt it
             json_data = None
             # print("TEST0")
@@ -334,11 +336,7 @@ class HttpMediaSession:
                 json_data=json_data,
             )
 
-            if (
-                seq is not None  # never ack live stream
-                and seq % self.window_size == 0
-                and (seq < 2000)
-            ):  # seq < 2000 is temp
+            if seq is not None and seq % self.window_size == 0:  # never ack live stream
                 # print("sending ack")
                 data = {
                     "type": "notification",
@@ -381,7 +379,7 @@ class HttpMediaSession:
         mimetype: str = "application/json",
         session: int = None,
         encrypt: bool = False,
-        no_data_timeout=1.0,
+        no_data_timeout=10.0,
     ) -> Generator[HttpMediaResponse, None, None]:
         sequence = None
         queue = None
@@ -475,6 +473,12 @@ class HttpMediaSession:
                             coro, timeout=no_data_timeout
                         )
                     except asyncio.exceptions.TimeoutError:
+                        print(
+                            "Server did not send a new chunk in {} sec (sequence {}"
+                            ", session {}), assuming the stream is over".format(
+                                no_data_timeout, sequence, session
+                            )
+                        )
                         logger.debug(
                             "Server did not send a new chunk in {} sec (sequence {}"
                             ", session {}), assuming the stream is over".format(
