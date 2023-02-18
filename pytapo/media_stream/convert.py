@@ -1,7 +1,8 @@
 import logging
 import io
 import av
-import sys
+import ffmpeg
+import os
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -17,10 +18,9 @@ class Convert:
     def __init__(self):
         pass
 
-    # cuts and saves the video
-    def save(self, fileLocation, fileLength):
-        output = av.open(fileLocation, "w")
+    def saveWithAV(self, fileLocation, fileLength):
         self.openStream()
+        output = av.open(fileLocation, "w")
 
         input_stream = self.stream.streams.video[0]
         codec_name = input_stream.codec_context.name
@@ -55,6 +55,38 @@ class Convert:
 
         self.stream.close()
         output.close()
+
+    # cuts and saves the video
+    def save(self, fileLocation, fileLength, method="av"):
+        if method == "av":
+            return self.saveWithAV(fileLocation, fileLength)
+        elif method == "ffmpeg-python":
+            raise Exception("Not implemented")
+            # todo
+            tempFileLocation = fileLocation + ".ts"
+            file = open(tempFileLocation, "wb")
+            file.write(self.writer.getvalue())
+            file.close()
+
+            input = ffmpeg.input(tempFileLocation)
+            out = ffmpeg.output(None, input.video, fileLocation).run_async(
+                pipe_stdin=True
+            )
+            print(out)
+        elif method == "ffmpeg":
+            tempFileLocation = fileLocation + ".ts"
+            file = open(tempFileLocation, "wb")
+            file.write(self.writer.getvalue())
+            file.close()
+
+            cmd = 'ffmpeg -i "{inputFile}" -y -an "{outputFile}" >/dev/null 2>&1'.format(
+                inputFile=tempFileLocation, outputFile=fileLocation
+            )
+            os.system(cmd)
+
+            os.remove(tempFileLocation)
+        else:
+            raise Exception("Method not supported")
 
     # calculates ideal refresh interval for a real time estimate of downloaded data
     def getRefreshIntervalForLengthEstimate(self):
