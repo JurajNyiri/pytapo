@@ -5,11 +5,14 @@ import json
 
 
 class Downloader:
-    def __init__(self, tapo: Tapo, startTime: int, endTime: int, padding=5):
+    def __init__(
+        self, tapo: Tapo, startTime: int, endTime: int, outputDirectory="./", padding=5
+    ):
         self.tapo = tapo
         self.startTime = startTime
         self.endTime = endTime
         self.padding = padding
+        self.outputDirectory = outputDirectory
 
     async def download(self):
         convert = Convert()
@@ -37,34 +40,30 @@ class Downloader:
                 "%Y-%m-%d %H_%M_%S"
             )
             segmentLength = self.endTime - self.startTime
-            print("Downloading " + date + "")
+            fileName = self.outputDirectory + str(date) + ".mp4"
+            currentAction = "Downloading"
             async for resp in mediaSession.transceive(payload):
                 if resp.mimetype == "video/mp2t":
                     dataChunks += 1
                     convert.write(resp.plaintext)
-
-                    print(
-                        (
-                            "Downloaded: "
-                            + str(round(convert.getLength(), 2))
-                            + " / "
-                            + str(segmentLength)
-                        )
-                        + (" " * 10)
-                        + "\r",
-                        end="",
-                    )
-
                     detectedLength = convert.getLength()
+
+                    yield {
+                        "currentAction": currentAction,
+                        "fileName": fileName,
+                        "progress": convert.getLength(),
+                        "total": segmentLength,
+                    }
                     if (
                         detectedLength
                         > segmentLength + self.padding
                         # > 10  # temp
                     ):
-                        print("Downloaded!" + " " * 20)
-                        fileName = "./output/" + str(date) + ".mp4"
-                        print("Converting...")
+                        currentAction = "Converting"
+                        yield {
+                            "currentAction": currentAction,
+                            "fileName": fileName,
+                            "progress": convert.getLength(),
+                            "total": segmentLength,
+                        }
                         convert.save(fileName, segmentLength, "ffmpeg")
-                        print("")
-                        print("Saving to " + fileName + "...")
-                        return fileName
