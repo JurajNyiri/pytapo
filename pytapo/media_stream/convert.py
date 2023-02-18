@@ -1,7 +1,6 @@
 import logging
 import io
 import av
-import ffmpeg
 import os
 import datetime
 
@@ -61,19 +60,6 @@ class Convert:
         # todo: does not work with audio yet
         if method == "av":
             return self.saveWithAV(fileLocation, fileLength)
-        elif method == "ffmpeg-python":
-            raise Exception("Not implemented")
-            # todo
-            tempFileLocation = fileLocation + ".ts"
-            file = open(tempFileLocation, "wb")
-            file.write(self.writer.getvalue())
-            file.close()
-
-            input = ffmpeg.input(tempFileLocation)
-            out = ffmpeg.output(None, input.video, fileLocation).run_async(
-                pipe_stdin=True
-            )
-            print(out)
         elif method == "ffmpeg":  # recommended, fastest and works with audio
             tempVideoFileLocation = fileLocation + ".ts"
             file = open(tempVideoFileLocation, "wb")
