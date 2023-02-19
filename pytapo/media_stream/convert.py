@@ -108,16 +108,18 @@ class Convert:
         firstTime = None
         lastTime = None
         for frame in self.stream.decode(stream):
-            if firstTime is None:
-                firstTime = float(frame.pts * stream.time_base)
-            lastTime = float(frame.pts * stream.time_base)
-
+            if frame.pts:
+                if firstTime is None:
+                    firstTime = float(frame.pts * stream.time_base)
+                lastTime = float(frame.pts * stream.time_base)
         self.writer.seek(0, io.SEEK_END)
 
-        duration = lastTime - firstTime
-        self.known_lengths[self.addedChunks] = duration
-        self.lengthLastCalculatedAtChunk = self.addedChunks
-        return duration
+        if firstTime and lastTime:
+            duration = lastTime - firstTime
+            self.known_lengths[self.addedChunks] = duration
+            self.lengthLastCalculatedAtChunk = self.addedChunks
+            return duration
+        return False
 
     # returns length of video, can return an estimate which is usually very close
     def getLength(self, exact=False):

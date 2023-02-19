@@ -73,11 +73,20 @@ class Downloader:
                             dataChunks += 1
                             convert.write(resp.plaintext, resp.audioPayload)
                             detectedLength = convert.getLength()
+                            if not detectedLength:
+                                currentAction = "Recording in progress"
+                                yield {
+                                    "currentAction": currentAction,
+                                    "fileName": fileName,
+                                    "progress": 0,
+                                    "total": segmentLength,
+                                }
+                                downloading = False
 
                             yield {
                                 "currentAction": currentAction,
                                 "fileName": fileName,
-                                "progress": convert.getLength(),
+                                "progress": detectedLength,
                                 "total": segmentLength,
                             }
                             if (detectedLength > segmentLength + self.padding) or (
