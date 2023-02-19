@@ -11,6 +11,7 @@ from warnings import warn
 
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
+from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -498,6 +499,25 @@ class Tapo:
                 }
             )["result"]["responses"][0]["result"]["user_id"]
         return self.userID
+
+    def getRecordingsList(self, start_date="20000101", end_date=None):
+        if end_date is None:
+            end_date = datetime.today().strftime("%Y%m%d")
+        result = self.executeFunction(
+            "searchDateWithVideo",
+            {
+                "playback": {
+                    "search_year_utility": {
+                        "channel": [0],
+                        "end_date": end_date,
+                        "start_date": start_date,
+                    }
+                }
+            },
+        )
+        if "playback" not in result:
+            raise Exception("Video playback is not supported by this camera")
+        return result["playback"]["search_results"]
 
     def getRecordings(self, date):
         result = self.executeFunction(
