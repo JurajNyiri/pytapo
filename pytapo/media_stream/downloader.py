@@ -73,7 +73,7 @@ class Downloader:
                             dataChunks += 1
                             convert.write(resp.plaintext, resp.audioPayload)
                             detectedLength = convert.getLength()
-                            if not detectedLength:
+                            if detectedLength is False:
                                 currentAction = "Recording in progress"
                                 yield {
                                     "currentAction": currentAction,
