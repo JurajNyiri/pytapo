@@ -11,6 +11,8 @@ class Downloader:
         datetime.now().timestamp()
     )  # keeps track of when was class first imported in GMT
 
+    FRESH_RECORDING_TIME_SECONDS = 60
+
     def __init__(
         self,
         tapo: Tapo,
@@ -49,7 +51,7 @@ class Downloader:
             )
             segmentLength = self.endTime - self.startTime
             fileName = self.outputDirectory + str(dateStart) + "-" + dateEnd + ".mp4"
-            if self.scriptStartTime - 60 < self.endTime:
+            if self.scriptStartTime - self.FRESH_RECORDING_TIME_SECONDS < self.endTime:
                 currentAction = "Recording in progress"
                 yield {
                     "currentAction": currentAction,
@@ -58,7 +60,7 @@ class Downloader:
                     "total": 0,
                 }
                 downloading = False
-            if os.path.isfile(fileName):
+            elif os.path.isfile(fileName):
                 currentAction = "Skipping"
                 yield {
                     "currentAction": currentAction,
