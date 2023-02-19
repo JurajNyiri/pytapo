@@ -1,8 +1,9 @@
 import logging
 import io
-import av
+import subprocess
 import os
 import datetime
+import hashlib
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -17,50 +18,9 @@ class Convert:
         self.addedChunks = 0
         self.lengthLastCalculatedAtChunk = 0
 
-    def saveWithAV(self, fileLocation, fileLength):
-        self.openStream()
-        output = av.open(fileLocation, "w")
-
-        input_stream = self.stream.streams.video[0]
-        codec_name = input_stream.codec_context.name
-        fps = 15
-        out_stream = output.add_stream(codec_name, str(fps))
-        out_stream.width = input_stream.codec_context.width
-        out_stream.height = input_stream.codec_context.height
-        out_stream.pix_fmt = input_stream.codec_context.pix_fmt
-
-        firstTime = None
-        for frame in self.stream.decode(input_stream):
-            if firstTime is None:
-                firstTime = float(frame.pts * input_stream.time_base)
-            currentFrameTime = float(frame.pts * input_stream.time_base)
-            currentLength = currentFrameTime - firstTime
-            if currentLength > fileLength:
-                print("Converted!" + " " * 20)
-                break
-            print(
-                ("Converted: " + str(round(currentLength, 2)) + " / " + str(fileLength))
-                + (" " * 10)
-                + "\r",
-                end="",
-            )
-            img_frame = frame.to_image()
-            out_frame = av.VideoFrame.from_image(img_frame)
-            out_packet = out_stream.encode(out_frame)
-            output.mux(out_packet)
-
-        out_packet = out_stream.encode(None)
-        output.mux(out_packet)
-
-        self.stream.close()
-        output.close()
-
     # cuts and saves the video
     def save(self, fileLocation, fileLength, method="ffmpeg"):
-        # todo: does not work with audio yet
-        if method == "av":
-            return self.saveWithAV(fileLocation, fileLength)
-        elif method == "ffmpeg":  # recommended, fastest and works with audio
+        if method == "ffmpeg":
             tempVideoFileLocation = fileLocation + ".ts"
             file = open(tempVideoFileLocation, "wb")
             file.write(self.writer.getvalue())
@@ -94,32 +54,40 @@ class Convert:
         else:
             return self.addedChunks / 2
 
-    # todo: optimize to use buffer instead
-    def openStream(self):
-        self.writer.seek(io.SEEK_SET)
-        self.stream = av.open(self.writer, mode="r")
-
     # calculates real stream length, hard on processing since it has to go through all the frames
     def calculateLength(self):
-        self.openStream()
-
-        stream = self.stream.streams.video[0]
-
-        firstTime = None
-        lastTime = None
-        for frame in self.stream.decode(stream):
-            if frame.pts:
-                if firstTime is None:
-                    firstTime = float(frame.pts * stream.time_base)
-                lastTime = float(frame.pts * stream.time_base)
-        self.writer.seek(0, io.SEEK_END)
-
-        if firstTime and lastTime:
-            duration = lastTime - firstTime
-            self.known_lengths[self.addedChunks] = duration
+        tempFileLocation = hashlib.md5(self.writer.getvalue()).hexdigest() + ".pytapo"
+        file = open(tempFileLocation, "wb")
+        file.write(self.writer.getvalue())
+        file.close()
+        detectedLength = False
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "fatal",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    tempFileLocation,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            detectedLength = float(result.stdout)
+            self.known_lengths[self.addedChunks] = detectedLength
             self.lengthLastCalculatedAtChunk = self.addedChunks
-            return duration
-        return False
+
+        except Exception as e:
+            print("")
+            print(e)
+            print("Warning: Could not calculate length from stream.")
+            pass
+        if os.path.exists(tempFileLocation):
+            os.remove(tempFileLocation)
+        return detectedLength
 
     # returns length of video, can return an estimate which is usually very close
     def getLength(self, exact=False):
@@ -134,10 +102,17 @@ class Convert:
             + self.getRefreshIntervalForLengthEstimate()
             or lastKnownLength == 0
         ):
-            return self.calculateLength()
+            calculatedLength = self.calculateLength()
+            if calculatedLength is not False:
+                return calculatedLength
+            else:
+                if lastKnownLength != 0:
+                    bytesPerChunk = lastKnownChunk / lastKnownLength
+                    return self.addedChunks / bytesPerChunk
         else:
             bytesPerChunk = lastKnownChunk / lastKnownLength
             return self.addedChunks / bytesPerChunk
+        return False
 
     def write(self, data: bytes, audioData: bytes):
         self.addedChunks += 1
