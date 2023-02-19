@@ -57,8 +57,6 @@ See [example script](https://github.com/JurajNyiri/pytapo/blob/main/experiments/
 You need to call it with following ENV values:
 
 - `HOST`: IP Address of your camera
-- `USER`: 3rd party user account name created via the app for the camera
-- `PASSWORD`: 3rd party user account password created via the app for the camera
 - `PASSWORD_CLOUD`: Tapo cloud account password, it is required to access the recordings, everything is still local
 - `OUTPUT`: Directory where you wish to save all the recordings
 - `DATE`: Date for which to download recordings in format of YYYYMMDD, for example 20230221.

@@ -1,35 +1,63 @@
 from pytapo.media_stream.convert import Convert
 from pytapo import Tapo
 from datetime import datetime
+
 import json
 import os
 
 
 class Downloader:
+    scriptStartTime = int(
+        datetime.now().timestamp()
+    )  # keeps track of when was class first imported in GMT
+
     def __init__(
         self,
         tapo: Tapo,
         startTime: int,
         endTime: int,
         outputDirectory="./",
-        padding=5,
-        overwriteFiles=False,
+        padding=None,
+        overwriteFiles=None,
+        window_size=None,  # affects download speed, with higher values camera sometimes stops sending data
     ):
         self.tapo = tapo
         self.startTime = startTime
         self.endTime = endTime
         self.padding = padding
+        if padding is None:
+            self.padding = 5
+        else:
+            self.padding = int(padding)
+
         self.outputDirectory = outputDirectory
         self.overwriteFiles = overwriteFiles
+        if window_size is None:
+            self.window_size = 200
+        else:
+            self.window_size = int(window_size)
 
     async def download(self, retry=False):
         downloading = True
         while downloading:
-            date = datetime.utcfromtimestamp(int(self.startTime)).strftime(
+            # todo: add a way to not download recent videos to prevent videos in progress
+            dateStart = datetime.utcfromtimestamp(int(self.startTime)).strftime(
+                "%Y-%m-%d %H_%M_%S"
+            )
+            dateEnd = datetime.utcfromtimestamp(int(self.endTime)).strftime(
                 "%Y-%m-%d %H_%M_%S"
             )
             segmentLength = self.endTime - self.startTime
-            fileName = self.outputDirectory + str(date) + ".mp4"
+            fileName = self.outputDirectory + str(dateStart) + "-" + dateEnd + ".mp4"
+            if self.scriptStartTime - 60 < self.endTime:
+                currentAction = "Recording in progress"
+                yield {
+                    "currentAction": currentAction,
+                    "fileName": fileName,
+                    "progress": 0,
+                    "total": 0,
+                }
+                downloading = False
             if os.path.isfile(fileName):
                 currentAction = "Skipping"
                 yield {
@@ -44,6 +72,8 @@ class Downloader:
                 mediaSession = self.tapo.getMediaSession()
                 if retry:
                     mediaSession.set_window_size(50)
+                else:
+                    mediaSession.set_window_size(self.window_size)
                 async with mediaSession:
                     payload = {
                         "type": "request",
@@ -74,21 +104,20 @@ class Downloader:
                             convert.write(resp.plaintext, resp.audioPayload)
                             detectedLength = convert.getLength()
                             if detectedLength is False:
-                                currentAction = "Recording in progress"
                                 yield {
                                     "currentAction": currentAction,
                                     "fileName": fileName,
                                     "progress": 0,
                                     "total": segmentLength,
                                 }
-                                downloading = False
-
-                            yield {
-                                "currentAction": currentAction,
-                                "fileName": fileName,
-                                "progress": detectedLength,
-                                "total": segmentLength,
-                            }
+                                detectedLength = 0
+                            else:
+                                yield {
+                                    "currentAction": currentAction,
+                                    "fileName": fileName,
+                                    "progress": detectedLength,
+                                    "total": segmentLength,
+                                }
                             if (detectedLength > segmentLength + self.padding) or (
                                 retry
                                 and detectedLength

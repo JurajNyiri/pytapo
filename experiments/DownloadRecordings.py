@@ -3,15 +3,19 @@ from pytapo.media_stream.downloader import Downloader
 import asyncio
 import os
 
+# mandatory
 outputDir = os.environ.get("OUTPUT")  # directory path where videos will be saved
 date = os.environ.get("DATE")  # date to download recordings for in format YYYYMMDD
 host = os.environ.get("HOST")  # change to camera IP
-user = os.environ.get("USER")  # your username
-password = os.environ.get("PASSWORD")  # your password
 password_cloud = os.environ.get("PASSWORD_CLOUD")  # set to your cloud password
 
+# optional
+window_size = os.environ.get(
+    "WINDOW_SIZE"
+)  # set to prefferred window size, affects download speed and stability, recommended: 50
+
 print("Connecting to camera...")
-tapo = Tapo(host, user, password, password_cloud)
+tapo = Tapo(host, "admin", password_cloud, password_cloud)
 
 
 async def download_async():
@@ -20,7 +24,13 @@ async def download_async():
     for recording in recordings:
         for key in recording:
             downloader = Downloader(
-                tapo, recording[key]["startTime"], recording[key]["endTime"], outputDir,
+                tapo,
+                recording[key]["startTime"],
+                recording[key]["endTime"],
+                outputDir,
+                None,
+                False,
+                window_size,
             )
             async for status in downloader.download():
                 statusString = status["currentAction"] + " " + status["fileName"]
