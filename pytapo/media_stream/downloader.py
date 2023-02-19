@@ -39,6 +39,11 @@ class Downloader:
         else:
             self.window_size = int(window_size)
 
+    async def downloadFile(self):
+        async for status in self.download():
+            pass
+        return status
+
     async def download(self, retry=False):
         downloading = True
         while downloading:
