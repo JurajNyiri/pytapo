@@ -519,7 +519,7 @@ class Tapo:
             raise Exception("Video playback is not supported by this camera")
         return result["playback"]["search_results"]
 
-    def getRecordings(self, date):
+    def getRecordings(self, date, start_index=0, end_index=999999999):
         result = self.executeFunction(
             "searchVideoOfDay",
             {
@@ -527,9 +527,9 @@ class Tapo:
                     "search_video_utility": {
                         "channel": 0,
                         "date": date,
-                        "end_index": 99,
+                        "end_index": end_index,
                         "id": self.getUserID(),
-                        "start_index": 0,
+                        "start_index": start_index,
                     }
                 }
             },
