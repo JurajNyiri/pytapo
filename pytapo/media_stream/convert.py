@@ -3,7 +3,7 @@ import io
 import subprocess
 import os
 import datetime
-import hashlib
+import tempfile
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -56,37 +56,33 @@ class Convert:
 
     # calculates real stream length, hard on processing since it has to go through all the frames
     def calculateLength(self):
-        tempFileLocation = hashlib.md5(self.writer.getvalue()).hexdigest() + ".pytapo"
-        file = open(tempFileLocation, "wb")
-        file.write(self.writer.getvalue())
-        file.close()
         detectedLength = False
         try:
-            result = subprocess.run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "fatal",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    tempFileLocation,
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-            detectedLength = float(result.stdout)
-            self.known_lengths[self.addedChunks] = detectedLength
-            self.lengthLastCalculatedAtChunk = self.addedChunks
-
+            with tempfile.NamedTemporaryFile() as tmp:
+                tmp.write(self.writer.getvalue())
+                result = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "fatal",
+                        "-show_entries",
+                        "format=duration",
+                        "-of",
+                        "default=noprint_wrappers=1:nokey=1",
+                        tmp.name,
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                detectedLength = float(result.stdout)
+                self.known_lengths[self.addedChunks] = detectedLength
+                self.lengthLastCalculatedAtChunk = self.addedChunks
+                tmp.close()
         except Exception as e:
             print("")
             print(e)
             print("Warning: Could not calculate length from stream.")
             pass
-        if os.path.exists(tempFileLocation):
-            os.remove(tempFileLocation)
         return detectedLength
 
     # returns length of video, can return an estimate which is usually very close
@@ -106,7 +102,7 @@ class Convert:
             if calculatedLength is not False:
                 return calculatedLength
             else:
-                if lastKnownLength != 0:
+                if bool(self.known_lengths) is True:
                     bytesPerChunk = lastKnownChunk / lastKnownLength
                     return self.addedChunks / bytesPerChunk
         else:
