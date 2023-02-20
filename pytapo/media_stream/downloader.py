@@ -51,13 +51,13 @@ class Downloader:
 
     async def downloadFile(self, logger=None):
         if logger is not None:
-            logger.warn("Starting download")
+            logger.debug("Starting download")
         async for status in self.download():
             if logger is not None:
-                logger.warn(status)
+                logger.debug(status)
             pass
         if logger is not None:
-            logger.warn("Finished download")
+            logger.debug("Finished download")
 
         status["md5"] = self.md5(status["fileName"])
 
