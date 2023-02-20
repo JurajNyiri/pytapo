@@ -4,6 +4,7 @@ from datetime import datetime
 
 import json
 import os
+import hashlib
 
 
 class Downloader:
@@ -22,11 +23,13 @@ class Downloader:
         padding=None,
         overwriteFiles=None,
         window_size=None,  # affects download speed, with higher values camera sometimes stops sending data
+        fileName=None,
     ):
         self.tapo = tapo
         self.startTime = startTime
         self.endTime = endTime
         self.padding = padding
+        self.fileName = fileName
         if padding is None:
             self.padding = 5
         else:
@@ -39,6 +42,13 @@ class Downloader:
         else:
             self.window_size = int(window_size)
 
+    def md5(self, fileName):
+        with open(fileName, "rb") as f:
+            file_hash = hashlib.md5()
+            while chunk := f.read(8192):
+                file_hash.update(chunk)
+        return file_hash.hexdigest()
+
     async def downloadFile(self, logger=None):
         if logger is not None:
             logger.warn("Starting download")
@@ -48,6 +58,9 @@ class Downloader:
             pass
         if logger is not None:
             logger.warn("Finished download")
+
+        status["md5"] = self.md5(status["fileName"])
+
         return status
 
     async def download(self, retry=False):
@@ -61,7 +74,12 @@ class Downloader:
                 "%Y-%m-%d %H_%M_%S"
             )
             segmentLength = self.endTime - self.startTime
-            fileName = self.outputDirectory + str(dateStart) + "-" + dateEnd + ".mp4"
+            if self.fileName is None:
+                fileName = (
+                    self.outputDirectory + str(dateStart) + "-" + dateEnd + ".mp4"
+                )
+            else:
+                fileName = self.outputDirectory + self.fileName
             if self.scriptStartTime - self.FRESH_RECORDING_TIME_SECONDS < self.endTime:
                 currentAction = "Recording in progress"
                 yield {
