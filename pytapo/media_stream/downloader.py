@@ -39,9 +39,15 @@ class Downloader:
         else:
             self.window_size = int(window_size)
 
-    async def downloadFile(self):
+    async def downloadFile(self, logger=None):
+        if logger is not None:
+            logger.warn("Starting download")
         async for status in self.download():
+            if logger is not None:
+                logger.warn(status)
             pass
+        if logger is not None:
+            logger.warn("Finished download")
         return status
 
     async def download(self, retry=False):
