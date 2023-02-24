@@ -43,11 +43,13 @@ class Downloader:
             self.window_size = int(window_size)
 
     def md5(self, fileName):
-        with open(fileName, "rb") as f:
-            file_hash = hashlib.md5()
-            while chunk := f.read(8192):
-                file_hash.update(chunk)
-        return file_hash.hexdigest()
+        if os.path.isfile(fileName):
+            with open(fileName, "rb") as f:
+                file_hash = hashlib.md5()
+                while chunk := f.read(8192):
+                    file_hash.update(chunk)
+            return file_hash.hexdigest()
+        return False
 
     async def downloadFile(self, logger=None):
         if logger is not None:
@@ -59,7 +61,9 @@ class Downloader:
         if logger is not None:
             logger.debug("Finished download")
 
-        status["md5"] = self.md5(status["fileName"])
+        md5Hash = self.md5(status["fileName"])
+
+        status["md5"] = "" if md5Hash is False else md5Hash
 
         return status
 
