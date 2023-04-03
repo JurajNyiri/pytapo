@@ -543,19 +543,31 @@ class Tapo:
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
+    def __getSensitivityNumber(self, sensitivity):
+        if sensitivity.isnumeric():
+            sensitivityInt = int(sensitivity)
+            if sensitivityInt >= 0 and sensitivityInt <= 100:
+                return str(sensitivityInt)
+            else:
+                raise Exception("Invalid sensitivity, can be between 0 and 100.")
+        else:
+            if sensitivity == "high":
+                return "80"
+            elif sensitivity == "normal":
+                return "50"
+            elif sensitivity == "low":
+                return "20"
+            else:
+                raise Exception("Invalid sensitivity, can be low, normal or high")
+
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
             "motion_detection": {"motion_det": {"enabled": "on" if enabled else "off"}},
         }
         if sensitivity:
-            if sensitivity == "high":
-                data["motion_detection"]["motion_det"]["digital_sensitivity"] = "80"
-            elif sensitivity == "normal":
-                data["motion_detection"]["motion_det"]["digital_sensitivity"] = "50"
-            elif sensitivity == "low":
-                data["motion_detection"]["motion_det"]["digital_sensitivity"] = "20"
-            else:
-                raise Exception("Invalid sensitivity, can be low, normal or high")
+            data["motion_detection"]["motion_det"][
+                "digital_sensitivity"
+            ] = self.__getSensitivityNumber(sensitivity)
         # child devices always need digital_sensitivity setting
         if (
             self.childID
@@ -572,26 +584,27 @@ class Tapo:
             "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            if sensitivity == "high":
-                data["people_detection"]["detection"]["sensitivity"] = "80"
-            elif sensitivity == "normal":
-                data["people_detection"]["detection"]["sensitivity"] = "50"
-            elif sensitivity == "low":
-                data["people_detection"]["detection"]["sensitivity"] = "20"
-            else:
-                raise Exception("Invalid sensitivity, can be low, normal or high")
-
+            data["people_detection"]["detection"][
+                "sensitivity"
+            ] = self.__getSensitivityNumber(sensitivity)
         return self.executeFunction("setPersonDetectionConfig", data)
+
+    def setPetDetection(self, enabled, sensitivity=False):
+        data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
+        if sensitivity:
+            data["pet_detection"]["detection"][
+                "sensitivity"
+            ] = self.__getSensitivityNumber(sensitivity)
+
+        return self.executeFunction("setPetDetectionConfig", data)
 
     def setBabyCryDetection(self, enabled, sensitivity=False):
         data = {"sound_detection": {"bcd": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
-            if sensitivity == "high":
-                data["sound_detection"]["bcd"]["sensitivity"] = "high"
-            elif sensitivity == "normal":
-                data["sound_detection"]["bcd"]["sensitivity"] = "normal"
-            elif sensitivity == "low":
-                data["sound_detection"]["bcd"]["sensitivity"] = "low"
+            if sensitivity in ["high", "normal", "low"]:
+                if sensitivity == "normal":
+                    sensitivity = "medium"
+                data["sound_detection"]["bcd"]["sensitivity"] = sensitivity
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
