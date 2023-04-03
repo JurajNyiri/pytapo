@@ -583,6 +583,20 @@ class Tapo:
 
         return self.executeFunction("setPersonDetectionConfig", data)
 
+    def setBabyCryDetection(self, enabled, sensitivity=False):
+        data = {"sound_detection": {"bcd": {"enabled": "on" if enabled else "off"}}}
+        if sensitivity:
+            if sensitivity == "high":
+                data["sound_detection"]["bcd"]["sensitivity"] = "high"
+            elif sensitivity == "normal":
+                data["sound_detection"]["bcd"]["sensitivity"] = "normal"
+            elif sensitivity == "low":
+                data["sound_detection"]["bcd"]["sensitivity"] = "low"
+            else:
+                raise Exception("Invalid sensitivity, can be low, normal or high")
+
+        return self.executeFunction("setBCDConfig", data)
+
     def setAutoTrackTarget(self, enabled):
         return self.executeFunction(
             "setTargetTrackConfig",
