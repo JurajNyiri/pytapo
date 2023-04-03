@@ -108,7 +108,7 @@ class Tapo:
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
-    def executeFunction(self, method, params):
+    def executeFunction(self, method, params, retry=False):
         if method == "multipleRequest":
             data = self.performRequest({"method": "multipleRequest", "params": params})[
                 "result"
@@ -130,6 +130,9 @@ class Tapo:
         ):
             return data["result"]
         else:
+            if "error_code" in data and data["error_code"] == -64303 and retry is False:
+                self.setCruise(False)
+                return self.executeFunction(method, params, True)
             raise Exception(
                 "Error: {}, Response: {}".format(
                     data["err_msg"]
@@ -696,6 +699,16 @@ class Tapo:
                 }
             },
         )
+
+    def setCruise(self, enabled, coord=False):
+        if coord not in ["x", "y"] and coord is not False:
+            raise Exception("Invalid coord parameter. Can be 'x' or 'y'.")
+        if enabled and coord is not False:
+            return self.executeFunction(
+                "cruiseMove", {"motor": {"cruise": {"coord": coord}}},
+            )
+        else:
+            return self.executeFunction("cruiseStop", {"motor": {"cruise_stop": {}}},)
 
     def reboot(self):
         return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
