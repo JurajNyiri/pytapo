@@ -124,7 +124,10 @@ class Tapo:
         if type(data) == list:
             return data
 
-        if "result" in data:
+        if "result" in data and (
+            "error_code" not in data
+            or ("error_code" in data and data["error_code"] == 0)
+        ):
             return data["result"]
         else:
             raise Exception(
