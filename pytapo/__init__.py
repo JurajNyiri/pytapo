@@ -598,15 +598,48 @@ class Tapo:
 
         return self.executeFunction("setPetDetectionConfig", data)
 
+    def setBarkDetection(self, enabled, sensitivity=False):
+        data = {
+            "bark_detection": {"detection": {"enabled": "on" if enabled else "off"}}
+        }
+        if sensitivity:
+            data["bark_detection"]["detection"][
+                "sensitivity"
+            ] = self.__getSensitivityNumber(sensitivity)
+
+        return self.executeFunction("setBarkDetectionConfig", data)
+
+    def setGlassBreakDetection(self, enabled, sensitivity=False):
+        data = {
+            "glass_detection": {"detection": {"enabled": "on" if enabled else "off"}}
+        }
+        if sensitivity:
+            data["glass_detection"]["detection"][
+                "sensitivity"
+            ] = self.__getSensitivityNumber(sensitivity)
+
+        return self.executeFunction("setGlassDetectionConfig", data)
+
+    def setTamperDetection(self, enabled, sensitivity=False):
+        data = {
+            "tamper_detection": {"tamper_det": {"enabled": "on" if enabled else "off"}}
+        }
+        if sensitivity not in ["high", "normal", "low"]:
+            raise Exception("Invalid sensitivity, can be low, normal or high")
+        if sensitivity == "normal":
+            sensitivity = "medium"
+        data["tamper_detection"]["tamper_det"]["sensitivity"] = sensitivity
+
+        return self.executeFunction("setTamperDetectionConfig", data)
+
     def setBabyCryDetection(self, enabled, sensitivity=False):
         data = {"sound_detection": {"bcd": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
-            if sensitivity in ["high", "normal", "low"]:
-                if sensitivity == "normal":
-                    sensitivity = "medium"
-                data["sound_detection"]["bcd"]["sensitivity"] = sensitivity
-            else:
+            if sensitivity not in ["high", "normal", "low"]:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
+            if sensitivity == "normal":
+                sensitivity = "medium"
+            data["sound_detection"]["bcd"]["sensitivity"] = sensitivity
 
         return self.executeFunction("setBCDConfig", data)
 
