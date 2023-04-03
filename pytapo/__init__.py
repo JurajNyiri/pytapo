@@ -681,11 +681,12 @@ class Tapo:
         data = {
             "tamper_detection": {"tamper_det": {"enabled": "on" if enabled else "off"}}
         }
-        if sensitivity not in ["high", "normal", "low"]:
-            raise Exception("Invalid sensitivity, can be low, normal or high")
-        if sensitivity == "normal":
-            sensitivity = "medium"
-        data["tamper_detection"]["tamper_det"]["sensitivity"] = sensitivity
+        if sensitivity:
+            if sensitivity not in ["high", "normal", "low"]:
+                raise Exception("Invalid sensitivity, can be low, normal or high")
+            if sensitivity == "normal":
+                sensitivity = "medium"
+            data["tamper_detection"]["tamper_det"]["sensitivity"] = sensitivity
 
         return self.executeFunction("setTamperDetectionConfig", data)
 
