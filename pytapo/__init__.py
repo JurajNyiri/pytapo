@@ -310,16 +310,6 @@ class Tapo:
         )
         return data["cet"]["media_encrypt"]
 
-    def getMotionDetection(self):
-        return self.executeFunction(
-            "getDetectionConfig", {"motion_detection": {"name": ["motion_det"]}},
-        )["motion_detection"]["motion_det"]
-
-    def getPersonDetection(self):
-        return self.executeFunction(
-            "getPersonDetectionConfig", {"people_detection": {"name": ["detection"]}},
-        )["people_detection"]["detection"]
-
     def getAlarm(self):
         # ensure reverse compatibility, simulate the same response for children devices
         if self.childID:
@@ -563,6 +553,11 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
+    def getMotionDetection(self):
+        return self.executeFunction(
+            "getDetectionConfig", {"motion_detection": {"name": ["motion_det"]}},
+        )["motion_detection"]["motion_det"]
+
     def setMotionDetection(self, enabled, sensitivity=False):
         data = {
             "motion_detection": {"motion_det": {"enabled": "on" if enabled else "off"}},
@@ -582,6 +577,11 @@ class Tapo:
             ]
         return self.executeFunction("setDetectionConfig", data)
 
+    def getPersonDetection(self):
+        return self.executeFunction(
+            "getPersonDetectionConfig", {"people_detection": {"name": ["detection"]}},
+        )["people_detection"]["detection"]
+
     def setPersonDetection(self, enabled, sensitivity=False):
         data = {
             "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
@@ -592,6 +592,11 @@ class Tapo:
             ] = self.__getSensitivityNumber(sensitivity)
         return self.executeFunction("setPersonDetectionConfig", data)
 
+    def getPetDetection(self):
+        return self.executeFunction(
+            "getPetDetectionConfig", {"pet_detection": {"name": ["detection"]}},
+        )["pet_detection"]["detection"]
+
     def setPetDetection(self, enabled, sensitivity=False):
         data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
@@ -600,6 +605,11 @@ class Tapo:
             ] = self.__getSensitivityNumber(sensitivity)
 
         return self.executeFunction("setPetDetectionConfig", data)
+
+    def getBarkDetection(self):
+        return self.executeFunction(
+            "getBarkDetectionConfig", {"bark_detection": {"name": ["detection"]}},
+        )["bark_detection"]["detection"]
 
     def setBarkDetection(self, enabled, sensitivity=False):
         data = {
