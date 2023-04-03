@@ -948,6 +948,34 @@ class Tapo:
                         "params": {"people_detection": {"name": ["detection"]}},
                     },
                     {
+                        "method": "getVehicleDetectionConfig",
+                        "params": {"vehicle_detection": {"name": ["detection"]}},
+                    },
+                    {
+                        "method": "getBCDConfig",
+                        "params": {"sound_detection": {"name": ["bcd"]}},
+                    },
+                    {
+                        "method": "getPetDetectionConfig",
+                        "params": {"pet_detection": {"name": ["detection"]}},
+                    },
+                    {
+                        "method": "getBarkDetectionConfig",
+                        "params": {"bark_detection": {"name": ["detection"]}},
+                    },
+                    {
+                        "method": "getMeowDetectionConfig",
+                        "params": {"meow_detection": {"name": ["detection"]}},
+                    },
+                    {
+                        "method": "getGlassDetectionConfig",
+                        "params": {"glass_detection": {"name": ["detection"]}},
+                    },
+                    {
+                        "method": "getTamperDetectionConfig",
+                        "params": {"tamper_detection": {"name": "tamper_det"}},
+                    },
+                    {
                         "method": "getLensMaskConfig",
                         "params": {"lens_mask": {"name": ["lens_mask_info"]}},
                     },
