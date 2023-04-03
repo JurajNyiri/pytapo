@@ -595,6 +595,21 @@ class Tapo:
             ] = self.__getSensitivityNumber(sensitivity)
         return self.executeFunction("setPersonDetectionConfig", data)
 
+    def getVehicleDetection(self):
+        return self.executeFunction(
+            "getVehicleDetectionConfig", {"vehicle_detection": {"name": ["detection"]}},
+        )["vehicle_detection"]["detection"]
+
+    def setVehicleDetection(self, enabled, sensitivity=False):
+        data = {
+            "vehicle_detection": {"detection": {"enabled": "on" if enabled else "off"}}
+        }
+        if sensitivity:
+            data["vehicle_detection"]["detection"][
+                "sensitivity"
+            ] = self.__getSensitivityNumber(sensitivity)
+        return self.executeFunction("setVehicleDetectionConfig", data)
+
     def getPetDetection(self):
         return self.executeFunction(
             "getPetDetectionConfig", {"pet_detection": {"name": ["detection"]}},
