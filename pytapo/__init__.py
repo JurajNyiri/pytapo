@@ -679,6 +679,12 @@ class Tapo:
             "getBCDConfig", {"sound_detection": {"name": ["bcd"]}},
         )["sound_detection"]["bcd"]
 
+    def getCruise(self):
+        data = self.executeFunction(
+            "getPatrolAction", {"patrol": {"get_patrol_action": {}}}
+        )
+        return data
+
     def setBabyCryDetection(self, enabled, sensitivity=False):
         data = {"sound_detection": {"bcd": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
