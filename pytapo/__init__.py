@@ -611,6 +611,11 @@ class Tapo:
             "getBarkDetectionConfig", {"bark_detection": {"name": ["detection"]}},
         )["bark_detection"]["detection"]
 
+    def getMeowDetection(self):
+        return self.executeFunction(
+            "getMeowDetectionConfig", {"meow_detection": {"name": ["detection"]}},
+        )["meow_detection"]["detection"]
+
     def setBarkDetection(self, enabled, sensitivity=False):
         data = {
             "bark_detection": {"detection": {"enabled": "on" if enabled else "off"}}
@@ -621,6 +626,17 @@ class Tapo:
             ] = self.__getSensitivityNumber(sensitivity)
 
         return self.executeFunction("setBarkDetectionConfig", data)
+
+    def setMeowDetection(self, enabled, sensitivity=False):
+        data = {
+            "meow_detection": {"detection": {"enabled": "on" if enabled else "off"}}
+        }
+        if sensitivity:
+            data["meow_detection"]["detection"][
+                "sensitivity"
+            ] = self.__getSensitivityNumber(sensitivity)
+
+        return self.executeFunction("setMeowDetectionConfig", data)
 
     def getGlassBreakDetection(self):
         return self.executeFunction(
