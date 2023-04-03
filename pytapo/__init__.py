@@ -609,6 +609,11 @@ class Tapo:
 
         return self.executeFunction("setBarkDetectionConfig", data)
 
+    def getGlassBreakDetection(self):
+        return self.executeFunction(
+            "getGlassDetectionConfig", {"glass_detection": {"name": ["detection"]}},
+        )["glass_detection"]["detection"]
+
     def setGlassBreakDetection(self, enabled, sensitivity=False):
         data = {
             "glass_detection": {"detection": {"enabled": "on" if enabled else "off"}}
@@ -619,6 +624,11 @@ class Tapo:
             ] = self.__getSensitivityNumber(sensitivity)
 
         return self.executeFunction("setGlassDetectionConfig", data)
+
+    def getTamperDetection(self):
+        return self.executeFunction(
+            "getTamperDetectionConfig", {"tamper_detection": {"name": "tamper_det"}},
+        )["tamper_detection"]["tamper_det"]
 
     def setTamperDetection(self, enabled, sensitivity=False):
         data = {
@@ -631,6 +641,11 @@ class Tapo:
         data["tamper_detection"]["tamper_det"]["sensitivity"] = sensitivity
 
         return self.executeFunction("setTamperDetectionConfig", data)
+
+    def getBabyCryDetection(self):
+        return self.executeFunction(
+            "getBCDConfig", {"sound_detection": {"name": ["bcd"]}},
+        )["sound_detection"]["bcd"]
 
     def setBabyCryDetection(self, enabled, sensitivity=False):
         data = {"sound_detection": {"bcd": {"enabled": "on" if enabled else "off"}}}
