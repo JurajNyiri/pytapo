@@ -51,15 +51,15 @@ class Downloader:
             return file_hash.hexdigest()
         return False
 
-    async def downloadFile(self, logger=None):
-        if logger is not None:
-            logger.debug("Starting download")
+    async def downloadFile(self, callbackFunc=None):
+        if callbackFunc is not None:
+            callbackFunc("Starting download")
         async for status in self.download():
-            if logger is not None:
-                logger.debug(status)
+            if callbackFunc is not None:
+                callbackFunc(status)
             pass
-        if logger is not None:
-            logger.debug("Finished download")
+        if callbackFunc is not None:
+            callbackFunc("Finished download")
 
         md5Hash = self.md5(status["fileName"])
 
