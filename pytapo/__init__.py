@@ -2,6 +2,7 @@
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
 
+
 import hashlib
 import json
 
@@ -215,6 +216,75 @@ class Tapo:
             }
         )
         return childDevices["result"]["child_device_list"]
+
+    def getEvents(self, startTime=False, endTime=False):
+        nowTS = int(datetime.timestamp(datetime.now()))
+        if startTime is False:
+            startTime = nowTS - (10 * 60)
+        if endTime is False:
+            endTime = nowTS + 60
+
+        responseData = self.executeFunction(
+            "multipleRequest",
+            {
+                "requests": [
+                    {
+                        "method": "searchDetectionList", "params": {
+                            "playback": {
+                                "search_detection_list": {
+                                    "start_index": 0,
+                                    "channel": 0,
+                                    "start_time": startTime,
+                                    "end_time": endTime,
+                                    "end_index": 99
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "method": "getClockStatus", "params": {
+                            "system": {
+                                "name": "clock_status"
+                            }
+                        }
+                    }
+                ]
+            },
+        )
+        data = {}
+        events = []
+        for response in responseData:
+            data[response['method']] = response['result']
+
+        detectionsReturned = (
+            'searchDetectionList' in data
+            and 'playback' in data['searchDetectionList']
+            and 'search_detection_list' in data['searchDetectionList']['playback']
+        )
+        timeReturned = (
+            'getClockStatus' in data
+            and 'system' in data['getClockStatus']
+            and 'clock_status' in data['getClockStatus']['system']
+            and 'seconds_from_1970' in data['getClockStatus']['system']['clock_status']
+        )
+
+        if detectionsReturned and timeReturned:
+            currentCameraTime = (
+                datetime.strptime(
+                    data['getClockStatus']['system']['clock_status']['local_time'],
+                    "%Y-%m-%d %H:%M:%S"
+                ).timestamp()
+            )
+            timeCorrection = currentCameraTime - nowTS  # calculates camera time diff in seconds
+            cameraLocalTS = nowTS + timeCorrection  # local timestamp from camera, adjusted for camera time
+
+            for event in data['searchDetectionList']['playback']['search_detection_list']:
+                event['start_time'] = event['start_time']
+                event['end_time'] = event['end_time']
+                event['startRelative'] = cameraLocalTS - event['start_time']
+                event['endRelative'] = cameraLocalTS - event['end_time']
+                events.append(event)
+        return events
 
     # returns empty response for child devices
     def getOsd(self):
@@ -881,13 +951,13 @@ class Tapo:
     # does not work for child devices, function discovery needed
     def startManualAlarm(self):
         return self.performRequest(
-            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "start"}},}
+            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "start"}}, }
         )
 
     # does not work for child devices, function discovery needed
     def stopManualAlarm(self):
         return self.performRequest(
-            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},}
+            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "stop"}}, }
         )
 
     @staticmethod
