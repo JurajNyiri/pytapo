@@ -8,10 +8,6 @@ import hashlib
 
 
 class Downloader:
-    scriptStartTime = int(
-        datetime.now().timestamp()
-    )  # keeps track of when was class first imported in GMT
-
     FRESH_RECORDING_TIME_SECONDS = 60
 
     def __init__(
@@ -30,6 +26,9 @@ class Downloader:
         self.endTime = endTime
         self.padding = padding
         self.fileName = fileName
+        self.scriptStartTime = int(
+            datetime.now().timestamp()
+        )  # keeps track of when was class initiated
         if padding is None:
             self.padding = 5
         else:
