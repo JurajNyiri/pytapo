@@ -59,7 +59,7 @@ class Convert:
     def calculateLength(self):
         detectedLength = False
         try:
-            with tempfile.NamedTemporaryFile() as tmp:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(self.writer.getvalue())
                 result = subprocess.run(
                     [
@@ -78,7 +78,7 @@ class Convert:
                 detectedLength = float(result.stdout)
                 self.known_lengths[self.addedChunks] = detectedLength
                 self.lengthLastCalculatedAtChunk = self.addedChunks
-                tmp.close()
+            os.unlink(tmp.name)
         except Exception as e:
             print("")
             print(e)
