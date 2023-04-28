@@ -30,11 +30,12 @@ class Convert:
             file.write(self.audioWriter.getvalue())
             file.close()
 
-            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}" >/dev/null 2>&1'.format(
+            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
                 inputVideoFile=tempVideoFileLocation,
                 inputAudioFile=tempAudioFileLocation,
                 outputFile=fileLocation,
                 videoLength=str(datetime.timedelta(seconds=fileLength)),
+                devnull=os.devnull
             )
             os.system(cmd)
 
@@ -58,7 +59,7 @@ class Convert:
     def calculateLength(self):
         detectedLength = False
         try:
-            with tempfile.NamedTemporaryFile() as tmp:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(self.writer.getvalue())
                 result = subprocess.run(
                     [
@@ -77,7 +78,7 @@ class Convert:
                 detectedLength = float(result.stdout)
                 self.known_lengths[self.addedChunks] = detectedLength
                 self.lengthLastCalculatedAtChunk = self.addedChunks
-                tmp.close()
+            os.unlink(tmp.name)
         except Exception as e:
             print("")
             print(e)
