@@ -29,6 +29,7 @@ class Tapo:
         self.stok = False
         self.userID = False
         self.childID = childID
+        self.timeCorrection = False
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -217,72 +218,60 @@ class Tapo:
         )
         return childDevices["result"]["child_device_list"]
 
+    def getTimeCorrection(self):
+        if self.timeCorrection is False:
+            currentTime = self.getTime()
+
+            timeReturned = (
+                "system" in currentTime
+                and "clock_status" in currentTime["system"]
+                and "seconds_from_1970" in currentTime["system"]["clock_status"]
+            )
+            if timeReturned:
+                nowTS = int(datetime.timestamp(datetime.now()))
+                self.timeCorrection = (
+                    nowTS - currentTime["system"]["clock_status"]["seconds_from_1970"]
+                )
+        return self.timeCorrection
+
     def getEvents(self, startTime=False, endTime=False):
+        timeCorrection = self.getTimeCorrection()
+        if not timeCorrection:
+            raise Exception("Failed to get correct camera time.")
+
         nowTS = int(datetime.timestamp(datetime.now()))
         if startTime is False:
-            startTime = nowTS - (10 * 60)
+            startTime = nowTS + (-1 * timeCorrection) - (10 * 60)
         if endTime is False:
-            endTime = nowTS + 60
+            endTime = nowTS + (-1 * timeCorrection) + 60
 
         responseData = self.executeFunction(
-            "multipleRequest",
+            "searchDetectionList",
             {
-                "requests": [
-                    {
-                        "method": "searchDetectionList", "params": {
-                            "playback": {
-                                "search_detection_list": {
-                                    "start_index": 0,
-                                    "channel": 0,
-                                    "start_time": startTime,
-                                    "end_time": endTime,
-                                    "end_index": 99
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "method": "getClockStatus", "params": {
-                            "system": {
-                                "name": "clock_status"
-                            }
-                        }
+                "playback": {
+                    "search_detection_list": {
+                        "start_index": 0,
+                        "channel": 0,
+                        "start_time": startTime,
+                        "end_time": endTime,
+                        "end_index": 99,
                     }
-                ]
+                }
             },
         )
-        data = {}
         events = []
-        for response in responseData:
-            data[response['method']] = response['result']
 
         detectionsReturned = (
-            'searchDetectionList' in data
-            and 'playback' in data['searchDetectionList']
-            and 'search_detection_list' in data['searchDetectionList']['playback']
-        )
-        timeReturned = (
-            'getClockStatus' in data
-            and 'system' in data['getClockStatus']
-            and 'clock_status' in data['getClockStatus']['system']
-            and 'seconds_from_1970' in data['getClockStatus']['system']['clock_status']
+            "playback" in responseData
+            and "search_detection_list" in responseData["playback"]
         )
 
-        if detectionsReturned and timeReturned:
-            currentCameraTime = (
-                datetime.strptime(
-                    data['getClockStatus']['system']['clock_status']['local_time'],
-                    "%Y-%m-%d %H:%M:%S"
-                ).timestamp()
-            )
-            timeCorrection = currentCameraTime - nowTS  # calculates camera time diff in seconds
-            cameraLocalTS = nowTS + timeCorrection  # local timestamp from camera, adjusted for camera time
-
-            for event in data['searchDetectionList']['playback']['search_detection_list']:
-                event['start_time'] = event['start_time']
-                event['end_time'] = event['end_time']
-                event['startRelative'] = cameraLocalTS - event['start_time']
-                event['endRelative'] = cameraLocalTS - event['end_time']
+        if detectionsReturned:
+            for event in responseData["playback"]["search_detection_list"]:
+                event["start_time"] = event["start_time"] + timeCorrection
+                event["end_time"] = event["end_time"] + timeCorrection
+                event["startRelative"] = nowTS - event["start_time"]
+                event["endRelative"] = nowTS - event["end_time"]
                 events.append(event)
         return events
 
@@ -291,7 +280,8 @@ class Tapo:
         # no, asking for all does not work...
         if self.childID:
             return self.executeFunction(
-                "getOsd", {"OSD": {"name": ["logo", "date", "label"]}},
+                "getOsd",
+                {"OSD": {"name": ["logo", "date", "label"]}},
             )
         else:
             return self.executeFunction(
@@ -373,13 +363,15 @@ class Tapo:
 
     def getPrivacyMode(self):
         data = self.executeFunction(
-            "getLensMaskConfig", {"lens_mask": {"name": ["lens_mask_info"]}},
+            "getLensMaskConfig",
+            {"lens_mask": {"name": ["lens_mask_info"]}},
         )
         return data["lens_mask"]["lens_mask_info"]
 
     def getMediaEncrypt(self):
         data = self.executeFunction(
-            "getMediaEncrypt", {"cet": {"name": ["media_encrypt"]}},
+            "getMediaEncrypt",
+            {"cet": {"name": ["media_encrypt"]}},
         )
         return data["cet"]["media_encrypt"]
 
@@ -400,7 +392,8 @@ class Tapo:
             }
         else:
             return self.executeFunction(
-                "getLastAlarmInfo", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                "getLastAlarmInfo",
+                {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
             )["msg_alarm"]["chn1_msg_alarm_info"]
 
     def getAlarmConfig(self):
@@ -419,11 +412,15 @@ class Tapo:
 
     def getRotationStatus(self):
         return self.executeFunction(
-            "getRotationStatus", {"image": {"name": ["switch"]}},
+            "getRotationStatus",
+            {"image": {"name": ["switch"]}},
         )
 
     def getLED(self):
-        return self.executeFunction("getLedStatus", {"led": {"name": ["config"]}},)[
+        return self.executeFunction(
+            "getLedStatus",
+            {"led": {"name": ["config"]}},
+        )[
             "led"
         ]["config"]
 
@@ -628,7 +625,8 @@ class Tapo:
 
     def getMotionDetection(self):
         return self.executeFunction(
-            "getDetectionConfig", {"motion_detection": {"name": ["motion_det"]}},
+            "getDetectionConfig",
+            {"motion_detection": {"name": ["motion_det"]}},
         )["motion_detection"]["motion_det"]
 
     def setMotionDetection(self, enabled, sensitivity=False):
@@ -652,7 +650,8 @@ class Tapo:
 
     def getPersonDetection(self):
         return self.executeFunction(
-            "getPersonDetectionConfig", {"people_detection": {"name": ["detection"]}},
+            "getPersonDetectionConfig",
+            {"people_detection": {"name": ["detection"]}},
         )["people_detection"]["detection"]
 
     def setPersonDetection(self, enabled, sensitivity=False):
@@ -667,7 +666,8 @@ class Tapo:
 
     def getVehicleDetection(self):
         return self.executeFunction(
-            "getVehicleDetectionConfig", {"vehicle_detection": {"name": ["detection"]}},
+            "getVehicleDetectionConfig",
+            {"vehicle_detection": {"name": ["detection"]}},
         )["vehicle_detection"]["detection"]
 
     def setVehicleDetection(self, enabled, sensitivity=False):
@@ -682,7 +682,8 @@ class Tapo:
 
     def getPetDetection(self):
         return self.executeFunction(
-            "getPetDetectionConfig", {"pet_detection": {"name": ["detection"]}},
+            "getPetDetectionConfig",
+            {"pet_detection": {"name": ["detection"]}},
         )["pet_detection"]["detection"]
 
     def setPetDetection(self, enabled, sensitivity=False):
@@ -696,12 +697,14 @@ class Tapo:
 
     def getBarkDetection(self):
         return self.executeFunction(
-            "getBarkDetectionConfig", {"bark_detection": {"name": ["detection"]}},
+            "getBarkDetectionConfig",
+            {"bark_detection": {"name": ["detection"]}},
         )["bark_detection"]["detection"]
 
     def getMeowDetection(self):
         return self.executeFunction(
-            "getMeowDetectionConfig", {"meow_detection": {"name": ["detection"]}},
+            "getMeowDetectionConfig",
+            {"meow_detection": {"name": ["detection"]}},
         )["meow_detection"]["detection"]
 
     def setBarkDetection(self, enabled, sensitivity=False):
@@ -728,7 +731,8 @@ class Tapo:
 
     def getGlassBreakDetection(self):
         return self.executeFunction(
-            "getGlassDetectionConfig", {"glass_detection": {"name": ["detection"]}},
+            "getGlassDetectionConfig",
+            {"glass_detection": {"name": ["detection"]}},
         )["glass_detection"]["detection"]
 
     def setGlassBreakDetection(self, enabled, sensitivity=False):
@@ -744,7 +748,8 @@ class Tapo:
 
     def getTamperDetection(self):
         return self.executeFunction(
-            "getTamperDetectionConfig", {"tamper_detection": {"name": "tamper_det"}},
+            "getTamperDetectionConfig",
+            {"tamper_detection": {"name": "tamper_det"}},
         )["tamper_detection"]["tamper_det"]
 
     def setTamperDetection(self, enabled, sensitivity=False):
@@ -762,7 +767,8 @@ class Tapo:
 
     def getBabyCryDetection(self):
         return self.executeFunction(
-            "getBCDConfig", {"sound_detection": {"name": ["bcd"]}},
+            "getBCDConfig",
+            {"sound_detection": {"name": ["bcd"]}},
         )["sound_detection"]["bcd"]
 
     def getCruise(self):
@@ -797,10 +803,14 @@ class Tapo:
             raise Exception("Invalid coord parameter. Can be 'x' or 'y'.")
         if enabled and coord is not False:
             return self.executeFunction(
-                "cruiseMove", {"motor": {"cruise": {"coord": coord}}},
+                "cruiseMove",
+                {"motor": {"cruise": {"coord": coord}}},
             )
         else:
-            return self.executeFunction("cruiseStop", {"motor": {"cruise_stop": {}}},)
+            return self.executeFunction(
+                "cruiseStop",
+                {"motor": {"cruise_stop": {}}},
+            )
 
     def reboot(self):
         return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
@@ -909,7 +919,8 @@ class Tapo:
 
     def setRotationStatus(self, flip_type):
         return self.executeFunction(
-            "setRotationStatus", {"image": {"switch": {"flip_type": flip_type}}},
+            "setRotationStatus",
+            {"image": {"switch": {"flip_type": flip_type}}},
         )
 
     def getForceWhitelampState(self) -> bool:
@@ -951,13 +962,19 @@ class Tapo:
     # does not work for child devices, function discovery needed
     def startManualAlarm(self):
         return self.performRequest(
-            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "start"}}, }
+            {
+                "method": "do",
+                "msg_alarm": {"manual_msg_alarm": {"action": "start"}},
+            }
         )
 
     # does not work for child devices, function discovery needed
     def stopManualAlarm(self):
         return self.performRequest(
-            {"method": "do", "msg_alarm": {"manual_msg_alarm": {"action": "stop"}}, }
+            {
+                "method": "do",
+                "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},
+            }
         )
 
     @staticmethod
