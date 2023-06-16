@@ -236,7 +236,7 @@ class Tapo:
 
     def getEvents(self, startTime=False, endTime=False):
         timeCorrection = self.getTimeCorrection()
-        if not timeCorrection:
+        if timeCorrection is False:
             raise Exception("Failed to get correct camera time.")
 
         nowTS = int(datetime.timestamp(datetime.now()))
