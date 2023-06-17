@@ -254,7 +254,7 @@ class Tapo:
                         "channel": 0,
                         "start_time": startTime,
                         "end_time": endTime,
-                        "end_index": 99,
+                        "end_index": 999,
                     }
                 }
             },
