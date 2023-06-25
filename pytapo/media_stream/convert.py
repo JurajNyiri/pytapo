@@ -4,6 +4,7 @@ import subprocess
 import os
 import datetime
 import tempfile
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -18,34 +19,47 @@ class Convert:
         self.addedChunks = 0
         self.lengthLastCalculatedAtChunk = 0
 
-    # cuts and saves the video
-    def save(self, fileLocation, fileLength, method="ffmpeg"):
+    def save(self, fileLocation: str, fileLength: int, method: str = "ffmpeg") -> None:
         if method == "ffmpeg":
-            tempVideoFileLocation = fileLocation + ".ts"
-            file = open(tempVideoFileLocation, "wb")
-            file.write(self.writer.getvalue())
-            file.close()
-            tempAudioFileLocation = fileLocation + ".alaw"
-            file = open(tempAudioFileLocation, "wb")
-            file.write(self.audioWriter.getvalue())
-            file.close()
+            tempVideoFileLocation = f"{fileLocation}.ts"
+            with open(tempVideoFileLocation, "wb") as file:
+                file.write(self.writer.getvalue())
+            tempAudioFileLocation = f"{fileLocation}.alaw"
+            with open(tempAudioFileLocation, "wb") as file:
+                file.write(self.audioWriter.getvalue())
 
-            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
-                inputVideoFile=tempVideoFileLocation,
-                inputAudioFile=tempAudioFileLocation,
-                outputFile=fileLocation,
-                videoLength=str(datetime.timedelta(seconds=fileLength)),
-                devnull=os.devnull
-            )
-            os.system(cmd)
-
+            cmd = [
+                "ffmpeg",
+                "-ss",
+                "00:00:00",
+                "-i",
+                tempVideoFileLocation,
+                "-f",
+                "alaw",
+                "-ar",
+                "8000",
+                "-i",
+                tempAudioFileLocation,
+                "-t",
+                str(datetime.timedelta(seconds=fileLength)),
+                "-y",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                fileLocation,
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             os.remove(tempVideoFileLocation)
             os.remove(tempAudioFileLocation)
         else:
-            raise Exception("Method not supported")
+            raise ValueError("Method not supported")
 
-    # calculates ideal refresh interval for a real time estimate of downloaded data
-    def getRefreshIntervalForLengthEstimate(self):
+    def getRefreshIntervalForLengthEstimate(self) -> int:
         if self.addedChunks < 100:
             return 50
         elif self.addedChunks < 1000:
@@ -53,64 +67,51 @@ class Convert:
         elif self.addedChunks < 10000:
             return 5000
         else:
-            return self.addedChunks / 2
+            return self.addedChunks // 2
 
-    # calculates real stream length, hard on processing since it has to go through all the frames
-    def calculateLength(self):
-        detectedLength = False
-        try:
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(self.writer.getvalue())
-                result = subprocess.run(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "fatal",
-                        "-show_entries",
-                        "format=duration",
-                        "-of",
-                        "default=noprint_wrappers=1:nokey=1",
-                        tmp.name,
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                )
-                detectedLength = float(result.stdout)
-                self.known_lengths[self.addedChunks] = detectedLength
+    def calculateLength(self) -> Optional[float]:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(self.writer.getvalue())
+            tmp.flush()
+
+            cmd = [
+                "ffprobe",
+                "-v",
+                "fatal",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                tmp.name,
+            ]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            if result.returncode == 0:
+                detected_length = float(result.stdout)
+                self.known_lengths[self.addedChunks] = detected_length
                 self.lengthLastCalculatedAtChunk = self.addedChunks
-            os.unlink(tmp.name)
-        except Exception as e:
-            print("")
-            print(e)
-            print("Warning: Could not calculate length from stream.")
-            pass
-        return detectedLength
+                return detected_length
+            else:
+                logger.error("Could not calculate length from stream.")
+                return None
 
-    # returns length of video, can return an estimate which is usually very close
-    def getLength(self, exact=False):
+    def getLength(self, exact=False) -> Optional[float]:
         if bool(self.known_lengths) is True:
-            lastKnownChunk = list(self.known_lengths)[-1]
-            lastKnownLength = self.known_lengths[lastKnownChunk]
+            last_known_chunk = list(self.known_lengths)[-1]
+            last_known_length = self.known_lengths[last_known_chunk]
         if (
             exact
             or not self.known_lengths
             or self.addedChunks
             > self.lengthLastCalculatedAtChunk
             + self.getRefreshIntervalForLengthEstimate()
-            or lastKnownLength == 0
+            or last_known_length == 0
         ):
-            calculatedLength = self.calculateLength()
-            if calculatedLength is not False:
-                return calculatedLength
-            else:
-                if bool(self.known_lengths) is True:
-                    bytesPerChunk = lastKnownChunk / lastKnownLength
-                    return self.addedChunks / bytesPerChunk
+            return self.calculateLength()
         else:
-            bytesPerChunk = lastKnownChunk / lastKnownLength
-            return self.addedChunks / bytesPerChunk
-        return False
+            bytes_per_chunk = last_known_chunk / last_known_length
+            return self.addedChunks / bytes_per_chunk
 
-    def write(self, data: bytes, audioData: bytes):
+    def write(self, data: bytes, audioData: bytes) -> None:
         self.addedChunks += 1
-        return self.writer.write(data) and self.audioWriter.write(audioData)
+        self.writer.write(data)
+        self.audioWriter.write(audioData)
