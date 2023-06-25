@@ -95,7 +95,7 @@ class Convert:
                 return None
 
     def getLength(self, exact=False) -> Optional[float]:
-        if bool(self.known_lengths) is True:
+        if bool(self.known_lengths):
             last_known_chunk = list(self.known_lengths)[-1]
             last_known_length = self.known_lengths[last_known_chunk]
         if (
@@ -107,9 +107,8 @@ class Convert:
             or last_known_length == 0
         ):
             return self.calculateLength()
-        else:
-            bytes_per_chunk = last_known_chunk / last_known_length
-            return self.addedChunks / bytes_per_chunk
+        bytes_per_chunk = last_known_chunk / last_known_length
+        return self.addedChunks / bytes_per_chunk
 
     def write(self, data: bytes, audioData: bytes) -> None:
         self.addedChunks += 1

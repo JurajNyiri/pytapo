@@ -50,7 +50,7 @@ jobs:
 
       - name: Run tests
         run: |
-          poetry run pytest --cov=pytapo/
+          poetry run pytest test_pytapo.py --cov=pytapo/
 
       - name: Generate coverage report
         run: |

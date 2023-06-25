@@ -53,15 +53,24 @@ class Downloader:
         downloading = True
         retry = False
         while downloading:
-            yield from self._handle_download(retry)
+            async for status in await self._handle_download(retry):
+                yield status
             downloading = False
             retry = not retry
 
-    def _handle_download(self, retry=False):
-        dateStart = datetime.utcfromtimestamp(int(self.startTime)).strftime("%Y-%m-%d %H_%M_%S")
-        dateEnd = datetime.utcfromtimestamp(int(self.endTime)).strftime("%Y-%m-%d %H_%M_%S")
+    async def _handle_download(self, retry=False):
+        dateStart = datetime.utcfromtimestamp(int(self.startTime)).strftime(
+            "%Y-%m-%d %H_%M_%S"
+        )
+        dateEnd = datetime.utcfromtimestamp(int(self.endTime)).strftime(
+            "%Y-%m-%d %H_%M_%S"
+        )
         segmentLength = self.endTime - self.startTime
-        fileName = (self.outputDirectory + str(dateStart) + "-" + dateEnd + ".mp4") if self.fileName is None else self.outputDirectory + self.fileName
+        fileName = (
+            (self.outputDirectory + str(dateStart) + "-" + dateEnd + ".mp4")
+            if self.fileName is None
+            else self.outputDirectory + self.fileName
+        )
         convert = Convert()
         mediaSession = self.tapo.getMediaSession()
         mediaSession.set_window_size(50 if retry else self.window_size)
@@ -74,8 +83,15 @@ class Downloader:
                     dataChunks += 1
                     convert.write(resp.plaintext, resp.audioPayload)
                     detectedLength = convert.getLength() or 0
-                    yield self._create_status("Retrying" if retry else "Downloading", fileName, detectedLength, segmentLength)
-                    if (detectedLength > segmentLength + self.padding) or (retry and detectedLength >= segmentLength):
+                    yield self._create_status(
+                        "Retrying" if retry else "Downloading",
+                        fileName,
+                        detectedLength,
+                        segmentLength,
+                    )
+                    if (detectedLength > segmentLength + self.padding) or (
+                        retry and detectedLength >= segmentLength
+                    ):
                         downloadedFull = True
                         yield self._create_status("Converting", fileName)
                         convert.save(fileName, segmentLength)
@@ -92,21 +108,28 @@ class Downloader:
                     yield self._create_status("Giving up", fileName)
 
     def _prepare_payload(self):
-        return json.dumps({
-            "type": "request",
-            "seq": 1,
-            "params": {
-                "playback": {
-                    "client_id": self.tapo.getUserID(),
-                    "channels": [0, 1],
-                    "scale": "1/1",
-                    "start_time": str(self.startTime),
-                    "end_time": str(self.endTime),
-                    "event_type": [1, 2],
+        return json.dumps(
+            {
+                "type": "request",
+                "seq": 1,
+                "params": {
+                    "playback": {
+                        "client_id": self.tapo.getUserID(),
+                        "channels": [0, 1],
+                        "scale": "1/1",
+                        "start_time": str(self.startTime),
+                        "end_time": str(self.endTime),
+                        "event_type": [1, 2],
+                    },
+                    "method": "get",
                 },
-                "method": "get",
-            },
-        })
+            }
+        )
 
     def _create_status(self, action, fileName, progress=0, total=0):
-        return {"currentAction": action, "fileName": fileName, "progress": progress, "total": total}
+        return {
+            "currentAction": action,
+            "fileName": fileName,
+            "progress": progress,
+            "total": total,
+        }

@@ -9,12 +9,12 @@ repos:
       - id: check-yaml  # Checks yaml files are parseable
       - id: end-of-file-fixer  # Makes sure files end in a newline and only a newline
   - repo: https://github.com/ambv/black
-    rev: stable
+    rev: 23.3.0
     hooks:
       - id: black
         language_version: python3.8
   - repo: https://github.com/pycqa/isort
-    rev: 5.9.3  # Use the ref you want to point at
+    rev: 5.12.0  # Use the ref you want to point at
     hooks:
       - id: isort
   - repo: local

@@ -5,11 +5,13 @@ from pytapo.media_stream._utils import parse_time, annexB2AVC
 
 logging.basicConfig(level=logging.DEBUG)
 
+
 class StreamType(Enum):
     Private = 0x06
     AAC = 0x0F
     H264 = 0x1B
     PCMATapo = 0x90
+
 
 class PES:
     ModeUnknown = 0

@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -103,16 +104,12 @@ class HttpMediaSession:
                     j.split("=")
                     for j in res_headers["WWW-Authenticate"].split(" ", 1)[1].split(",")
                 )
+            } | {
+                "username": self.username,
+                "cnonce": generate_nonce(24).decode(),
+                "nc": "00000001",
+                "qop": "auth",
             }
-            self._auth_data.update(
-                {
-                    "username": self.username,
-                    "cnonce": generate_nonce(24).decode(),
-                    "nc": "00000001",
-                    "qop": "auth",
-                }
-            )
-
             challenge1 = hashlib.md5(
                 ":".join(
                     (self.username, self._auth_data["realm"], self.hashed_password)
@@ -199,10 +196,8 @@ class HttpMediaSession:
         except Exception:
             # Close socket in case of issues during setup
             # noinspection PyBroadException
-            try:
+            with contextlib.suppress(Exception):
                 self._writer.close()
-            except Exception:
-                pass
             self._started = False
             raise
 
@@ -221,7 +216,6 @@ class HttpMediaSession:
         logger.debug("Response handler is running")
 
         while self._started:
-            session = None
             seq = None
 
             # We're only interested in what comes after it,
@@ -241,6 +235,7 @@ class HttpMediaSession:
             length = int(headers["Content-Length"])
             encrypted = bool(int(headers["X-If-Encrypt"]))
 
+            session = None
             if "X-Session-Id" in headers:
                 session = int(headers["X-Session-Id"])
             if "X-Data-Sequence" in headers:
@@ -268,9 +263,7 @@ class HttpMediaSession:
                     # print(e)
                     if "padding is incorrect" in e.args[0].lower():
                         e = ValueError(
-                            e.args[0]
-                            + " - This usually means that"
-                            + " the cloud password is incorrect."
+                            f"{e.args[0]} - This usually means that the cloud password is incorrect."
                         )
                     plaintext = e
                 except Exception as e:
@@ -305,8 +298,7 @@ class HttpMediaSession:
                 )
             ):
                 logger.warning(
-                    "Received response with no or invalid session information "
-                    "(sequence {}, session {}), can't be delivered".format(seq, session)
+                    f"Received response with no or invalid session information (sequence {seq}, session {session}), can't be delivered"
                 )
                 continue
 
@@ -318,10 +310,9 @@ class HttpMediaSession:
 
             # Move queue to use sessions from now on
             if (
-                (session is not None)
-                and (seq is not None)
-                and (session not in self._sessions)
-                and (seq in self._sequence_numbers)
+                session is not None
+                and seq is not None
+                and session not in self._sessions
             ):
                 queue = self._sequence_numbers.pop(seq)
                 self._sessions[session] = queue
@@ -366,16 +357,7 @@ class HttpMediaSession:
                     await self._writer.drain()
 
             logger.debug(
-                (
-                    "{} response of type {} processed (sequence {}, session {})"
-                    ", dispatching to queue {}"
-                ).format(
-                    "Encrypted" if encrypted else "Plaintext",
-                    mimetype,
-                    seq,
-                    session,
-                    id(queue),
-                )
+                f'{"Encrypted" if encrypted else "Plaintext"} response of type {mimetype} processed (sequence {seq}, session {session}), dispatching to queue {id(queue)}'
             )
 
             await queue.put(response_obj)
@@ -497,15 +479,14 @@ class HttpMediaSession:
                 else:
                     # No timeout, the user needs to cancel this externally
                     resp: HttpMediaResponse = await coro
-                logger.debug("Got one response from queue {}".format(id(queue)))
+                logger.debug(f"Got one response from queue {id(queue)}")
                 if resp.session is not None:
                     session = resp.session
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
                     raise resp.plaintext
                 # print(resp.plaintext)
                 tsReader.setBuffer(list(resp.plaintext))
-                pkt = tsReader.getPacket()
-                if pkt:
+                if pkt := tsReader.getPacket():
                     if pkt.payloadType == PayloadType.PCMA:
                         resp.audioPayload = pkt.payload
 
