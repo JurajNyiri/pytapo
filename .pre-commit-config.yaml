@@ -1,16 +1,22 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v1.2.3
+    rev: v4.0.1  # Use the ref you want to point at
     hooks:
       - id: check-merge-conflict
       - id: debug-statements
       - id: flake8
         args: [--max-line-length=88]
+      - id: check-yaml  # Checks yaml files are parseable
+      - id: end-of-file-fixer  # Makes sure files end in a newline and only a newline
   - repo: https://github.com/ambv/black
     rev: stable
     hooks:
       - id: black
         language_version: python3.8
+  - repo: https://github.com/pycqa/isort
+    rev: 5.9.3  # Use the ref you want to point at
+    hooks:
+      - id: isort
   - repo: local
     hooks:
       - id: tests
