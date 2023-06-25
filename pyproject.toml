@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "pytapo"
+version = "3.1.13"
+description = "Python library for communication with Tapo Cameras"
+authors = ["Juraj Nyíri <juraj.nyiri@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.7"
+requests = "^2.22"
+urllib3 = "^1.25"
+pycryptodome = "^3.8"
+rtp = "^0.0.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+pytest-asyncio = "^0.10.0"
+mock = "^3.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.urls]
+"Repository" = "https://github.com/JurajNyiri/pytapo"
