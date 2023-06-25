@@ -1,6 +1,9 @@
 from enum import Enum
+import logging
 from rtp import RTP, PayloadType
 from pytapo.media_stream._utils import parse_time, annexB2AVC
+
+logging.basicConfig(level=logging.DEBUG)
 
 class StreamType(Enum):
     Private = 0x06
@@ -65,21 +68,11 @@ class PES:
                 self.Payload = None
                 return None
 
-            # first byte also flags
-            flags = self.Payload[1]
             optSize = self.Payload[2]  # optional fields
             payload = self.Payload[self.minHeaderSize + optSize :]
 
             if self.StreamType == StreamType.H264:
-                ts = 0
-                hasPTS = 0b1000_0000
-                if flags & hasPTS:
-                    ts = parse_time(self.Payload[self.minHeaderSize :])
-
-                stream_type = self.get_payload_type(self.StreamType)
-                pkt = RTP(
-                    payload=annexB2AVC(payload), payloadType=stream_type, timestamp=ts,
-                )
+                pkt = self.generate_RTP(payload)
             elif self.StreamType == StreamType.PCMATapo:
                 self.Sequence += 1
                 self.Timestamp += len(payload)
@@ -106,3 +99,15 @@ class PES:
             self.Payload = None
 
         return pkt
+
+    def generate_RTP(self, payload):
+        hasPTS = 0b1000_0000
+        # first byte also flags
+        flags = self.Payload[1]
+        ts = parse_time(self.Payload[self.minHeaderSize :]) if flags & hasPTS else 0
+        stream_type = self.get_payload_type(self.StreamType)
+        return RTP(
+            payload=annexB2AVC(payload),
+            payloadType=stream_type,
+            timestamp=ts,
+        )

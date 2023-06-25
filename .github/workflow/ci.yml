@@ -1,0 +1,64 @@
+name: Pytapo application CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: 3.10
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libffi-dev libssl-dev
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Run poetry
+        uses: abatilo/actions-poetry@v2
+        with:
+          poetry-version: "1.5.0"
+
+      - name: Install dependencies
+        run: |
+          poetry install
+
+      - name: Run linting
+        run: |
+          poetry run flake8 pytapo/
+
+      - name: Run type checks
+        run: |
+          poetry run mypy pytapo/
+
+      - name: Run tests
+        run: |
+          poetry run pytest --cov=pytapo/
+
+      - name: Generate coverage report
+        run: |
+          poetry run coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          files: ./coverage.xml

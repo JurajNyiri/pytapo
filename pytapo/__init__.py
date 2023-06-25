@@ -14,6 +14,9 @@ from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 from datetime import datetime
 
+import httpx
+from rich import print
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
@@ -46,14 +49,11 @@ class Tapo:
         )
 
         self.basicInfo = self.getBasicInfo()
-        self.presets = self.isSupportingPresets()
-        if not self.presets:
-            self.presets = {}
+        self.presets = self.isSupportingPresets() or {}
 
     def isSupportingPresets(self):
         try:
-            presets = self.getPresets()
-            return presets
+            return self.getPresets()
         except Exception:
             return False
 
@@ -64,9 +64,7 @@ class Tapo:
         return "{host}:8800".format(host=self.host)
 
     def ensureAuthenticated(self):
-        if not self.stok:
-            return self.refreshStok()
-        return True
+        return True if self.stok else self.refreshStok()
 
     def refreshStok(self):
         url = "https://{host}".format(host=self.host)
@@ -89,9 +87,6 @@ class Tapo:
             except Exception as e:
                 if str(e) == "Invalid authentication data":
                     raise e
-                else:
-                    pass
-
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
             return self.stok
@@ -108,7 +103,7 @@ class Tapo:
             if "error_code" not in data or data["error_code"] == 0:
                 return True
         except Exception as e:
-            raise Exception("Unexpected response from Tapo Camera: " + str(e))
+            raise Exception(f"Unexpected response from Tapo Camera: {str(e)}")
 
     def executeFunction(self, method, params, retry=False):
         if method == "multipleRequest":
@@ -127,22 +122,15 @@ class Tapo:
             return data
 
         if "result" in data and (
-            "error_code" not in data
-            or ("error_code" in data and data["error_code"] == 0)
+            "error_code" not in data or data["error_code"] == 0
         ):
             return data["result"]
-        else:
-            if "error_code" in data and data["error_code"] == -64303 and retry is False:
-                self.setCruise(False)
-                return self.executeFunction(method, params, True)
-            raise Exception(
-                "Error: {}, Response: {}".format(
-                    data["err_msg"]
-                    if "err_msg" in data
-                    else self.getErrorMessage(data["error_code"]),
-                    json.dumps(data),
-                )
-            )
+        if "error_code" in data and data["error_code"] == -64303 and retry is False:
+            self.setCruise(False)
+            return self.executeFunction(method, params, True)
+        raise Exception(
+            f'Error: {data["err_msg"] if "err_msg" in data else self.getErrorMessage(data["error_code"])}, Response: {json.dumps(data)}'
+        )
 
     def performRequest(self, requestData, loginRetryCount=0):
         self.ensureAuthenticated()
@@ -171,22 +159,18 @@ class Tapo:
         )
         if not self.responseIsOK(res):
             data = json.loads(res.text)
-            #  -40401: Invalid Stok
             if (
-                data
-                and "error_code" in data
-                and data["error_code"] == -40401
-                and loginRetryCount < MAX_LOGIN_RETRIES
+                not data
+                or "error_code" not in data
+                or data["error_code"] != -40401
+                or loginRetryCount >= MAX_LOGIN_RETRIES
             ):
-                self.refreshStok()
-                return self.performRequest(requestData, loginRetryCount + 1)
-            else:
                 raise Exception(
-                    "Error: {}, Response: {}".format(
-                        self.getErrorMessage(data["error_code"]), json.dumps(data)
-                    )
+                    f'Error: {self.getErrorMessage(data["error_code"])}, Response: {json.dumps(data)}'
                 )
 
+            self.refreshStok()
+            return self.performRequest(requestData, loginRetryCount + 1)
         responseJSON = res.json()
         # strip away child device stuff to ensure consistent response format for HUB cameras
         if self.childID:
@@ -376,25 +360,23 @@ class Tapo:
         return data["cet"]["media_encrypt"]
 
     def getAlarm(self):
-        # ensure reverse compatibility, simulate the same response for children devices
-        if self.childID:
-            data = self.getAlarmConfig()
-
-            # replace "siren" with "sound", some cameras call it siren, some sound
-            for i in range(len(data[0]["result"]["alarm_mode"])):
-                if data[0]["result"]["alarm_mode"][i] == "siren":
-                    data[0]["result"]["alarm_mode"][i] = "sound"
-            return {
-                "alarm_type": "0",
-                "light_type": "0",
-                "enabled": data[0]["result"]["enabled"],
-                "alarm_mode": data[0]["result"]["alarm_mode"],
-            }
-        else:
+        if not self.childID:
             return self.executeFunction(
                 "getLastAlarmInfo",
                 {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
             )["msg_alarm"]["chn1_msg_alarm_info"]
+        data = self.getAlarmConfig()
+
+        # replace "siren" with "sound", some cameras call it siren, some sound
+        for i in range(len(data[0]["result"]["alarm_mode"])):
+            if data[0]["result"]["alarm_mode"][i] == "siren":
+                data[0]["result"]["alarm_mode"][i] = "sound"
+        return {
+            "alarm_type": "0",
+            "light_type": "0",
+            "enabled": data[0]["result"]["enabled"],
+            "alarm_mode": data[0]["result"]["alarm_mode"],
+        }
 
     def getAlarmConfig(self):
         return self.executeFunction(
@@ -565,7 +547,7 @@ class Tapo:
 
     def getRecordingsList(self, start_date="20000101", end_date=None):
         if end_date is None:
-            end_date = datetime.today().strftime("%Y%m%d")
+            end_date = datetime.now().strftime("%Y%m%d")
         result = self.executeFunction(
             "searchDateWithVideo",
             {
@@ -772,10 +754,9 @@ class Tapo:
         )["sound_detection"]["bcd"]
 
     def getCruise(self):
-        data = self.executeFunction(
+        return self.executeFunction(
             "getPatrolAction", {"patrol": {"get_patrol_action": {}}}
         )
-        return data
 
     def setBabyCryDetection(self, enabled, sensitivity=False):
         data = {"sound_detection": {"bcd": {"enabled": "on" if enabled else "off"}}}
@@ -832,8 +813,8 @@ class Tapo:
         return True
 
     def deletePreset(self, presetID):
-        if not str(presetID) in self.presets:
-            raise Exception("Preset {} is not set in the app".format(str(presetID)))
+        if str(presetID) not in self.presets:
+            raise Exception(f"Preset {str(presetID)} is not set in the app")
 
         self.executeFunction(
             "deletePreset", {"preset": {"remove_preset": {"id": [presetID]}}}
@@ -842,8 +823,8 @@ class Tapo:
         return True
 
     def setPreset(self, presetID):
-        if not str(presetID) in self.presets:
-            raise Exception("Preset {} is not set in the app".format(str(presetID)))
+        if str(presetID) not in self.presets:
+            raise Exception(f"Preset {str(presetID)} is not set in the app")
         return self.executeFunction(
             "motorMoveToPreset", {"preset": {"goto_preset": {"id": str(presetID)}}}
         )
@@ -854,7 +835,7 @@ class Tapo:
         data = self.executeFunction("getLdc", {"image": {"name": ["switch"]}})
         switches = data["image"]["switch"]
         if switch not in switches:
-            raise Exception("Switch {} is not supported by this camera".format(switch))
+            raise Exception(f"Switch {switch} is not supported by this camera")
         return switches[switch]
 
     def __setImageSwitch(self, switch: str, value: str):
@@ -867,32 +848,30 @@ class Tapo:
         return self.__setImageSwitch("ldc", "on" if enable else "off")
 
     def getDayNightMode(self) -> str:
-        if self.childID:
-            rawValue = self.getNightVisionModeConfig()["image"]["switch"][
-                "night_vision_mode"
-            ]
-            if rawValue == "inf_night_vision":
-                return "on"
-            elif rawValue == "wtl_night_vision":
-                return "off"
-            elif rawValue == "md_night_vision":
-                return "auto"
-        else:
+        if not self.childID:
             return self.__getImageCommon("inf_type")
+        rawValue = self.getNightVisionModeConfig()["image"]["switch"][
+            "night_vision_mode"
+        ]
+        if rawValue == "inf_night_vision":
+            return "on"
+        elif rawValue == "md_night_vision":
+            return "auto"
+        elif rawValue == "wtl_night_vision":
+            return "off"
 
     def setDayNightMode(self, mode):
         allowed_modes = ["off", "on", "auto"]
         if mode not in allowed_modes:
-            raise Exception("Day night mode must be one of {}".format(allowed_modes))
-        if self.childID:
-            if mode == "on":
-                return self.setNightVisionModeConfig("inf_night_vision")
-            elif mode == "off":
-                return self.setNightVisionModeConfig("wtl_night_vision")
-            elif mode == "auto":
-                return self.setNightVisionModeConfig("md_night_vision")
-        else:
+            raise Exception(f"Day night mode must be one of {allowed_modes}")
+        if not self.childID:
             return self.__setImageCommon("inf_type", mode)
+        if mode == "on":
+            return self.setNightVisionModeConfig("inf_night_vision")
+        elif mode == "off":
+            return self.setNightVisionModeConfig("wtl_night_vision")
+        elif mode == "auto":
+            return self.setNightVisionModeConfig("md_night_vision")
 
     def getNightVisionModeConfig(self):
         return self.executeFunction(
@@ -939,7 +918,7 @@ class Tapo:
             raise Exception("__getImageCommon is not supported by this camera")
         fields = data["image"]["common"]
         if field not in fields:
-            raise Exception("Field {} is not supported by this camera".format(field))
+            raise Exception(f"Field {field} is not supported by this camera")
         return fields[field]
 
     def __setImageCommon(self, field: str, value: str):
@@ -954,9 +933,7 @@ class Tapo:
         # todo: auto does not work on some child cameras?
         allowed_modes = ["auto", "50", "60"]
         if mode not in allowed_modes:
-            raise Exception(
-                "Light frequency mode must be one of {}".format(allowed_modes)
-            )
+            raise Exception(f"Light frequency mode must be one of {allowed_modes}")
         return self.__setImageCommon("light_freq_mode", mode)
 
     # does not work for child devices, function discovery needed
@@ -1013,8 +990,8 @@ class Tapo:
             self.performRequest(
                 {"method": "do", "cloud_config": {"fw_download": "null"}}
             )
-        except Exception:
-            raise Exception("No new firmware available.")
+        except Exception as e:
+            raise Exception("No new firmware available.") from e
 
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
@@ -1130,17 +1107,13 @@ class Tapo:
         results = self.performRequest(requestData)
 
         returnData = {}
-        # todo finish on child
-        i = 0
-        for result in results["result"]["responses"]:
+        for i, result in enumerate(results["result"]["responses"]):
             if (
                 "error_code" in result and result["error_code"] == 0
             ) and "result" in result:
                 returnData[result["method"]] = result["result"]
-            else:
-                if "method" in result:
-                    returnData[result["method"]] = False
-                else:  # some cameras are not returning method for error messages
-                    returnData[requestData["params"]["requests"][i]["method"]] = False
-            i += 1
+            elif "method" in result:
+                returnData[result["method"]] = False
+            else:  # some cameras are not returning method for error messages
+                returnData[requestData["params"]["requests"][i]["method"]] = False
         return returnData

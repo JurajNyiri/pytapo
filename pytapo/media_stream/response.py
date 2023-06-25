@@ -1,9 +1,9 @@
 from typing import Dict, Optional, Any
 
+
 class HttpMediaResponse:
     """
     This class encapsulates the HTTP response from a media server.
-    
     Attributes:
         seq (int): The sequence number of the response.
         session (int): The session identifier.
@@ -15,17 +15,19 @@ class HttpMediaResponse:
         json_data (Any): The json data extracted from the response.
         audioPayload (bytes): The audio data extracted from the response.
     """
-    
-    def __init__(self,
-                 seq: int,
-                 session: int,
-                 headers: Dict[str, str],
-                 encrypted: bool,
-                 mimetype: str,
-                 ciphertext: Optional[bytes],
-                 plaintext: bytes,
-                 json_data: Any,
-                 audioPayload: bytes) -> None:
+
+    def __init__(
+        self,
+        seq: int,
+        session: int,
+        headers: Dict[str, str],
+        encrypted: bool,
+        mimetype: str,
+        ciphertext: Optional[bytes],
+        plaintext: bytes,
+        json_data: Any,
+        audioPayload: bytes,
+    ) -> None:
         self.seq = seq
         self.session = session
         self.headers = headers
