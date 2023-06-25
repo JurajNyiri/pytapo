@@ -2,16 +2,19 @@ from pytapo.media_stream.pes import PES
 
 
 class TSReader:
-    b = bytearray  # packets buffer
-    i = 0  # read position
-    s = 0  # end position
-    pmt = 0
-    pes = {}
     PacketSize = 188
     SyncByte = 0x47
+    const_pid_null_packet = 0x1FFF
+    const_has_adaption_field = 0b0010_0000
+    const_pid_pat = 0
+    const_crc_size = 4
 
     def __init__(self):
-        pass
+        self.b = bytearray  # packets buffer
+        self.i = 0  # read position
+        self.s = self.PacketSize  # end position
+        self.pmt = 0
+        self.pes = {}
 
     def setBuffer(self, body: bytearray):
         self.b = body
@@ -45,96 +48,81 @@ class TSReader:
         size = self.read_uint16() & 0x03FF  # Section length
         self.set_size(size)
 
-        self.skip(2)  # Table ID extension
-        self.skip(1)  # flags...
-        self.skip(1)  # Section number
-        self.skip(1)  # Last section number
+        self.skip(4)  # Skipping Table ID extension and flags
+        self.skip(2)  # Skipping Section number and Last section number
+
+    def read_packet_content(self):
+        self.skip(1)  # Sync byte
+
+        pid = self.read_uint16() & 0x1FFF  # PID
+        flag = self.read_byte()  # flags...
+
+        if pid == self.const_pid_null_packet:
+            return None
+
+        if flag & self.const_has_adaption_field != 0:
+            ad_size = self.read_byte()  # Adaptation field length
+            if ad_size > self.PacketSize - 6:
+                print("WARNING: mpegts: wrong adaptation size")
+                return None
+            self.skip(ad_size)
+
+        return pid
+
+    def handle_pat(self):
+        self.read_psi_header()
+
+        while self.left() > self.const_crc_size:
+            p_num = self.read_uint16()
+            p_pid = self.read_uint16() & 0x1FFF
+            if p_num != 0:
+                self.pmt = p_pid
+
+        self.skip(self.const_crc_size)  # CRC32
+
+    def handle_pmt(self):
+        self.read_psi_header()
+
+        pes_pid = self.read_uint16() & 0x1FFF  # ? PCR PID
+        p_size = self.read_uint16() & 0x03FF  # ? 0x0FFF
+        self.skip(p_size)
+
+        self.pes = {}
+
+        while self.left() > self.const_crc_size:
+            stream_type = self.read_byte()
+            pes_pid = self.read_uint16() & 0x1FFF  # Elementary PID
+            i_size = self.read_uint16() & 0x03FF  # ? 0x0FFF
+            self.skip(i_size)
+
+            self.pes[pes_pid] = PES()
+            self.pes[pes_pid].StreamType = stream_type
+
+        self.skip(self.const_crc_size)  # ? CRC32
 
     def getPacket(self):
         while self.sync():
-            self.skip(1)  # Sync byte
-
-            pid = self.read_uint16() & 0x1FFF  # PID
-            flag = self.read_byte()  # flags...
-
-            const_pid_null_packet = 0x1FFF
-            if pid == const_pid_null_packet:
+            pid = self.read_packet_content()
+            if pid is None:
                 continue
 
-            const_has_adaption_field = 0b0010_0000
-            if flag & const_has_adaption_field != 0:
-                ad_size = self.read_byte()  # Adaptation field length
-                if ad_size > self.PacketSize - 6:
-                    print("WARNING: mpegts: wrong adaptation size")
+            if pid == self.const_pid_pat:
+                if self.pmt != 0:  # already processed
                     continue
-                self.skip(ad_size)
-
-            # PAT: Program Association Table
-            const_pid_pat = 0
-            if pid == const_pid_pat:
-                # already processed
-                if self.pmt != 0:
-                    continue
-
-                self.read_psi_header()
-
-                const_crc_size = 4
-                while self.left() > const_crc_size:
-                    p_num = self.read_uint16()
-                    p_pid = self.read_uint16() & 0x1FFF
-                    if p_num != 0:
-                        self.pmt = p_pid
-
-                self.skip(4)  # CRC32
+                self.handle_pat()
                 continue
 
-            # PMT : Program Map Table
             if pid == self.pmt:
-                # already processed
-                if bool(self.pes) is True:
+                if bool(self.pes):  # already processed
                     continue
-
-                self.read_psi_header()
-
-                pes_pid = self.read_uint16() & 0x1FFF  # ? PCR PID
-                p_size = self.read_uint16() & 0x03FF  # ? 0x0FFF
-                self.skip(p_size)
-
-                self.pes = {}
-
-                const_crc_size = 4
-                while self.left() > const_crc_size:
-                    stream_type = self.read_byte()
-                    pes_pid = self.read_uint16() & 0x1FFF  # Elementary PID
-                    i_size = self.read_uint16() & 0x03FF  # ? 0x0FFF
-                    self.skip(i_size)
-
-                    self.pes[pes_pid] = PES()
-                    self.pes[pes_pid].StreamType = stream_type
-
-                self.skip(4)  # ? CRC32
+                self.handle_pmt()
                 continue
 
-            if bool(self.pes) is False:
-                continue
+            if not bool(self.pes) or pid not in self.pes:
+                continue  # unknown PID or no PES
 
-            if pid not in self.pes:
-                continue  # unknown PID
-
-            # print(self.i)
-            # print(pid)
-            # print(self.pes)
-            # print(self.pes[pid])
-
-            # print("pid:" + str(pid))
-            # print(self.b)
-            if self.pes[pid].Payload is None:
-                # print("nil")
-                # print(self.i)
-                # print(self.b)
-                # print(self.b[self.i])
-                # print(self.b[self.i + 1])
-                # print(self.b[self.i + 2])
+            pes_pid = self.pes[pid]
+            if pes_pid.Payload is None:
                 # PES Packet start code prefix
                 if (
                     self.read_byte() != 0
@@ -144,25 +132,23 @@ class TSReader:
                     continue
 
                 # read stream ID and total payload size
-                self.pes[pid].StreamID = self.read_byte()
-                self.pes[pid].SetBuffer(self.read_uint16(), self.Bytes())
+                pes_pid.StreamID = self.read_byte()
+                pes_pid.SetBuffer(self.read_uint16(), self.Bytes())
             else:
-                self.pes[pid].AppendBuffer(self.Bytes())
-            # print("getPacket - 7")
+                pes_pid.AppendBuffer(self.Bytes())
 
-            if pkt := self.pes[pid].GetPacket():
+            if pkt := pes_pid.GetPacket():
                 return pkt
-            # print("getPacket - 8")
 
         return None
 
     def Bytes(self):
-        return self.b[self.i : self.PacketSize]
+        return self.b[self.i: self.PacketSize]
 
     def sync(self):
         # drop previous readed packet
         if self.i != 0:
-            self.b = self.b[self.PacketSize :]
+            self.b = self.b[self.PacketSize:]
             self.i = 0
             self.s = self
 
