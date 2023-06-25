@@ -9,7 +9,7 @@ class NonceMissingException(HttpMediaSessionException, ValueError):
 
 class HttpStatusCodeException(HttpMediaSessionException):
     def __init__(self, status_code: int) -> None:
-        super().__init__("HTTP request returned {} status code".format(status_code))
+        super().__init__(f"HTTP request returned {status_code} status code")
 
 
 class KeyExchangeMissingException(HttpMediaSessionException, RuntimeError):
