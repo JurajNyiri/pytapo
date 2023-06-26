@@ -78,6 +78,7 @@ def test_exceptions():
         (MotorException, "Motor exception"),
         (ResponseException, "Response exception"),
         (SettingsException, "Settings exception"),
+        (HttpStatusCodeException, "HTTP request returned 500 status code")
     ]
 
     for exception_class, expected_message in exception_classes:

@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch
 from pytapo.media_stream.crypto import AESHelper
 from pytapo.media_stream.error import NonceMissingException
+from Crypto.Util.Padding import pad, unpad
 from Crypto.Cipher import AES
 
 
@@ -46,13 +47,14 @@ def test_refresh_cipher(mock_new, aes_helper):
 
 @patch("Crypto.Cipher.AES.new")
 def test_decrypt(mock_new, aes_helper):
-    mock_new.return_value.decrypt.return_value = b"data"
-    result = aes_helper.decrypt(b"encrypted_data")
+    mock_new.return_value.decrypt.return_value = pad(b"data", 16, style="pkcs7")
+    result = aes_helper.decrypt(pad(b"data", 16, style="pkcs7"))
     assert result == b"data"
+
 
 
 @patch("Crypto.Cipher.AES.new")
 def test_encrypt(mock_new, aes_helper):
-    mock_new.return_value.encrypt.return_value = b"encrypted_data"
+    mock_new.return_value.encrypt.return_value = pad(b"data", 16, style="pkcs7")
     result = aes_helper.encrypt(b"data")
-    assert result == b"encrypted_data"
+    assert result == pad(b"data", 16, style="pkcs7")

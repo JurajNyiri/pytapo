@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 from pytapo.error import AlarmException
 from pytapo.settings.alarm import AlarmInterface
 
@@ -8,9 +8,11 @@ from pytapo.settings.alarm import AlarmInterface
 def execute_function():
     return MagicMock()
 
+
 @pytest.fixture
 def perform_request():
     return MagicMock()
+
 
 @pytest.fixture
 def alarm_interface(perform_request, execute_function):
@@ -43,50 +45,54 @@ def test_set_alarm_raises_exception_when_no_sound_light(alarm_interface):
         alarm_interface.set_alarm(True, False, False)
 
 
-def test_set_alarm_enabled_sound_light(mocker, alarm_interface):
+def test_set_alarm(mocker, alarm_interface):
     mocker.patch.object(alarm_interface, "perform_request", return_value=None)
-    alarm_interface.set_alarm_enabled_sound_light(True)
+    alarm_interface.set_alarm(True, True, True)
     alarm_interface.perform_request.assert_called_once_with(
         {
+            "method": "set",
             "msg_alarm": {
-                "alarm_mode": "1",
-                "alarm_sound": "1",
-                "light_type": "1",
+                "chn1_msg_alarm_info": {
+                    "enabled": "on",
+                    "alarm_mode": ["sound", "light"],
+                    "alarm_type": "0",
+                    "light_type": "0",
+                }
             },
-            "method": "do",
-        }
-    )
-
-
-def test_set_alarm_disabled_sound_light(mocker, alarm_interface):
-    mocker.patch.object(alarm_interface, "perform_request", return_value=None)
-    alarm_interface.set_alarm_disabled_sound_light(False)
-    alarm_interface.perform_request.assert_called_once_with(
-        {
-            "msg_alarm": {
-                "alarm_mode": "0",
-                "alarm_sound": "0",
-                "light_type": "0",
-            },
-            "method": "do",
         }
     )
 
 
 def test_get_alarm(mocker, alarm_interface):
-    expected_alarm_config = {"alarm_mode": "1", "alarm_sound": "1", "light_type": "0"}
-    mocker.patch.object(
-        alarm_interface, "execute_function", return_value=expected_alarm_config
-    )
+    expected_alarm_config = {
+        "alarm_mode": ["sound"],
+        "enabled": "on",
+        "alarm_type": "0",
+        "light_type": "0",
+        "msg_alarm": {
+            "chn1_msg_alarm_info": {
+                "alarm_mode": ["sound"],
+                "enabled": "on",
+                "alarm_type": "0",
+                "light_type": "0",
+            }
+        },
+    }
+    mocker.patch.object(alarm_interface, "execute", return_value=expected_alarm_config)
     alarm_config = alarm_interface.get_alarm()
     assert alarm_config == expected_alarm_config
 
 
 def test_get_alarm_config(alarm_interface):
-    alarm_interface.execute.return_value = {
-        "requests": [{"method": "getAlarmConfig", "params": {"msg_getalarmconfig": {}}}]
+    expected_config = {
+        "requests": [
+            {"method": "getAlarmConfig", "params": {"msg_getalarmconfig": {}}},
+            {"method": "getAlarmPlan", "params": {"msg_getalarmplan": {}}},
+            {"method": "getSirenTypeList", "params": {"msg_getsirentypelist": {}}},
+            {"method": "getLightTypeList", "params": {"msg_getlighttypelist": {}}},
+            {"method": "getSirenStatus", "params": {"msg_getsirenstatus": {}}},
+        ]
     }
+    alarm_interface.execute.return_value = expected_config
     alarm_config = alarm_interface.get_alarm_config()
-    assert alarm_config == {
-        "requests": [{"method": "getAlarmConfig", "params": {"msg_getalarmconfig": {}}}]
-    }
+    assert alarm_config == expected_config

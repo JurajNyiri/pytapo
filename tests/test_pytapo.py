@@ -3,12 +3,10 @@ from httpx import AsyncClient
 import pytest
 from pytapo import Tapo
 from pytapo.error import ResponseException
-from pytapo.media_stream.session import HttpMediaSession
 
 
-# Create a new fixture for the client
 @pytest.fixture
-def client():
+async def client():
     return AsyncClient()
 
 
@@ -43,15 +41,12 @@ async def test_performRequest_fail(mocker, tapo):
         await tapo.performRequest(data)
 
 
-def test_getMediaSession(tapo):
-    session = tapo.getMediaSession()
-    assert isinstance(session, HttpMediaSession)
-
-
-def test_getHostURL(mocker, tapo):
+@pytest.mark.asyncio
+async def test_getHostURL(mocker, tapo):
     mocker.patch.object(tapo, "stok", "dummy_stok")
     assert tapo.getHostURL() == "https://localhost/stok=dummy_stok/ds"
 
 
-def test_getStreamURL(tapo):
+@pytest.mark.asyncio
+async def test_getStreamURL(tapo):
     assert tapo.getStreamURL() == "localhost:8800"

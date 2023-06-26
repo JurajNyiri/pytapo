@@ -90,6 +90,18 @@ class DeviceInterface:
             "getTargetTrackConfig", {"target_track": {"name": ["target_track_info"]}}
         )["target_track"]["target_track_info"]
 
+    def setAutoTrackTarget(self, enabled: bool) -> dict:
+        """
+        Controls the auto track target configuration of the device.
+
+        Parameters:
+        enabled (bool): Auto track target status to set.
+        """
+        return self.execute_function(
+            "setTargetTrackConfig",
+            {"target_track": {"target_track_info": {"enabled": "on" if enabled else "off"}}},
+        )
+
     def getAudioSpec(self) -> dict:
         """
         Fetches the device's audio capabilities.
@@ -135,6 +147,17 @@ class DeviceInterface:
         """
         return self.execute_function(
             "getClockStatus", {"system": {"name": "clock_status"}}
+        )
+
+    def getModel(self) -> dict:
+        """
+        Retrieves the device model.
+
+        Returns:
+        dict: Device model.
+        """
+        return self.execute_function(
+            "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
         )
 
     # returns empty response for child devices
@@ -321,3 +344,50 @@ class DeviceInterface:
                 event["endRelative"] = nowTS - event["end_time"]
                 events.append(event)
         return events
+
+    def format(self) -> dict:
+        """
+        Formats the SD card of the device.
+        """
+        return self.execute_function(
+            "formatSdCard", {"harddisk_manage": {"format_hd": "1"}}
+        )  # pragma: no cover
+
+    def startFirmwareUpgrade(self) -> None:
+        """
+        Starts the firmware upgrade process.
+
+        Raises:
+        SettingsException: If the firmware upgrade could not be started.
+        """
+        try:
+            self.performRequest(
+                {"method": "do", "cloud_config": {"fw_download": "null"}}
+            )
+        except Exception as e:
+            raise SettingsException("Error: Could not start firmware upgrade") from e
+
+    def isUpdateAvailable(self) -> bool:
+        """
+        Checks if a firmware update is available.
+
+        Returns:
+        bool: True if an update is available, False otherwise.
+        """
+        return self.performRequest(
+            {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "checkFirmwareVersionByCloud",
+                            "params": {"cloud_config": {"check_fw_version": "null"}},
+                        },
+                        {
+                            "method": "getCloudConfig",
+                            "params": {"cloud_config": {"name": ["upgrade_info"]}},
+                        },
+                    ]
+                },
+            }
+        )

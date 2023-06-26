@@ -64,6 +64,15 @@ class ClientInterface:
         self.hashedCloudPassword = (
             hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
         )
+        self.perform_request = perform_request or self._perform_request
+        self.execute_function = execute_function or self._execute_function
+
+    async def _perform_request(self, url, data, headers):
+        async with httpx.AsyncClient() as client:
+            return await client.post(url, data=json.dumps(data), headers=headers)
+
+    async def _execute_function(self, url, data, headers):
+        return await httpx.post(url, data=json.dumps(data), headers=headers)
 
     def ensureAuthenticated(self):
         """
@@ -87,7 +96,7 @@ class ClientInterface:
             },
         }
         async with httpx.AsyncClient() as client:
-            res = await client.post(url, data=json.dumps(data), headers=self.headers)
+            res = await self.perform_request(url, data, self.headers)
         if res.status_code == 401:
             data = res.json()
             if data["result"]["data"]["code"] == -40411:
@@ -119,16 +128,13 @@ class ClientInterface:
         Get the userID.
         If userID is not already fetched, it triggers a request to fetch the userID.
         """
+        url = f"https://{self.host}/stok={self.stok}/ds"
+        data = {
+            "method": "getUserID",
+            "params": {"system": {"get_user_id": "null"}},
+        }
+
         if not self.userID:
-            res = await httpx.post(
-                f"https://{self.host}/stok={self.stok}/ds",
-                data=json.dumps(
-                    {
-                        "method": "getUserID",
-                        "params": {"system": {"get_user_id": "null"}},
-                    }
-                ),
-                headers=self.headers,
-            )
+            res = await self.perform_request(url, data, self.headers)
         self.userID = res.json()["result"]["responses"][0]["result"]["user_id"]
         return self.userID

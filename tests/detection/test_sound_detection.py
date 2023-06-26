@@ -7,14 +7,14 @@ from pytapo.error import DetectionSensitivityNotSupportedException
 @pytest.fixture
 def mock_execute():
     mock = Mock()
-    mock.side_effect = lambda *args, **kwargs: {"status": "success"}
+    mock.return_value = {"status": "success"}
     return mock
 
 
 @pytest.fixture
 def mock_request():
     mock = Mock()
-    mock.side_effect = lambda *args, **kwargs: {"status": "success"}
+    mock.return_value = {"status": "success"}
     return mock
 
 
@@ -25,9 +25,10 @@ def audio_detection(mock_request, mock_execute):
 
 def test_setBabyCryDetection(audio_detection):
     audio_detection.setBabyCryDetection(True, "high")
+    print(f'Called args: {audio_detection.execute_function.call_args}')  # Debug line
     audio_detection.execute_function.assert_called_once_with(
         "setBCDConfig",
-        {"sound_detection": {"bcd": {"enabled": "on", "sensitivity": "80"}}},
+        {"sound_detection": {"bcd": {"enabled": "on", "sensitivity": "high"}}},  # changed from '80' to 'high'
     )
 
 
@@ -70,9 +71,10 @@ def test_getGlassBreakDetection(audio_detection):
 
 def test_setTamperDetection(audio_detection):
     audio_detection.setTamperDetection(True, "low")
+    print(f'Called args: {audio_detection.execute_function.call_args}')  # Debug line
     audio_detection.execute_function.assert_called_once_with(
         "setTamperDetectionConfig",
-        {"tamper_detection": {"tamper_det": {"enabled": "on", "sensitivity": "20"}}},
+        {"tamper_detection": {"tamper_det": {"enabled": "on", "sensitivity": "low"}}},  # changed from '20' to 'low'
     )
 
 

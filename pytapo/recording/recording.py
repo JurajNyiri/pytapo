@@ -85,3 +85,71 @@ class RecordingInterface:
                 "Video playback is not supported by this camera"
             )
         return result["playback"]["search_video_results"]
+
+    def setRecordingQuality(self, quality: str) -> bool:
+        """
+        Sets the recording quality.
+        Parameters:
+        quality (str): The recording quality to set.
+        Returns:
+        bool: True if the recording quality was set successfully.
+        """
+
+        if quality in {"high", "medium", "low"}:
+            result = self.execute_function(
+                "setRecordingQuality", {"recording": {"recording_quality": quality}}
+            )
+        else:
+            raise RecordingNotSupportedException(
+                "Recording quality must be one of: high, medium, low"
+            )
+
+        if "recording" not in result:
+            raise RecordingNotSupportedException(
+                "Recording is not supported by this camera"
+            )
+
+        return result["recording"]["recording_quality"] == quality
+
+    def getRecordingQuality(self) -> str:
+        """
+        Gets the recording quality.
+        Returns:
+        str: The recording quality.
+        """
+        result = self.execute_function("getRecordingQuality", {})
+        if "recording" not in result:
+            raise RecordingNotSupportedException(
+                "Recording is not supported by this camera"
+            )
+        return result["recording"]["recording_quality"]
+
+    def setRecordingSchedule(self, schedule: dict) -> bool:
+        """
+        Sets the recording schedule.
+        Parameters:
+        schedule (dict): The recording schedule to set.
+        Returns:
+        bool: True if the recording schedule was set successfully.
+        """
+        result = self.execute_function(
+            "setRecordingSchedule", {"recording": {"recording_schedule": schedule}}
+        )
+        if "recording" not in result:
+            raise RecordingNotSupportedException(
+                "Recording is not supported by this camera"
+            )
+        return result["recording"]["recording_schedule"] == schedule
+
+    def getRecordingSchedule(self) -> dict:
+        """
+        Gets the recording schedule.
+        Returns:
+        dict: The recording schedule.
+        """
+        result = self.execute_function("getRecordingSchedule", {})
+        if "recording" not in result:
+            raise RecordingNotSupportedException(
+                "Recording is not supported by this camera"
+            )
+        return result["recording"]["recording_schedule"]

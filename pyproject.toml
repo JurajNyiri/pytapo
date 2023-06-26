@@ -36,6 +36,7 @@ pycln = "^2.1.3"
 isort = "^5.12.0"
 mkdocs-build-plantuml-plugin = "^1.7.4"
 asynctest = "^0.13.0"
+pytest-mock = "^3.11.1"
 
 
 [build-system]

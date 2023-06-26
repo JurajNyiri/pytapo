@@ -29,9 +29,13 @@ class ImageInterface:
         Returns:
         str: The image field value.
         """
-        data = self.execute_function("getLightFrequencyInfo", {"image": {"name": "common"}})
+        data = self.execute_function(
+            "getLightFrequencyInfo", {"image": {"name": "common"}}
+        )
         if "common" not in data["image"]:
-            raise ImageCommonNotSupportedException("Image common not supported by camera")
+            raise ImageCommonNotSupportedException(
+                "Image common not supported by camera"
+            )
         fields = data["image"]["common"]
         if field not in fields:
             raise ImageCommonNotSupportedException(
@@ -64,7 +68,9 @@ class ImageInterface:
         data = self.execute_function("getLdc", {"image": {"name": ["switch"]}})
         switches = data["image"]["switch"]
         if switch not in switches:
-            raise ImageCommonNotSupportedException("Image switch not supported by camera")
+            raise ImageCommonNotSupportedException(
+                "Image switch not supported by camera"
+            )
         return switches[switch]
 
     def __set_image_switch(self, switch: str, value: str) -> dict:
@@ -104,7 +110,9 @@ class ImageInterface:
         """
         if not self.child_id:
             return self.__get_image_common("inf_type")
-        raw_value = self.get_night_vision_mode_config()["image"]["switch"]["night_vision_mode"]
+        raw_value = self.get_night_vision_mode_config()["image"]["switch"][
+            "night_vision_mode"
+        ]
         if raw_value == "inf_night_vision":
             return "on"
         elif raw_value == "md_night_vision":
@@ -164,7 +172,9 @@ class ImageInterface:
         bool: True if set to vertical, False otherwise.
         """
         if self.child_id:
-            return self.get_rotation_status()["image"]["switch"]["flip_type"] == "center"
+            return (
+                self.get_rotation_status()["image"]["switch"]["flip_type"] == "center"
+            )
         else:
             return self.__get_image_switch("flip_type") == "center"
 
@@ -190,6 +200,17 @@ class ImageInterface:
         return self.execute_function(
             "setRotationStatus",
             {"image": {"switch": {"flip_type": flip_type}}},
+        )
+
+    def get_rotation_status(self) -> dict:
+        """
+        Retrieves the rotation status.
+
+        Returns:
+        dict: The rotation status.
+        """
+        return self.execute_function(
+            "getRotationStatus", {"image": {"name": "switch"}}
         )
 
     def get_force_whitelamp_state(self) -> bool:
@@ -219,3 +240,69 @@ class ImageInterface:
         """
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
         return self.perform_request({"method": "get", "image": {"name": "common"}})
+
+    def getForceWhitelampState(self) -> bool:
+        """
+        Checks if the force whitelamp state is enabled.
+
+        Returns:
+        bool: True if enabled, False otherwise.
+        """
+
+        return self.__getImageSwitch("force_wtl_state") == "on"
+
+    def setForceWhitelampState(self, enable: bool) -> dict:
+        """
+        Enables or disables the force whitelamp state.
+
+        Parameters:
+        enable (bool): True to enable, False to disable.
+        """
+
+        return self.__setImageSwitch("force_wtl_state", "on" if enable else "off")
+
+    def getImageFlipVertical(self):
+        """
+        Checks if the image flip is set to vertical.
+
+        Returns:
+        bool: True if set to vertical, False otherwise.
+        """
+
+        if self.childID:
+            return self.getRotationStatus()["image"]["switch"]["flip_type"] == "center"
+        else:
+            return self.__getImageSwitch("flip_type") == "center"
+
+    def setImageFlipVertical(self, enable):
+        """
+        Sets the image flip to vertical.
+
+        Parameters:
+        enable (bool): True to set to vertical, False otherwise.
+        """
+
+        if self.childID:
+            return self.setRotationStatus("center" if enable else "off")
+        else:
+            return self.__setImageSwitch("flip_type", "center" if enable else "off")
+
+
+    def getLensDistortionCorrection(self, enable: bool) -> dict:
+        """
+        Checks if the lens distortion correction is enabled.
+
+        Returns:
+        bool: True if enabled, False otherwise.
+        """
+        return self.__getImageSwitch("ldc") == "on"
+
+    def setLensDistortionCorrection(self, enable: bool) -> dict:
+        """
+        Enables or disables the lens distortion correction.
+
+        Parameters:
+        enable (bool): True to enable, False to disable.
+        """
+
+        return self.__setImageSwitch("ldc", "on" if enable else "off")

@@ -1,12 +1,19 @@
-from pytapo import Tapo
-
-
 class HomeAssistantInterface:
     """Interface for HomeAssistant-Tapo-Control."""
 
-    def __init__(self, perform_request, execute_function):
+    def __init__(self, perform_request, execute_function, child_id=None):
+        """
+        Initialize the HomeAssistantInterface with a function to execute API calls.
+
+        Parameters:
+        perform_request (func): The function to perform direct API calls.
+        execute_function (func): The function to be used for making API requests. It should take in a function name and parameters as arguments.
+        child_id (str): The ID of the child device (if applicable).
+        """
+
         self.perform_request = perform_request
         self.execute_function = execute_function
+        self.child_id = child_id
 
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP

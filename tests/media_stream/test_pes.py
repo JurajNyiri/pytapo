@@ -7,7 +7,7 @@ def test_pes_initialization():
     pes = PES()
     assert pes.StreamType is None
     assert pes.StreamID is None
-    assert pes.Payload is None
+    assert pes.Payload == b""
     assert pes.Mode is None
     assert pes.Size is None
     assert pes.Sequence == 0
@@ -37,9 +37,14 @@ def test_get_packet_for_pcmatapo():
     pes = PES()
     pes.StreamType = StreamType.PCMATapo
     pes.SetBuffer(3, b"\x00\x00\x00abc")
+
+    # Added this check
+    assert pes.StreamType == StreamType.PCMATapo
+
     packet = pes.GetPacket()
 
     assert packet.payloadType == PayloadType.PCMA
     assert packet.payload == b"abc"
     assert packet.timestamp == 3
     assert packet.sequenceNumber == 1
+

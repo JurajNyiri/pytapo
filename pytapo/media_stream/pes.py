@@ -22,7 +22,7 @@ class PES:
     def __init__(self):
         self.StreamType = None
         self.StreamID = None
-        self.Payload = None
+        self.Payload = b""
         self.Mode = None
         self.Size = None
         self.Sequence = 0

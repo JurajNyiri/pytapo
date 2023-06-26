@@ -8,9 +8,23 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from __version__ import __version__
+from api.app.core.logging import Logger
+from api.config import Settings
 
 # import all routers
-from app.routers import article, company, news, users
+from api.app.routers.alarms import router as alarm_router
+from api.app.routers.led import router as led_router
+from api.app.routers.medias import router as medias_router
+from api.app.routers.recordings import router as recording_router
+from api.app.routers.settings import router as settings_router
+from api.app.routers.devices import router as devices_router
+from api.app.routers.client import router as client_router
+from api.app.routers.detections import router as detection_router
+from api.app.routers.home_assistant import router as home_assistant_router
+from api.app.routers.motors import router as motor_router
+from api.app.routers.presets import router as preset_router
+from api.app.routers.images import router as image_router
+
 
 startup_time = datetime.now()
 
@@ -31,12 +45,10 @@ swagger_ui_parameters = {
     "oauth2RedirectUrl": "http://localhost:8000/api/v1/docs/oauth2-redirect",
 }
 
-limiter = Limiter(key_func=get_remote_address)
-
 # Init app
 app = FastAPI(
-    title="AI News Tracker API",
-    description="AI News Tracker API",
+    title="pytapo ",
+    description="Python FastAPI Tapo C200",
     version=__version__,
     openapi_url="/api/v1/openapi.json",
     docs_url="/api/v1/docs",
@@ -44,15 +56,21 @@ app = FastAPI(
     redoc_url=None,
 )
 
-#  Rate Limiting
-app.state.limiter = limiter
-app.add_exception_handler(HTTPException, _rate_limit_exceeded_handler)
 
 # add all routers to app
-app.include_router(users.router)
-app.include_router(company.router)
-app.include_router(article.router)
-app.include_router(news.router)
+app.include_router(alarm_router)
+app.include_router(led_router)
+app.include_router(medias_router)
+app.include_router(recording_router)
+app.include_router(settings_router)
+app.include_router(devices_router)
+app.include_router(client_router)
+app.include_router(detection_router)
+app.include_router(home_assistant_router)
+app.include_router(motor_router)
+app.include_router(preset_router)
+app.include_router(image_router)
+
 
 # CORS
 app.add_middleware(
@@ -63,9 +81,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# add cache middleware to app
-redis_instance = RedisDB()
-
 
 @app.on_event("startup")
 async def startup():
@@ -73,99 +88,23 @@ async def startup():
     startup_time = datetime.now()
     logger.info("Starting up application...")
 
-    try:
-        FastAPICache.init(
-            backend=RedisBackend(redis_instance._connection), prefix="redis-cache"
-        )
-    except Exception:
-        logger.error("Redis server not available")
-        FastAPICache.init(InMemoryBackend(), prefix="inmemory-cache")
-
     logger.info("Seeding database...")
-    #seed_companies = await CompanySeeder().seed_companies()
-    seed_news = await NewsSeeder().seed_news()
-    
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down application...")
-    redis_instance.close()
-    MongoDB().close()
-
-
-def get_service_health(check_function, get_info_function, service_name_function):
-    try:
-        is_healthy = check_function()
-        service_info = get_info_function() or {
-            "version": "unknown",
-            "uptime": "unknown",
-        }
-        uptime = service_info.get("uptime", "unknown")
-        service_name = service_name_function() or service_name_function or "Unknown"
-        if (
-            "uptime" in service_info
-            and service_info["uptime"] is not None
-            and service_info["uptime"] != "unknown"
-        ):
-            service_info["uptime"] = (
-                datetime.now() - datetime.fromtimestamp(service_info["uptime"])
-            ).total_seconds()
-        else:
-            service_info["uptime"] = "unknown"
-    except Exception as e:
-        is_healthy = False
-        service_info = {"version": "unknown", "uptime": "unknown"}
-        service_name = "Unknown"
-
-    version = service_info.get("version", "unknown")
-    uptime = service_info.get("uptime", "unknown")
-
-    return {
-        "status": "ok" if is_healthy else "unavailable",
-        "version": version,
-        "uptime": uptime,
-        "hostname": service_name,
-        "environment": settings.ENVIRONMENT,
-    }
 
 
 @app.get("/health", tags=["Health"])
 async def read_health():
     try:
-        prometheus_health = get_service_health(
-            check_prometheus_health,
-            lambda: {
-                "version": "2.26.0",
-                "uptime": (datetime.now() - startup_time).total_seconds(),
-            },
-            "localhost",
-        )
-
-        redis_health = get_service_health(
-            redis_instance.check_connection,
-            redis_instance.get_info,
-            redis_instance.get_hostname(),
-        )
-
-        mongodb_instance = MongoDB()
-
-        mongodb_health = get_service_health(
-            mongodb_instance.check_connection,
-            mongodb_instance.get_info,
-            mongodb_instance.get_hostname(),
-        )
-
         return {
             "status": "ok",
             "version": __version__,
             "uptime": (datetime.now() - startup_time).total_seconds(),
             "hostname": settings.HOST,
             "environment": settings.ENVIRONMENT,
-            "dependencies": {
-                "redis": redis_health,
-                "mongodb": mongodb_health,
-                "prometheus": prometheus_health,
-            },
         }
     except Exception as e:
         logger.error(f"Health check failed due to {str(e)}")
@@ -180,13 +119,7 @@ async def favicon():
     return Response(content, media_type="image/x-icon")
 
 
-@limiter.limit("5/minute")
 @app.get("/", tags=["Root"])
-@cache(expire=60)
 def read_root():
-    logger.info("AI News Tracker API")
-    return "AI News Tracker API"
-
-
-if __name__ == "__main__":
-    Instrumentator().instrument(app).expose(app)
+    logger.info("read_root")
+    return "PYTAPO API"

@@ -6,15 +6,18 @@ class LEDInterface:
     An interface for interacting with LED settings on a Tapo device.
     """
 
-    def __init__(self, perform_request, execute_function):
+    def __init__(self, perform_request, execute_function, child_id=None):
         """
         Initialize the LEDInterface with a function to execute API calls.
 
         Parameters:
+        perform_request (func): The function to perform direct API calls.
         execute_function (func): The function to be used for making API requests. It should take in a function name and parameters as arguments.
+        child_id (str): The ID of the child device (if applicable).
         """
-        self.execute_function = execute_function
         self.perform_request = perform_request
+        self.execute_function = execute_function
+        self.child_id = child_id
 
     def get_light_frequency_mode(self) -> str:
         """
