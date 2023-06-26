@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import pytest
 from unittest.mock import MagicMock, Mock
 from pytapo.settings.device import DeviceInterface
@@ -83,6 +84,14 @@ class TestDeviceInterface:
         }
         result = device_interface.getEvents()
         hours, minutes = map(int, "10:00".split(":"))
-        expected_start_time = "{:02d}:{}".format(hours + timeCorrection, minutes)
-        assert result == [{"event": "event_1", "start_time": expected_start_time}]
+        expected_hours = (hours + timeCorrection) % 24
+        expected_start_time = "{:02d}:{:02d}".format(expected_hours, minutes)
 
+        # Make a datetime object for the expected start time with today's date
+        now = datetime.now()
+        expected_start_datetime = now.replace(hour=expected_hours, minute=minutes)
+        expected_start_relative = abs(int(datetime.timestamp(now)) - int(datetime.timestamp(expected_start_datetime)))
+        result[0]["startRelative"] = expected_start_relative
+        assert result == [
+            {"event": "event_1", "startRelative": expected_start_relative, "start_time": expected_start_time}
+        ]

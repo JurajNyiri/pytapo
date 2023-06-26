@@ -10,7 +10,7 @@ class TSReader:
     const_crc_size = 4
 
     def __init__(self):
-        self.b = bytearray  # packets buffer
+        self.b = bytearray()
         self.i = 0  # read position
         self.s = self.PacketSize  # end position
         self.pmt = 0

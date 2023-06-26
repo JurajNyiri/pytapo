@@ -82,6 +82,7 @@ class Tapo:
         )
         self.childID = childID
         self.mediaSession = HttpMediaSession(host, cloudPassword, superSecretKey)
+        self.headers = self.client.headers
 
     def getBasicInfo(self) -> dict:
         """

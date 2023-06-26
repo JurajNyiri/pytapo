@@ -3,6 +3,7 @@ from httpx import AsyncClient
 import pytest
 from pytapo import Tapo
 from pytapo.error import ResponseException
+from types import SimpleNamespace
 
 
 @pytest.fixture
@@ -21,19 +22,27 @@ def tapo():
 async def test_performRequest_success(mocker, tapo):
     data = {"key": "value"}
     mocker.patch.object(tapo, "responseIsOK", return_value=True)
-    mocker.patch.object(AsyncClient, "post", new_callable=AsyncMock, return_value=data)
+
+    # Mock the post method to return an object with a 'json' method
+    post_return_value = SimpleNamespace(json=AsyncMock(return_value=data))
+    mocker.patch.object(AsyncClient, "post", new_callable=AsyncMock, return_value=post_return_value)
+
     mocker.patch.object(
         tapo, "getHostURL", return_value="https://localhost/stok=dummy_stok/ds"
     )
     response = await tapo.performRequest(data)
-    assert response == data
+    assert await response == data  # await here
 
 
 @pytest.mark.asyncio
 async def test_performRequest_fail(mocker, tapo):
     data = {"error_code": -40401}
     mocker.patch.object(tapo, "responseIsOK", return_value=False)
-    mocker.patch.object(AsyncClient, "post", new_callable=AsyncMock, return_value=data)
+
+    # Mock the post method to return an object with a 'json' method
+    post_return_value = SimpleNamespace(json=AsyncMock(return_value=data))
+    mocker.patch.object(AsyncClient, "post", new_callable=AsyncMock, return_value=post_return_value)
+
     mocker.patch.object(
         tapo, "getHostURL", return_value="https://localhost/stok=dummy_stok/ds"
     )

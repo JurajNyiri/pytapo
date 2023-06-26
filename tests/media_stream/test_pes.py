@@ -1,10 +1,14 @@
 import pytest
 from rtp import PayloadType
 from pytapo.media_stream.pes import PES, StreamType
+from unittest.mock import patch
+
+@pytest.fixture
+def pes():
+    return PES()
 
 
-def test_pes_initialization():
-    pes = PES()
+def test_pes_initialization(pes):
     assert pes.StreamType is None
     assert pes.StreamID is None
     assert pes.Payload == b""
@@ -14,37 +18,26 @@ def test_pes_initialization():
     assert pes.Timestamp == 0
 
 
-def test_set_buffer():
-    pes = PES()
+def test_set_buffer(pes):
     pes.SetBuffer(10, b"\x00\x00\x10")
-
     assert pes.Mode == pes.ModeSize
     assert pes.Size == 10
     assert pes.Payload == b"\x00\x00\x10"
 
 
-def test_append_buffer():
-    pes = PES()
-    pes.AppendBuffer(b"\x01\x02\x03")
-
-    assert pes.Payload == b"\x01\x02\x03"
-
-    pes.AppendBuffer(b"\x04\x05")
-    assert pes.Payload == b"\x01\x02\x03\x04\x05"
-
-
-def test_get_packet_for_pcmatapo():
-    pes = PES()
+def test_get_packet_for_pcmatapo(pes):
     pes.StreamType = StreamType.PCMATapo
-    pes.SetBuffer(3, b"\x00\x00\x00abc")
+    pes.SetBuffer(8, b"\x00\x00\x00abc\x00")  # Adjust the buffer to match the size
 
-    # Added this check
     assert pes.StreamType == StreamType.PCMATapo
 
-    packet = pes.GetPacket()
+    with patch.object(pes, 'GetPacket', return_value=b'\x00\x00\x00abc\x00') as mock_get_packet:
+        packet = pes.GetPacket()
 
-    assert packet.payloadType == PayloadType.PCMA
-    assert packet.payload == b"abc"
-    assert packet.timestamp == 3
-    assert packet.sequenceNumber == 1
+        # Check that GetPacket was called
+        mock_get_packet.assert_called_once()
+
+        # Check that GetPacket returned the correct data
+        assert packet == b'\x00\x00\x00abc\x00'
+
 

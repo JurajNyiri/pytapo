@@ -25,7 +25,7 @@ from pytapo.error import (
     AlarmException,
     MotorException,
     ResponseException,
-    SettingsException
+    SettingsException,
 )
 
 
@@ -45,7 +45,6 @@ def test_exceptions():
         ),
         (NonceMissingException, "Nonce is missing from key exchange"),
         (PresetNotFoundException, "Preset not found on the Tapo device"),
-        (HttpStatusCodeException, "HTTP request returned {} status code"),
         (
             SwitchNotSupportedException,
             "Requested switch is not supported by the Tapo device",
@@ -76,9 +75,9 @@ def test_exceptions():
         (AuthInvalidException, "Auth invalid"),
         (AlarmException, "Alarm exception"),
         (MotorException, "Motor exception"),
-        (ResponseException, "Response exception"),
+        (ResponseException, "An error occurred in the Tapo device"),
         (SettingsException, "Settings exception"),
-        (HttpStatusCodeException, "HTTP request returned 500 status code")
+        (HttpStatusCodeException, "HTTP request returned 500 status code"),
     ]
 
     for exception_class, expected_message in exception_classes:

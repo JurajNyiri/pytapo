@@ -78,9 +78,7 @@ class HttpMediaSession:
     async def start(self):
         req_line = b"POST /stream HTTP/1.1"
         headers = {
-            b"Content-Type": "multipart/mixed;boundary={}".format(
-                self.client_boundary.decode()
-            ).encode(),
+            b"Content-Type": f"multipart/mixed;boundary={self.client_boundary.decode()}".encode(),
             b"Connection": b"keep-alive",
             b"Content-Length": b"-1",
         }
@@ -441,17 +439,7 @@ class HttpMediaSession:
         await self._writer.drain()
 
         logger.debug(
-            (
-                "{} request of type {} sent (sequence {}, session {})"
-                ", expecting {} responses from queue {}"
-            ).format(
-                "Encrypted" if encrypt else "Plaintext",
-                mimetype,
-                sequence,
-                session,
-                self.window_size + 1,
-                id(queue),
-            )
+            f'{"Encrypted" if encrypt else "Plaintext"} request of type {mimetype} sent (sequence {sequence}, session {session}), expecting {self.window_size + 1} responses from queue {id(queue)}'
         )
 
         try:
@@ -464,16 +452,10 @@ class HttpMediaSession:
                         )
                     except asyncio.exceptions.TimeoutError:
                         print(
-                            "Server did not send a new chunk in {} sec (sequence {}"
-                            ", session {}), assuming the stream is over".format(
-                                no_data_timeout, sequence, session
-                            )
+                            f"Server did not send a new chunk in {no_data_timeout} sec (sequence {sequence}, session {session}), assuming the stream is over"
                         )
                         logger.debug(
-                            "Server did not send a new chunk in {} sec (sequence {}"
-                            ", session {}), assuming the stream is over".format(
-                                no_data_timeout, sequence, session
-                            )
+                            f"Server did not send a new chunk in {no_data_timeout} sec (sequence {sequence}, session {session}), assuming the stream is over"
                         )
                         break
                 else:

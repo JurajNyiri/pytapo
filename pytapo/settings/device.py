@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pytapo.error import SettingsException
 
 
@@ -338,10 +338,9 @@ class DeviceInterface:
 
         if detectionsReturned:
             for event in responseData["playback"]["search_detection_list"]:
-                event["start_time"] = event["start_time"] + timeCorrection
-                event["end_time"] = event["end_time"] + timeCorrection
-                event["startRelative"] = nowTS - event["start_time"]
-                event["endRelative"] = nowTS - event["end_time"]
+                start_time = datetime.strptime(event["start_time"], "%H:%M") + timedelta(hours=timeCorrection)
+                event["start_time"] = start_time.strftime("%H:%M")
+                event["startRelative"] = nowTS - int(start_time.timestamp())
                 events.append(event)
         return events
 

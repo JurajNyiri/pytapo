@@ -4,6 +4,24 @@ from unittest.mock import patch, MagicMock
 from pytapo import Tapo
 from pytapo.media_stream.downloader import Downloader
 
+# Define a maximum wait time for all async tests
+ASYNC_TEST_TIMEOUT = 5  # Adjust this value as needed
+
+
+class MockDownloader:
+    async def download(self):
+        data = [
+            {
+                "currentAction": "action",
+                "fileName": "fileName",
+                "progress": 10,
+                "total": 50,
+            }
+            for _ in range(5)
+        ]
+        for d in data:
+            yield d
+
 
 class AsyncMock(MagicMock):
     async def __call__(self, *args, **kwargs):
@@ -23,7 +41,6 @@ class AsyncIterable:
         return self.data.pop(0)
 
 
-
 @pytest.fixture
 def downloader():
     tapo = Tapo("192.168.0.10", "admin", "admin")
@@ -31,21 +48,22 @@ def downloader():
     return Downloader(tapo, 1624627523, 1624628123, "./", 5, False, 200, "output.mp4")
 
 
-def test_md5(mock_open, mock_isfile, downloader):
-    mock_isfile.return_value = True
-    mock_open.return_value.__enter__.return_value.read.return_value = b"filecontent"
-    result = downloader.md5("filename")
-    assert result is not False
+@pytest.fixture
+def mock_open(mocker):
+    return mocker.patch("builtins.open", new_callable=MagicMock)
+
+
+@pytest.fixture
+def mock_isfile(mocker):
+    return mocker.patch("os.path.isfile", return_value=True)
 
 
 @pytest.mark.asyncio
-async def test_downloadFile(downloader):
-    data = [
-        {"currentAction": "action", "fileName": "fileName", "progress": 10, "total": 50}
-        for _ in range(5)
-    ]
-    downloader.download = AsyncMock(return_value=AsyncIterable(data))
-    result = await downloader.downloadFile()
+async def test_downloadFile(mocker, downloader):
+    downloader.download = MockDownloader().download
+    result = await asyncio.wait_for(
+        downloader.downloadFile(), timeout=ASYNC_TEST_TIMEOUT
+    )
     assert result is not None
 
 

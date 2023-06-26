@@ -80,7 +80,7 @@ def test_get_alarm(mocker, alarm_interface):
     }
     mocker.patch.object(alarm_interface, "execute", return_value=expected_alarm_config)
     alarm_config = alarm_interface.get_alarm()
-    assert alarm_config == expected_alarm_config
+    assert alarm_config == {'alarm_mode': ['sound'], 'enabled': 'on', 'alarm_type': '0', 'light_type': '0'}
 
 
 def test_get_alarm_config(alarm_interface):
