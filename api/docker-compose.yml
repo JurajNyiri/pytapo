@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - 8000:8000
+    command: uvicorn app.main:app --host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    labels:
+      - "version=0.1.1"
+      - "description=pytapo"
+      - "type=api"

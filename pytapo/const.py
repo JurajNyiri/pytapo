@@ -9,5 +9,6 @@ ERROR_CODES = {
     "-40105": "Method does not exist",
     "-40101": "Parameter to set does not exist",
     "-40209": "Invalid login credentials",
+    "-64304": "Maximum Pan/Tilt range reached",
 }
 MAX_LOGIN_RETRIES = 2

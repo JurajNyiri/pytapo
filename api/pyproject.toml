@@ -1,0 +1,64 @@
+[tool.poetry]
+name = "pytapo"
+version = "0.1.2"
+description = "PyTapo is a Python library for interacting with Tapo devices."
+authors = ["Antoine Boucher <antoine.boucher012@gmail.com>""]
+readme = "README.md"
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.10.0, !=3.11.*"
+fastapi = "^0.81.0"
+pydantic = "^1.10.8"
+python-multipart = "^0.0.6"
+httpx = "^0.23.3"
+pymongo = "^4.3.3"
+python-dotenv = "^0.19.2"
+uvicorn = {version = "^0.18.3", extras = ["standard"]}
+anyio = "^3.7.0"
+configparser = "^5.3.0"
+contractions = "^0.1.73"
+fastapi_health = "^0.4.0"
+rich = "*"
+structlog = "^23.1.0"
+aiofiles = "^23.1.0"
+types-aiofiles = "^23.1.0.4"
+asyncio = "^3.4.3"
+requests = "^2.31.0"
+beautifulsoup4 = "^4.12.2"
+
+[tool.poetry.dev-dependencies]
+pre-commit = "^3.0.4"
+black = "^23.1.0"
+pycln = "^2.1.3"
+isort = "^5.12.0"
+pytest = "^7.3.2"
+pytest-cov = "^4.1.0"
+pytest-asyncio = "^0.21.0"
+sphinx = "^4.3.2"
+coverage = "^6.3.2"
+mypy = "^0.930"
+bandit = "^1.7.0"
+flake8 = "^4.0.1"
+
+[tool.poetry.scripts]
+start = "uvicorn app.main:app --reload"
+ls = "ls -l"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+
+[tool.pycln]
+all = true
+
+[tool.isort]
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true

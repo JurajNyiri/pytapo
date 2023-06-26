@@ -1,0 +1,8 @@
+version: 2
+updates:
+  - package-ecosystem: "pip" # For Python projects
+    directory: "/" # Location of your 'pyproject.toml' or 'requirements.txt' file
+    schedule:
+      interval: "daily" # check for updates daily
+    target-branch: "main" # target branch for PR
+    versioning-strategy: "lockfile-only" # Only update the lockfile (poetry.lock or requirements.txt)
