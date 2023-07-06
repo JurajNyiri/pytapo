@@ -15,6 +15,7 @@ class Downloader:
         tapo: Tapo,
         startTime: int,
         endTime: int,
+        timeCorrection: int,
         outputDirectory="./",
         padding=None,
         overwriteFiles=None,
@@ -26,9 +27,7 @@ class Downloader:
         self.endTime = endTime
         self.padding = padding
         self.fileName = fileName
-        self.scriptStartTime = int(
-            datetime.now().timestamp()
-        )  # keeps track of when was class initiated
+        self.timeCorrection = timeCorrection
         if padding is None:
             self.padding = 5
         else:
@@ -83,7 +82,12 @@ class Downloader:
                 )
             else:
                 fileName = self.outputDirectory + self.fileName
-            if self.scriptStartTime - self.FRESH_RECORDING_TIME_SECONDS < self.endTime:
+            if (
+                datetime.now().timestamp()
+                - self.FRESH_RECORDING_TIME_SECONDS
+                - self.timeCorrection
+                < self.endTime
+            ):
                 currentAction = "Recording in progress"
                 yield {
                     "currentAction": currentAction,

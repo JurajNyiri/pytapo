@@ -21,12 +21,14 @@ tapo = Tapo(host, "admin", password_cloud, password_cloud)
 async def download_async():
     print("Getting recordings...")
     recordings = tapo.getRecordings(date)
+    timeCorrection = tapo.getTimeCorrection()
     for recording in recordings:
         for key in recording:
             downloader = Downloader(
                 tapo,
                 recording[key]["startTime"],
                 recording[key]["endTime"],
+                timeCorrection,
                 outputDir,
                 None,
                 False,
@@ -44,11 +46,11 @@ async def download_async():
                 else:
                     statusString += "..."
                 print(
-                    statusString + (" " * 10) + "\r", end="",
+                    statusString + (" " * 10) + "\r",
+                    end="",
                 )
             print("")
 
 
 loop = asyncio.get_event_loop()
 loop.run_until_complete(download_async())
-
