@@ -2,19 +2,15 @@
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
 
-
 import hashlib
 import json
-
 import requests
-import urllib3
+from datetime import datetime
 from warnings import warn
 
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
-from datetime import datetime
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from .TlsAdapter import TlsAdapter
 
 
 class Tapo:
@@ -44,6 +40,8 @@ class Tapo:
         self.hashedCloudPassword = (
             hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
         )
+        self.session = requests.session()
+        self.session.mount("https://", TlsAdapter())
 
         self.basicInfo = self.getBasicInfo()
         self.presets = self.isSupportingPresets()
@@ -78,9 +76,10 @@ class Tapo:
                 "username": self.user,
             },
         }
-        res = requests.post(
-            url, data=json.dumps(data), headers=self.headers, verify=False
+        res = self.session.request(
+            "POST", url, data=json.dumps(data), headers=self.headers, verify=False
         )
+
         if res.status_code == 401:
             try:
                 data = res.json()
@@ -166,9 +165,15 @@ class Tapo:
             }
         else:
             fullRequest = requestData
-        res = requests.post(
-            url, data=json.dumps(fullRequest), headers=self.headers, verify=False
+
+        res = self.session.request(
+            "POST",
+            url,
+            data=json.dumps(fullRequest),
+            headers=self.headers,
+            verify=False,
         )
+
         if not self.responseIsOK(res):
             data = json.loads(res.text)
             #  -40401: Invalid Stok
