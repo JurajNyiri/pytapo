@@ -486,9 +486,9 @@ class Tapo:
     def setWhitelampConfig(self, forceTime=False, intensityLevel=False):
         params = {"image": {"switch": {}}}
         if forceTime is not False:
-            params["image"]["switch"]["wtl_force_time"] = forceTime
+            params["image"]["switch"]["wtl_force_time"] = str(forceTime)
         if intensityLevel is not False:
-            params["image"]["switch"]["wtl_intensity_level"] = intensityLevel
+            params["image"]["switch"]["wtl_intensity_level"] = str(intensityLevel)
 
         return self.executeFunction(
             "setWhitelampConfig",
