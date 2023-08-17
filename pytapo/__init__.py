@@ -488,7 +488,7 @@ class Tapo:
         if forceTime is not False:
             params["image"]["switch"]["wtl_force_time"] = forceTime
         if intensityLevel is not False:
-            params["image"]["switch"]["wtl_intensity_level"] = forceTime
+            params["image"]["switch"]["wtl_intensity_level"] = intensityLevel
 
         return self.executeFunction(
             "setWhitelampConfig",
