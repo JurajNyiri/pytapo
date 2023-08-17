@@ -1161,6 +1161,10 @@ class Tapo:
                         "method": "getWhitelampStatus",
                         "params": {"image": {"get_wtl_status": ["null"]}},
                     },
+                    {
+                        "method": "getWhitelampConfig",
+                        "params": {"image": {"name": "switch"}},
+                    },
                 ]
             },
         }
