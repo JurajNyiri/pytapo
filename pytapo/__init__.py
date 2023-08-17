@@ -477,6 +477,24 @@ class Tapo:
             {"lens_mask": {"lens_mask_info": {"enabled": "on" if enabled else "off"}}},
         )
 
+    def getWhitelampConfig(self):
+        return self.executeFunction(
+            "getWhitelampConfig",
+            {"image": {"name": "switch"}},
+        )
+
+    def setWhitelampConfig(self, forceTime=False, intensityLevel=False):
+        params = {"image": {"switch": {}}}
+        if forceTime is not False:
+            params["image"]["switch"]["wtl_force_time"] = forceTime
+        if intensityLevel is not False:
+            params["image"]["switch"]["wtl_intensity_level"] = forceTime
+
+        return self.executeFunction(
+            "setWhitelampConfig",
+            params,
+        )
+
     def setMediaEncrypt(self, enabled):
         return self.executeFunction(
             "setMediaEncrypt",
