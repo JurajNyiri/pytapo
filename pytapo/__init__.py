@@ -447,6 +447,16 @@ class Tapo:
     def getVhttpd(self):
         return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
 
+    def getWhitelampStatus(self):
+        return self.executeFunction(
+            "getWhitelampStatus", {"image": {"get_wtl_status": ["null"]}}
+        )
+
+    def reverseWhitelampStatus(self):
+        return self.executeFunction(
+            "reverseWhitelampStatus", {"image": {"reverse_wtl_status": ["null"]}}
+        )
+
     def getBasicInfo(self):
         return self.executeFunction(
             "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
@@ -1128,6 +1138,10 @@ class Tapo:
                     {
                         "method": "getNightVisionModeConfig",
                         "params": {"image": {"name": "switch"}},
+                    },
+                    {
+                        "method": "getWhitelampStatus",
+                        "params": {"image": {"get_wtl_status": ["null"]}},
                     },
                 ]
             },
