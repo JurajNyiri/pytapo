@@ -1195,6 +1195,10 @@ class Tapo:
                         "method": "getWhitelampConfig",
                         "params": {"image": {"name": "switch"}},
                     },
+                    {
+                        "method": "getMsgPushConfig",
+                        "params": {"msg_push": {"name": ["chn1_msg_push_info"]}},
+                    },
                 ]
             },
         }
