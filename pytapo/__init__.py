@@ -495,6 +495,36 @@ class Tapo:
             params,
         )
 
+    def getNotificationsEnabled(self):
+        params = {"msg_push": {"name": ["chn1_msg_push_info"]}}
+
+        data = self.executeFunction(
+            "getMsgPushConfig",
+            params,
+        )
+        return data["msg_push"]["chn1_msg_push_info"]
+
+    def setNotificationsEnabled(
+        self, notificationsEnabled=False, richNotificationsEnabled=False
+    ):
+        params = {
+            "msg_push": {
+                "chn1_msg_push_info": {
+                    "notification_enabled": "off"
+                    if notificationsEnabled is False
+                    else "on",
+                    "rich_notification_enabled": "off"
+                    if richNotificationsEnabled is False
+                    else "on",
+                }
+            }
+        }
+
+        return self.executeFunction(
+            "setMsgPushConfig",
+            params,
+        )
+
     def setMediaEncrypt(self, enabled):
         return self.executeFunction(
             "setMediaEncrypt",
