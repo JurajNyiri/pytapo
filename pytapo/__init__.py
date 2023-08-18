@@ -505,20 +505,17 @@ class Tapo:
         return data["msg_push"]["chn1_msg_push_info"]
 
     def setNotificationsEnabled(
-        self, notificationsEnabled=False, richNotificationsEnabled=False
+        self, notificationsEnabled=None, richNotificationsEnabled=None
     ):
-        params = {
-            "msg_push": {
-                "chn1_msg_push_info": {
-                    "notification_enabled": "off"
-                    if notificationsEnabled is False
-                    else "on",
-                    "rich_notification_enabled": "off"
-                    if richNotificationsEnabled is False
-                    else "on",
-                }
-            }
-        }
+        params = {"msg_push": {"chn1_msg_push_info": {}}}
+        if notificationsEnabled is not None:
+            params["msg_push"]["chn1_msg_push_info"]["notification_enabled"] = (
+                "off" if notificationsEnabled is False else "on"
+            )
+        if richNotificationsEnabled is not None:
+            params["msg_push"]["chn1_msg_push_info"]["rich_notification_enabled"] = (
+                "off" if richNotificationsEnabled is False else "on"
+            )
 
         return self.executeFunction(
             "setMsgPushConfig",
