@@ -606,8 +606,8 @@ class Tapo:
             "setLedStatus", {"led": {"config": {"enabled": "on" if enabled else "off"}}}
         )
 
-    def getUserID(self):
-        if not self.userID:
+    def getUserID(self, forceReload=False):
+        if not self.userID or forceReload is True:
             response = self.userID = self.performRequest(
                 {
                     "method": "multipleRequest",
@@ -650,23 +650,29 @@ class Tapo:
         return result["playback"]["search_results"]
 
     def getRecordings(self, date, start_index=0, end_index=999999999):
-        result = self.executeFunction(
-            "searchVideoOfDay",
-            {
-                "playback": {
-                    "search_video_utility": {
-                        "channel": 0,
-                        "date": date,
-                        "end_index": end_index,
-                        "id": self.getUserID(),
-                        "start_index": start_index,
+        try:
+            result = self.executeFunction(
+                "searchVideoOfDay",
+                {
+                    "playback": {
+                        "search_video_utility": {
+                            "channel": 0,
+                            "date": date,
+                            "end_index": end_index,
+                            "id": self.getUserID(),
+                            "start_index": start_index,
+                        }
                     }
-                }
-            },
-        )
-        if "playback" not in result:
-            raise Exception("Video playback is not supported by this camera")
-        return result["playback"]["search_video_results"]
+                },
+            )
+            if "playback" not in result:
+                raise Exception("Video playback is not supported by this camera")
+            return result["playback"]["search_video_results"]
+        except Exception as err:
+            # user ID expired, get a new one
+            if ERROR_CODES["-71103"] in str(err):
+                self.getUserID(True)
+                return self.getRecordings(date, start_index, end_index)
 
     # does not work for child devices, function discovery needed
     def getCommonImage(self):

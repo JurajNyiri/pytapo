@@ -10,5 +10,6 @@ ERROR_CODES = {
     "-40101": "Parameter to set does not exist",
     "-40209": "Invalid login credentials",
     "-64304": "Maximum Pan/Tilt range reached",
+    "-71103": "User ID is not authorized",
 }
 MAX_LOGIN_RETRIES = 2
