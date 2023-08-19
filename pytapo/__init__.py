@@ -608,7 +608,7 @@ class Tapo:
 
     def getUserID(self):
         if not self.userID:
-            self.userID = self.performRequest(
+            response = self.userID = self.performRequest(
                 {
                     "method": "multipleRequest",
                     "params": {
@@ -620,7 +620,14 @@ class Tapo:
                         ]
                     },
                 }
-            )["result"]["responses"][0]["result"]["user_id"]
+            )["result"]["responses"][0]["result"]
+            if "error_code" not in response or response["error_code"] == 0:
+                self.userID = response["user_id"]
+            else:
+                if "error_code" in response and response["error_code"] == -71101:
+                    self.userID = self.getUserID()
+                else:
+                    raise Exception(response)
         return self.userID
 
     def getRecordingsList(self, start_date="20000101", end_date=None):
