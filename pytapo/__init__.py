@@ -680,7 +680,9 @@ class Tapo:
         return self.performRequest({"method": "get", "image": {"name": "common"}})
 
     def __getSensitivityNumber(self, sensitivity):
-        if sensitivity.isnumeric():
+        if isinstance(sensitivity, int) or (
+            isinstance(sensitivity, str) and sensitivity.isnumeric()
+        ):
             sensitivityInt = int(sensitivity)
             if sensitivityInt >= 0 and sensitivityInt <= 100:
                 return str(sensitivityInt)
