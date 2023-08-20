@@ -704,10 +704,15 @@ class Tapo:
             {"motion_detection": {"name": ["motion_det"]}},
         )["motion_detection"]["motion_det"]
 
-    def setMotionDetection(self, enabled, sensitivity=False):
+    def setMotionDetection(self, enabled=None, sensitivity=False):
         data = {
-            "motion_detection": {"motion_det": {"enabled": "on" if enabled else "off"}},
+            "motion_detection": {"motion_det": {}},
         }
+        if enabled is not None:
+            data["motion_detection"]["motion_det"]["enabled"] = (
+                "on" if enabled else "off"
+            )
+
         if sensitivity:
             data["motion_detection"]["motion_det"][
                 "digital_sensitivity"
