@@ -895,12 +895,15 @@ class Tapo:
     def reboot(self):
         return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
 
+    def processPresetsResponse(self, response):
+        return {
+            id: response["preset"]["preset"]["name"][key]
+            for key, id in enumerate(response["preset"]["preset"]["id"])
+        }
+
     def getPresets(self):
         data = self.executeFunction("getPresetConfig", {"preset": {"name": ["preset"]}})
-        self.presets = {
-            id: data["preset"]["preset"]["name"][key]
-            for key, id in enumerate(data["preset"]["preset"]["id"])
-        }
+        self.presets = self.processPresetsResponse(data)
         return self.presets
 
     def savePreset(self, name):
@@ -911,9 +914,13 @@ class Tapo:
         self.getPresets()
         return True
 
-    def deletePreset(self, presetID):
+    def deletePreset(self, presetID, retry=False):
         if not str(presetID) in self.presets:
-            raise Exception("Preset {} is not set in the app".format(str(presetID)))
+            if retry is False:
+                self.getPresets()
+                return self.deletePreset(presetID, True)
+            else:
+                raise Exception("Preset {} is not set in the app".format(str(presetID)))
 
         self.executeFunction(
             "deletePreset", {"preset": {"remove_preset": {"id": [presetID]}}}
@@ -921,9 +928,13 @@ class Tapo:
         self.getPresets()
         return True
 
-    def setPreset(self, presetID):
+    def setPreset(self, presetID, retry=False):
         if not str(presetID) in self.presets:
-            raise Exception("Preset {} is not set in the app".format(str(presetID)))
+            if retry is False:
+                self.getPresets()
+                return self.setPreset(presetID, True)
+            else:
+                raise Exception("Preset {} is not set in the app".format(str(presetID)))
         return self.executeFunction(
             "motorMoveToPreset", {"preset": {"goto_preset": {"id": str(presetID)}}}
         )
@@ -1235,4 +1246,5 @@ class Tapo:
                 else:  # some cameras are not returning method for error messages
                     returnData[requestData["params"]["requests"][i]["method"]] = False
             i += 1
+        self.presets = self.processPresetsResponse(returnData["getPresetConfig"])
         return returnData
