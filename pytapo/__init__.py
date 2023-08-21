@@ -15,7 +15,14 @@ from .TlsAdapter import TlsAdapter
 
 class Tapo:
     def __init__(
-        self, host, user, password, cloudPassword="", superSecretKey="", childID=None
+        self,
+        host,
+        user,
+        password,
+        cloudPassword="",
+        superSecretKey="",
+        childID=None,
+        reuseSession=False,
     ):
         self.host = host
         self.user = user
@@ -26,6 +33,7 @@ class Tapo:
         self.userID = False
         self.childID = childID
         self.timeCorrection = False
+        self.reuseSession = reuseSession
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -40,8 +48,7 @@ class Tapo:
         self.hashedCloudPassword = (
             hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
         )
-        self.session = requests.session()
-        self.session.mount("https://", TlsAdapter())
+        self.session = False
 
         self.basicInfo = self.getBasicInfo()
         self.presets = self.isSupportingPresets()
@@ -66,6 +73,23 @@ class Tapo:
             return self.refreshStok()
         return True
 
+    def request(self, method, url, **kwargs):
+        if self.session is False and self.reuseSession is True:
+            self.session = requests.session()
+            self.session.mount("https://", TlsAdapter())
+
+        if self.reuseSession is True:
+            session = self.session
+        else:
+            session = requests.session()
+            session.mount("https://", TlsAdapter())
+
+        response = session.request(method, url, **kwargs)
+        if self.reuseSession is False:
+            response.close()
+            session.close()
+        return response
+
     def refreshStok(self):
         url = "https://{host}".format(host=self.host)
         data = {
@@ -76,7 +100,7 @@ class Tapo:
                 "username": self.user,
             },
         }
-        res = self.session.request(
+        res = self.request(
             "POST", url, data=json.dumps(data), headers=self.headers, verify=False
         )
 
@@ -166,7 +190,7 @@ class Tapo:
         else:
             fullRequest = requestData
 
-        res = self.session.request(
+        res = self.request(
             "POST",
             url,
             data=json.dumps(fullRequest),
