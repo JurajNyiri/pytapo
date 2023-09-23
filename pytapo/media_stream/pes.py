@@ -75,7 +75,7 @@ class PES:
                     payload=annexB2AVC(payload), payloadType=streamType, timestamp=ts,
                 )
             elif self.StreamType == self.StreamTypePCMATapo:
-                self.Sequence += 1
+                self.Sequence = (self.Sequence+1) % 2**16
                 self.Timestamp += len(payload)
 
                 streamType = None
