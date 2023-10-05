@@ -453,6 +453,18 @@ class Tapo:
             "led"
         ]["config"]
 
+    def getSDCard(self):
+        return self.executeFunction(
+            "getSdCardStatus",
+            {"harddisk_manage": {"table": ["hd_info"]}},
+        )["harddisk_manage"]["hd_info"]
+
+    def getCircularRecordingConfig(self):
+        return self.executeFunction(
+            "getCircularRecordingConfig",
+            {"harddisk_manage": {"name": "harddisk"}},
+        )["harddisk_manage"]["harddisk"]
+
     def getAutoTrackTarget(self):
         return self.executeFunction(
             "getTargetTrackConfig", {"target_track": {"name": ["target_track_info"]}}
@@ -1250,6 +1262,14 @@ class Tapo:
                     {
                         "method": "getMsgPushConfig",
                         "params": {"msg_push": {"name": ["chn1_msg_push_info"]}},
+                    },
+                    {
+                        "method": "getSdCardStatus",
+                        "params": {"harddisk_manage": {"table": ["hd_info"]}},
+                    },
+                    {
+                        "method": "getCircularRecordingConfig",
+                        "params": {"harddisk_manage": {"name": "harddisk"}},
                     },
                 ]
             },
