@@ -1328,6 +1328,10 @@ class Tapo:
                         "method": "getCircularRecordingConfig",
                         "params": {"harddisk_manage": {"name": "harddisk"}},
                     },
+                    {
+                        "method": "getRecordPlan",
+                        "params": {"record_plan": {"name": ["chn1_channel"]}},
+                    },
                 ]
             },
         }
