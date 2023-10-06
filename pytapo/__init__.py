@@ -465,10 +465,49 @@ class Tapo:
             {"record_plan": {"name": ["chn1_channel"]}},
         )["record_plan"]["chn1_channel"]
 
-    def setRecordPlan(self, enabled):
+    def setRecordPlan(
+        self,
+        enabled,
+        sunday=None,
+        monday=None,
+        tuesday=None,
+        wednesday=None,
+        thursday=None,
+        friday=None,
+        saturday=None,
+    ):
+        """
+        Example day object - list with explanation:
+        [
+            "0000-0700:1", # Record continuously from 00:00 to 07:00 (note the :1)
+            "0700-0900:2", # Record on motion from 07:00 to 09:00 (note the :2)
+            "0900-1100:1", # Record continuously from 09:00 to 11:00
+            "1100-1200:2", # Record on motion from 11:00 to 12:00
+            "1200-1500:1", # Record continuously from 12:00 to 15:00
+                        # No recording from 15:00 to 17:00 (note the missing time between 15 to 17 in array)
+            "1700-2400:1", # Record continuously from 17:00 to 24:00
+        ]
+        """
+        recordPlan = {"enabled": "on" if enabled else "off"}
+
+        if sunday is not None and type(sunday) is list:
+            recordPlan["sunday"] = json.dumps(sunday)
+        if monday is not None and type(monday) is list:
+            recordPlan["monday"] = json.dumps(monday)
+        if tuesday is not None and type(tuesday) is list:
+            recordPlan["tuesday"] = json.dumps(tuesday)
+        if wednesday is not None and type(wednesday) is list:
+            recordPlan["wednesday"] = json.dumps(wednesday)
+        if thursday is not None and type(thursday) is list:
+            recordPlan["thursday"] = json.dumps(thursday)
+        if friday is not None and type(friday) is list:
+            recordPlan["friday"] = json.dumps(friday)
+        if saturday is not None and type(saturday) is list:
+            recordPlan["saturday"] = json.dumps(saturday)
+
         return self.executeFunction(
-            "setCircularRecordingConfig",
-            {"record_plan": {"chn1_channel": {"enabled": "on" if enabled else "off"}}},
+            "setRecordPlan",
+            {"record_plan": {"chn1_channel": recordPlan}},
         )
 
     def getCircularRecordingConfig(self):
