@@ -465,6 +465,12 @@ class Tapo:
             {"harddisk_manage": {"name": "harddisk"}},
         )["harddisk_manage"]["harddisk"]
 
+    def setCircularRecordingConfig(self, enabled):
+        return self.executeFunction(
+            "setCircularRecordingConfig",
+            {"harddisk_manage": {"harddisk": {"loop": "on" if enabled else "off"}}},
+        )
+
     def getAutoTrackTarget(self):
         return self.executeFunction(
             "getTargetTrackConfig", {"target_track": {"name": ["target_track_info"]}}
