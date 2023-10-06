@@ -463,7 +463,7 @@ class Tapo:
         return self.executeFunction(
             "getRecordPlan",
             {"record_plan": {"name": ["chn1_channel"]}},
-        )
+        )["record_plan"]["chn1_channel"]
 
     def getCircularRecordingConfig(self):
         return self.executeFunction(
