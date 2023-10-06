@@ -465,6 +465,12 @@ class Tapo:
             {"record_plan": {"name": ["chn1_channel"]}},
         )["record_plan"]["chn1_channel"]
 
+    def setRecordPlan(self, enabled):
+        return self.executeFunction(
+            "setCircularRecordingConfig",
+            {"record_plan": {"chn1_channel": {"enabled": "on" if enabled else "off"}}},
+        )
+
     def getCircularRecordingConfig(self):
         return self.executeFunction(
             "getCircularRecordingConfig",
