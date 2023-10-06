@@ -459,6 +459,12 @@ class Tapo:
             {"harddisk_manage": {"table": ["hd_info"]}},
         )["harddisk_manage"]["hd_info"]
 
+    def getRecordPlan(self):
+        return self.executeFunction(
+            "getRecordPlan",
+            {"record_plan": {"name": ["chn1_channel"]}},
+        )
+
     def getCircularRecordingConfig(self):
         return self.executeFunction(
             "getCircularRecordingConfig",
