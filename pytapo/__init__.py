@@ -24,6 +24,7 @@ class Tapo:
         childID=None,
         reuseSession=False,
     ):
+        print("pyTapo - Version for debugging new firmware")
         self.host = host
         self.user = user
         self.password = password
@@ -100,9 +101,14 @@ class Tapo:
                 "username": self.user,
             },
         }
+        print(data["params"]["hashed"])
+        print(data["params"]["username"])
+        print(self.headers)
         res = self.request(
             "POST", url, data=json.dumps(data), headers=self.headers, verify=False
         )
+        print(res.status_code)
+        print(res.text)
 
         if res.status_code == 401:
             try:
