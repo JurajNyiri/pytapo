@@ -24,7 +24,7 @@ class Tapo:
         childID=None,
         reuseSession=False,
     ):
-        print("pyTapo - Version for debugging new firmware 4")
+        print("pyTapo - Version for debugging new firmware 5")
         self.host = host
         self.user = user
         self.password = password
@@ -87,9 +87,10 @@ class Tapo:
         else:
             session = requests.session()
             session.mount("https://", TlsAdapter())
-
+        print(kwargs)
         response = session.request(method, url, **kwargs)
         print(response.text)
+        print("")
         if self.reuseSession is False:
             response.close()
             session.close()
@@ -105,14 +106,9 @@ class Tapo:
                 "username": self.user,
             },
         }
-        print(data["params"]["hashed"])
-        print(data["params"]["username"])
-        print(self.headers)
         res = self.request(
             "POST", url, data=json.dumps(data), headers=self.headers, verify=False
         )
-        print(res.status_code)
-        print(res.text)
 
         if res.status_code == 401:
             try:
@@ -144,7 +140,6 @@ class Tapo:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
     def executeFunction(self, method, params, retry=False):
-        print("executeFunction")
         if method == "multipleRequest":
             data = self.performRequest({"method": "multipleRequest", "params": params})[
                 "result"
@@ -211,7 +206,6 @@ class Tapo:
             headers=self.headers,
             verify=False,
         )
-        print(fullRequest)
 
         if not self.responseIsOK(res):
             data = json.loads(res.text)
@@ -566,7 +560,6 @@ class Tapo:
         )
 
     def getBasicInfo(self):
-        print("getBasicInfo")
         return self.executeFunction(
             "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
         )
