@@ -24,7 +24,7 @@ class Tapo:
         childID=None,
         reuseSession=False,
     ):
-        print("pyTapo - Version for debugging new firmware 3")
+        print("pyTapo - Version for debugging new firmware 4")
         self.host = host
         self.user = user
         self.password = password
