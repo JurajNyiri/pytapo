@@ -31,6 +31,7 @@ class Tapo:
         self.cloudPassword = cloudPassword
         self.superSecretKey = superSecretKey
         self.stok = False
+        self.seq = 0
         self.userID = False
         self.childID = childID
         self.timeCorrection = False
@@ -200,6 +201,9 @@ class Tapo:
         else:
             fullRequest = requestData
 
+        self.seq += 1
+        fullRequest["seq"] = self.seq
+
         res = self.request(
             "POST",
             url,
@@ -207,6 +211,7 @@ class Tapo:
             headers=self.headers,
             verify=False,
         )
+        print(fullRequest)
 
         if not self.responseIsOK(res):
             data = json.loads(res.text)
