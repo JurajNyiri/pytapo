@@ -45,9 +45,11 @@ class Tapo:
             "requestByApp": "true",
             "Content-Type": "application/json; charset=UTF-8",
         }
-        self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
+        self.hashedPassword = (
+            hashlib.sha256(password.encode("utf8")).hexdigest().upper()
+        )
         self.hashedCloudPassword = (
-            hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
+            hashlib.sha256(cloudPassword.encode("utf8")).hexdigest().upper()
         )
         self.session = False
 
