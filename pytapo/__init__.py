@@ -1,6 +1,7 @@
 #
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
+import copy
 
 import hashlib
 import json
@@ -24,7 +25,7 @@ class Tapo:
         childID=None,
         reuseSession=False,
     ):
-        print("pyTapo - Version for debugging new firmware 5")
+        print("pyTapo - Version for debugging new firmware 6")
         self.host = host
         self.user = user
         self.password = password
@@ -87,7 +88,16 @@ class Tapo:
         else:
             session = requests.session()
             session.mount("https://", TlsAdapter())
-        print(kwargs)
+        redactedKwargs = copy.deepcopy(kwargs)
+        if "data" in kwargs:
+            redactedKwargsData = json.loads(kwargs["data"])
+            if (
+                "params" in redactedKwargsData
+                and "password" in redactedKwargsData["params"]
+            ):
+                redactedKwargsData["params"]["password"] = "REDACTED"
+                redactedKwargs["data"] = json.dumps(redactedKwargsData)
+        print(redactedKwargs)
         response = session.request(method, url, **kwargs)
         print(response.text)
         print("")
