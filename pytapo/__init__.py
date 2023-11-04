@@ -5,6 +5,7 @@ import copy
 
 import hashlib
 import json
+import sys
 import requests
 from datetime import datetime
 from warnings import warn
@@ -12,6 +13,10 @@ from warnings import warn
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 from .TlsAdapter import TlsAdapter
+
+from pytapo.media_stream._utils import (
+    generate_nonce,
+)
 
 
 class Tapo:
@@ -37,6 +42,7 @@ class Tapo:
         self.childID = childID
         self.timeCorrection = False
         self.reuseSession = reuseSession
+        self.isSecureConnection = None
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -47,11 +53,9 @@ class Tapo:
             "requestByApp": "true",
             "Content-Type": "application/json; charset=UTF-8",
         }
-        self.hashedPassword = (
-            hashlib.sha256(password.encode("utf8")).hexdigest().upper()
-        )
+        self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
         self.hashedCloudPassword = (
-            hashlib.sha256(cloudPassword.encode("utf8")).hexdigest().upper()
+            hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
         )
         self.session = False
 
@@ -97,25 +101,60 @@ class Tapo:
             ):
                 redactedKwargsData["params"]["password"] = "REDACTED"
                 redactedKwargs["data"] = json.dumps(redactedKwargsData)
-        print(redactedKwargs)
+        # print(redactedKwargs)
         response = session.request(method, url, **kwargs)
-        print(response.text)
-        print("")
+        # print(response.text)
+        # print("")
         if self.reuseSession is False:
             response.close()
             session.close()
         return response
 
+    def isSecureConnectionAvailable(self):
+        if self.isSecureConnection is None:
+            url = "https://{host}".format(host=self.host)
+            data = {
+                "method": "login",
+                "params": {
+                    "encrypt_type": "3",
+                    "username": self.user,
+                },
+            }
+            res = self.request(
+                "POST", url, data=json.dumps(data), headers=self.headers, verify=False
+            )
+            response = res.json()
+            self.isSecureConnection = (
+                "error_code" in response
+                and response["error_code"] == -40413
+                and "result" in response
+                and "data" in response["result"]
+                and "encrypt_type" in response["result"]["data"]
+                and "3" in response["result"]["data"]["encrypt_type"]
+            )
+        return self.isSecureConnection
+
     def refreshStok(self):
+        cnonce = generate_nonce(8).decode().upper()
         url = "https://{host}".format(host=self.host)
-        data = {
-            "method": "login",
-            "params": {
-                "hashed": True,
-                "password": self.hashedPassword,
-                "username": self.user,
-            },
-        }
+        if self.isSecureConnectionAvailable():
+            data = {
+                "method": "login",
+                "params": {
+                    "cnonce": cnonce,
+                    "encrypt_type": "3",
+                    "username": self.user,
+                },
+            }
+        else:
+            data = {
+                "method": "login",
+                "params": {
+                    "hashed": True,
+                    "password": self.hashedPassword,
+                    "username": self.user,
+                },
+            }
         res = self.request(
             "POST", url, data=json.dumps(data), headers=self.headers, verify=False
         )
@@ -131,10 +170,47 @@ class Tapo:
                 else:
                     pass
 
-        if self.responseIsOK(res):
-            self.stok = res.json()["result"]["stok"]
-            return self.stok
-        raise Exception("Invalid authentication data")
+        if self.isSecureConnectionAvailable():
+            responseData = res.json()
+            if (
+                "result" in responseData
+                and "data" in responseData["result"]
+                and "nonce" in responseData["result"]["data"]
+            ):
+                digestPasswd = (
+                    hashlib.sha256(self.password.encode("utf8"))
+                    .hexdigest()
+                    .upper()  # todo: this part is not generated correctly
+                    + cnonce
+                    + responseData["result"]["data"]["nonce"]
+                )  # todo find out how to generate this
+                print(digestPasswd)
+                data = {
+                    "method": "login",
+                    "params": {
+                        "cnonce": cnonce,
+                        "encrypt_type": "3",
+                        "digest_passwd": digestPasswd,
+                        "username": self.user,
+                    },
+                }
+                print(data)
+                res = self.request(
+                    "POST",
+                    url,
+                    data=json.dumps(data),
+                    headers=self.headers,
+                    verify=False,
+                )
+
+                print(res.text)
+                print("todo")
+                sys.exit(1)
+        else:
+            if self.responseIsOK(res):
+                self.stok = res.json()["result"]["stok"]
+                return self.stok
+            raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res):
         if res.status_code != 200:
@@ -218,7 +294,7 @@ class Tapo:
         )
 
         if not self.responseIsOK(res):
-            data = json.loads(res.text)
+            data = res.json()
             #  -40401: Invalid Stok
             if (
                 data
