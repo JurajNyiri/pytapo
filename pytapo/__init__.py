@@ -7,13 +7,12 @@ import requests
 import base64
 from datetime import datetime
 from warnings import warn
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 from .TlsAdapter import TlsAdapter
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-
 from .media_stream._utils import (
     generate_nonce,
 )
@@ -40,7 +39,6 @@ class Tapo:
         self.cloudPassword = cloudPassword
         self.superSecretKey = superSecretKey
         self.stok = False
-        self.seq = 0
         self.userID = False
         self.childID = childID
         self.timeCorrection = False
@@ -352,9 +350,6 @@ class Tapo:
             fullRequest = requestData
 
         if self.seq is not None and self.isSecureConnection():
-            self.headers["Seq"] = str(self.seq)
-            # todo move under proper security condition
-
             fullRequest = {
                 "method": "securePassthrough",
                 "params": {
@@ -363,6 +358,7 @@ class Tapo:
                     ).decode("utf8")
                 },
             }
+            self.headers["Seq"] = str(self.seq)
             self.headers["Tapo_tag"] = self.getTag(fullRequest)
             self.seq += 1
 
