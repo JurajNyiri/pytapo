@@ -1,11 +1,8 @@
 #
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
-import copy
-
 import hashlib
 import json
-import sys
 import requests
 import base64
 from datetime import datetime
@@ -33,7 +30,6 @@ class Tapo:
         childID=None,
         reuseSession=False,
     ):
-        print("pyTapo - Version for debugging new firmware 6")
         self.seq = None
         self.host = host
         self.lsk = None
@@ -102,15 +98,6 @@ class Tapo:
         else:
             session = requests.session()
             session.mount("https://", TlsAdapter())
-        redactedKwargs = copy.deepcopy(kwargs)
-        if "data" in kwargs:
-            redactedKwargsData = json.loads(kwargs["data"])
-            if (
-                "params" in redactedKwargsData
-                and "password" in redactedKwargsData["params"]
-            ):
-                redactedKwargsData["params"]["password"] = "REDACTED"
-                redactedKwargs["data"] = json.dumps(redactedKwargsData)
         response = session.request(method, url, **kwargs)
         if self.reuseSession is False:
             response.close()
