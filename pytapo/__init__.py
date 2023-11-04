@@ -31,6 +31,7 @@ class Tapo:
         reuseSession=False,
     ):
         print("pyTapo - Version for debugging new firmware 6")
+        self.seq = None
         self.host = host
         self.user = user
         self.password = password
@@ -134,6 +135,21 @@ class Tapo:
             )
         return self.isSecureConnection
 
+    def validateDeviceConfirm(self, cnonce, nonce, deviceConfirm):
+        hashedPassword = (
+            hashlib.sha256(str(self.password).encode("utf8")).hexdigest().upper()
+        )
+        hashedNonces = (
+            hashlib.sha256(
+                cnonce.encode("utf8")
+                + hashedPassword.encode("utf8")
+                + nonce.encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        return deviceConfirm == (hashedNonces + nonce + cnonce)
+
     def refreshStok(self):
         cnonce = generate_nonce(8).decode().upper()
         url = "https://{host}".format(host=self.host)
@@ -183,35 +199,49 @@ class Tapo:
                     .hexdigest()
                     .upper()
                 )
-                digestPasswd = (
-                    hashlib.sha256(
-                        hashedPassword.encode("utf8")
-                        + cnonce.encode("utf8")
-                        + nonce.encode("utf8")
-                    )
-                    .hexdigest()
-                    .upper()
-                )
-                data = {
-                    "method": "login",
-                    "params": {
-                        "cnonce": cnonce,
-                        "encrypt_type": "3",
-                        "digest_passwd": (
-                            digestPasswd.encode("utf8")
+                if self.validateDeviceConfirm(
+                    cnonce, nonce, responseData["result"]["data"]["device_confirm"]
+                ):  # password verified on client, now request stok
+                    digestPasswd = (
+                        hashlib.sha256(
+                            hashedPassword.encode("utf8")
                             + cnonce.encode("utf8")
                             + nonce.encode("utf8")
-                        ).decode(),
-                        "username": self.user,
-                    },
-                }
-                res = self.request(
-                    "POST",
-                    url,
-                    data=json.dumps(data),
-                    headers=self.headers,
-                    verify=False,
-                )
+                        )
+                        .hexdigest()
+                        .upper()
+                    )
+                    data = {
+                        "method": "login",
+                        "params": {
+                            "cnonce": cnonce,
+                            "encrypt_type": "3",
+                            "digest_passwd": (
+                                digestPasswd.encode("utf8")
+                                + cnonce.encode("utf8")
+                                + nonce.encode("utf8")
+                            ).decode(),
+                            "username": self.user,
+                        },
+                    }
+                    res = self.request(
+                        "POST",
+                        url,
+                        data=json.dumps(data),
+                        headers=self.headers,
+                        verify=False,
+                    )
+                    responseData = res.json()
+                    if (
+                        "result" in responseData
+                        and "start_seq" in responseData["result"]
+                    ):
+                        # todo: set Lsk, Ivb
+                        self.seq = responseData["result"]["start_seq"]
+                        print(responseData)
+                        sys.exit(0)
+                else:
+                    raise Exception("Invalid authentication data")
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
             return self.stok
@@ -266,8 +296,6 @@ class Tapo:
 
     def performRequest(self, requestData, loginRetryCount=0):
         self.ensureAuthenticated()
-        print(self.stok)
-        sys.exit(0)
         url = self.getHostURL()
         if self.childID:
             fullRequest = {
@@ -289,9 +317,12 @@ class Tapo:
         else:
             fullRequest = requestData
 
-        self.seq += 1
-        fullRequest["seq"] = self.seq
+        if self.seq is not None:
+            self.headers["Seq"] = str(self.seq)
+            self.seq += 1
 
+        print(self.headers)
+        print(fullRequest)
         res = self.request(
             "POST",
             url,
@@ -299,7 +330,9 @@ class Tapo:
             headers=self.headers,
             verify=False,
         )
-
+        print(res.text)
+        print(res.status_code)
+        sys.exit(0)
         if not self.responseIsOK(res):
             data = res.json()
             #  -40401: Invalid Stok
