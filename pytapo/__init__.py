@@ -1,16 +1,21 @@
 #
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
-
 import hashlib
 import json
 import requests
+import base64
 from datetime import datetime
 from warnings import warn
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 from .TlsAdapter import TlsAdapter
+from .media_stream._utils import (
+    generate_nonce,
+)
 
 
 class Tapo:
@@ -24,7 +29,11 @@ class Tapo:
         childID=None,
         reuseSession=False,
     ):
+        self.seq = None
         self.host = host
+        self.lsk = None
+        self.cnonce = None
+        self.ivb = None
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
@@ -34,6 +43,7 @@ class Tapo:
         self.childID = childID
         self.timeCorrection = False
         self.reuseSession = reuseSession
+        self.isSecureConnectionCached = None
         self.headers = {
             "Host": self.host,
             "Referer": "https://{host}".format(host=self.host),
@@ -45,6 +55,9 @@ class Tapo:
             "Content-Type": "application/json; charset=UTF-8",
         }
         self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
+        self.hashedSha256Password = (
+            hashlib.sha256(password.encode("utf8")).hexdigest().upper()
+        )
         self.hashedCloudPassword = (
             hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
         )
@@ -83,23 +96,107 @@ class Tapo:
         else:
             session = requests.session()
             session.mount("https://", TlsAdapter())
-
         response = session.request(method, url, **kwargs)
         if self.reuseSession is False:
             response.close()
             session.close()
         return response
 
+    def isSecureConnection(self):
+        if self.isSecureConnectionCached is None:
+            url = "https://{host}".format(host=self.host)
+            data = {
+                "method": "login",
+                "params": {
+                    "encrypt_type": "3",
+                    "username": self.user,
+                },
+            }
+            res = self.request(
+                "POST", url, data=json.dumps(data), headers=self.headers, verify=False
+            )
+            response = res.json()
+            self.isSecureConnectionCached = (
+                "error_code" in response
+                and response["error_code"] == -40413
+                and "result" in response
+                and "data" in response["result"]
+                and "encrypt_type" in response["result"]["data"]
+                and "3" in response["result"]["data"]["encrypt_type"]
+            )
+        return self.isSecureConnectionCached
+
+    def validateDeviceConfirm(self, nonce, deviceConfirm):
+        hashedNonces = (
+            hashlib.sha256(
+                self.cnonce.encode("utf8")
+                + self.hashedSha256Password.encode("utf8")
+                + nonce.encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        return deviceConfirm == (hashedNonces + nonce + self.cnonce)
+
+    def getTag(self, request):
+        tag = (
+            hashlib.sha256(
+                self.hashedSha256Password.encode("utf8") + self.cnonce.encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        tag = (
+            hashlib.sha256(
+                tag.encode("utf8")
+                + json.dumps(request).encode("utf8")
+                + str(self.seq).encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        return tag
+
+    def generateEncryptionToken(self, tokenType, nonce):
+        hashedKey = (
+            hashlib.sha256(
+                self.cnonce.encode("utf8")
+                + self.hashedSha256Password.encode("utf8")
+                + nonce.encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        return hashlib.sha256(
+            (
+                tokenType.encode("utf8")
+                + self.cnonce.encode("utf8")
+                + nonce.encode("utf8")
+                + hashedKey.encode("utf8")
+            )
+        ).digest()[:16]
+
     def refreshStok(self):
+        self.cnonce = generate_nonce(8).decode().upper()
         url = "https://{host}".format(host=self.host)
-        data = {
-            "method": "login",
-            "params": {
-                "hashed": True,
-                "password": self.hashedPassword,
-                "username": self.user,
-            },
-        }
+        if self.isSecureConnection():
+            data = {
+                "method": "login",
+                "params": {
+                    "cnonce": self.cnonce,
+                    "encrypt_type": "3",
+                    "username": self.user,
+                },
+            }
+        else:
+            data = {
+                "method": "login",
+                "params": {
+                    "hashed": True,
+                    "password": self.hashedPassword,
+                    "username": self.user,
+                },
+            }
         res = self.request(
             "POST", url, data=json.dumps(data), headers=self.headers, verify=False
         )
@@ -115,19 +212,71 @@ class Tapo:
                 else:
                     pass
 
+        if self.isSecureConnection():
+            responseData = res.json()
+            if (
+                "result" in responseData
+                and "data" in responseData["result"]
+                and "nonce" in responseData["result"]["data"]
+                and "device_confirm" in responseData["result"]["data"]
+            ):
+                nonce = responseData["result"]["data"]["nonce"]
+                if self.validateDeviceConfirm(
+                    nonce, responseData["result"]["data"]["device_confirm"]
+                ):  # password verified on client, now request stok
+                    digestPasswd = (
+                        hashlib.sha256(
+                            self.hashedSha256Password.encode("utf8")
+                            + self.cnonce.encode("utf8")
+                            + nonce.encode("utf8")
+                        )
+                        .hexdigest()
+                        .upper()
+                    )
+                    data = {
+                        "method": "login",
+                        "params": {
+                            "cnonce": self.cnonce,
+                            "encrypt_type": "3",
+                            "digest_passwd": (
+                                digestPasswd.encode("utf8")
+                                + self.cnonce.encode("utf8")
+                                + nonce.encode("utf8")
+                            ).decode(),
+                            "username": self.user,
+                        },
+                    }
+                    res = self.request(
+                        "POST",
+                        url,
+                        data=json.dumps(data),
+                        headers=self.headers,
+                        verify=False,
+                    )
+                    responseData = res.json()
+                    if (
+                        "result" in responseData
+                        and "start_seq" in responseData["result"]
+                    ):
+                        self.lsk = self.generateEncryptionToken("lsk", nonce)
+                        self.ivb = self.generateEncryptionToken("ivb", nonce)
+                        self.seq = responseData["result"]["start_seq"]
+                else:
+                    raise Exception("Invalid authentication data")
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
             return self.stok
         raise Exception("Invalid authentication data")
 
-    def responseIsOK(self, res):
+    def responseIsOK(self, res, data=None):
         if res.status_code != 200:
             raise Exception(
                 "Error communicating with Tapo Camera. Status code: "
                 + str(res.status_code)
             )
         try:
-            data = res.json()
+            if data is None:
+                data = res.json()
             if "error_code" not in data or data["error_code"] == 0:
                 return True
         except Exception as e:
@@ -167,6 +316,16 @@ class Tapo:
                 )
             )
 
+    def encryptRequest(self, request):
+        cipher = AES.new(self.lsk, AES.MODE_CBC, self.ivb)
+        ct_bytes = cipher.encrypt(pad(request, AES.block_size))
+        return ct_bytes
+
+    def decryptResponse(self, response):
+        cipher = AES.new(self.lsk, AES.MODE_CBC, self.ivb)
+        pt = cipher.decrypt(response)
+        return unpad(pt, AES.block_size)
+
     def performRequest(self, requestData, loginRetryCount=0):
         self.ensureAuthenticated()
         url = self.getHostURL()
@@ -190,6 +349,19 @@ class Tapo:
         else:
             fullRequest = requestData
 
+        if self.seq is not None and self.isSecureConnection():
+            fullRequest = {
+                "method": "securePassthrough",
+                "params": {
+                    "request": base64.b64encode(
+                        self.encryptRequest(json.dumps(fullRequest).encode("utf-8"))
+                    ).decode("utf8")
+                },
+            }
+            self.headers["Seq"] = str(self.seq)
+            self.headers["Tapo_tag"] = self.getTag(fullRequest)
+            self.seq += 1
+
         res = self.request(
             "POST",
             url,
@@ -197,14 +369,23 @@ class Tapo:
             headers=self.headers,
             verify=False,
         )
-
-        if not self.responseIsOK(res):
-            data = json.loads(res.text)
+        responseData = res.json()
+        if (
+            self.isSecureConnection()
+            and "result" in responseData
+            and "response" in responseData["result"]
+        ):
+            encryptedResponse = responseData["result"]["response"]
+            encryptedResponse = base64.b64decode(responseData["result"]["response"])
+            responseJSON = json.loads(self.decryptResponse(encryptedResponse))
+        else:
+            responseJSON = res.json()
+        if not self.responseIsOK(res, responseJSON):
             #  -40401: Invalid Stok
             if (
-                data
-                and "error_code" in data
-                and data["error_code"] == -40401
+                responseJSON
+                and "error_code" in responseJSON
+                and responseJSON["error_code"] == -40401
                 and loginRetryCount < MAX_LOGIN_RETRIES
             ):
                 self.refreshStok()
@@ -212,11 +393,11 @@ class Tapo:
             else:
                 raise Exception(
                     "Error: {}, Response: {}".format(
-                        self.getErrorMessage(data["error_code"]), json.dumps(data)
+                        self.getErrorMessage(responseJSON["error_code"]),
+                        json.dumps(responseJSON),
                     )
                 )
 
-        responseJSON = res.json()
         # strip away child device stuff to ensure consistent response format for HUB cameras
         if self.childID:
             responses = []
