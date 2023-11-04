@@ -192,6 +192,7 @@ class Tapo:
                 "result" in responseData
                 and "data" in responseData["result"]
                 and "nonce" in responseData["result"]["data"]
+                and "device_confirm" in responseData["result"]["data"]
             ):
                 nonce = responseData["result"]["data"]["nonce"]
                 hashedPassword = (
