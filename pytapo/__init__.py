@@ -177,24 +177,34 @@ class Tapo:
                 and "data" in responseData["result"]
                 and "nonce" in responseData["result"]["data"]
             ):
-                digestPasswd = (
-                    hashlib.sha256(self.password.encode("utf8"))
+                nonce = responseData["result"]["data"]["nonce"]
+                hashedPassword = (
+                    hashlib.sha256(str(self.password).encode("utf8"))
                     .hexdigest()
-                    .upper()  # todo: this part is not generated correctly
-                    + cnonce
-                    + responseData["result"]["data"]["nonce"]
-                )  # todo find out how to generate this
-                print(digestPasswd)
+                    .upper()
+                )
+                digestPasswd = (
+                    hashlib.sha256(
+                        hashedPassword.encode("utf8")
+                        + cnonce.encode("utf8")
+                        + nonce.encode("utf8")
+                    )
+                    .hexdigest()
+                    .upper()
+                )
                 data = {
                     "method": "login",
                     "params": {
                         "cnonce": cnonce,
                         "encrypt_type": "3",
-                        "digest_passwd": digestPasswd,
+                        "digest_passwd": (
+                            digestPasswd.encode("utf8")
+                            + cnonce.encode("utf8")
+                            + nonce.encode("utf8")
+                        ).decode(),
                         "username": self.user,
                     },
                 }
-                print(data)
                 res = self.request(
                     "POST",
                     url,
@@ -202,15 +212,10 @@ class Tapo:
                     headers=self.headers,
                     verify=False,
                 )
-
-                print(res.text)
-                print("todo")
-                sys.exit(1)
-        else:
-            if self.responseIsOK(res):
-                self.stok = res.json()["result"]["stok"]
-                return self.stok
-            raise Exception("Invalid authentication data")
+        if self.responseIsOK(res):
+            self.stok = res.json()["result"]["stok"]
+            return self.stok
+        raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res):
         if res.status_code != 200:
@@ -261,6 +266,8 @@ class Tapo:
 
     def performRequest(self, requestData, loginRetryCount=0):
         self.ensureAuthenticated()
+        print(self.stok)
+        sys.exit(0)
         url = self.getHostURL()
         if self.childID:
             fullRequest = {
