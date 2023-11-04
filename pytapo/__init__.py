@@ -2,7 +2,9 @@
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
 import hashlib
+import sys
 import json
+import copy
 import requests
 import base64
 from datetime import datetime
@@ -96,7 +98,46 @@ class Tapo:
         else:
             session = requests.session()
             session.mount("https://", TlsAdapter())
+        redactedKwargs = copy.deepcopy(kwargs)
+        if "data" in redactedKwargs:
+            redactedKwargsData = json.loads(redactedKwargs["data"])
+            if "params" in redactedKwargsData:
+                if "password" in redactedKwargsData["params"]:
+                    redactedKwargsData["params"]["password"] = "REDACTED"
+                if "digest_passwd" in redactedKwargsData["params"]:
+                    redactedKwargsData["params"]["digest_passwd"] = "REDACTED"
+                if "cnonce" in redactedKwargsData["params"]:
+                    redactedKwargsData["params"]["cnonce"] = "REDACTED"
+            redactedKwargs["data"] = redactedKwargsData
+        if "headers" in redactedKwargs:
+            redactedKwargsHeaders = redactedKwargs["headers"]
+            if "Tapo_tag" in redactedKwargsHeaders:
+                redactedKwargsHeaders["Tapo_tag"] = "REDACTED"
+            if "Host" in redactedKwargsHeaders:
+                redactedKwargsHeaders["Host"] = "REDACTED"
+            if "Referer" in redactedKwargsHeaders:
+                redactedKwargsHeaders["Referer"] = "REDACTED"
+            redactedKwargs["headers"] = redactedKwargsHeaders
+        print("")
+        print(redactedKwargs)
         response = session.request(method, url, **kwargs)
+        print(response.status_code)
+        try:
+            loadJson = json.loads(response.text)
+            if "result" in loadJson:
+                if "stok" in loadJson["result"]:
+                    loadJson["result"]["stok"] = "REDACTED"
+                if "data" in loadJson["result"]:
+                    if "key" in loadJson["result"]["data"]:
+                        loadJson["result"]["data"]["key"] = "REDACTED"
+                    if "nonce" in loadJson["result"]["data"]:
+                        loadJson["result"]["data"]["nonce"] = "REDACTED"
+                    if "device_confirm" in loadJson["result"]["data"]:
+                        loadJson["result"]["data"]["device_confirm"] = "REDACTED"
+            print(loadJson)
+        except Exception as err:
+            print("Failed to load json:" + str(err))
+
         if self.reuseSession is False:
             response.close()
             session.close()
