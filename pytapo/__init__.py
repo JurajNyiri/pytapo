@@ -61,6 +61,9 @@ class Tapo:
             "Content-Type": "application/json; charset=UTF-8",
         }
         self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
+        self.hashedSha256Password = (
+            hashlib.sha256(password.encode("utf8")).hexdigest().upper()
+        )
         self.hashedCloudPassword = (
             hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
         )
@@ -108,10 +111,7 @@ class Tapo:
             ):
                 redactedKwargsData["params"]["password"] = "REDACTED"
                 redactedKwargs["data"] = json.dumps(redactedKwargsData)
-        # print(redactedKwargs)
         response = session.request(method, url, **kwargs)
-        # print(response.text)
-        # print("")
         if self.reuseSession is False:
             response.close()
             session.close()
@@ -142,13 +142,10 @@ class Tapo:
         return self.isSecureConnectionCached
 
     def validateDeviceConfirm(self, nonce, deviceConfirm):
-        hashedPassword = (
-            hashlib.sha256(str(self.password).encode("utf8")).hexdigest().upper()
-        )
         hashedNonces = (
             hashlib.sha256(
                 self.cnonce.encode("utf8")
-                + hashedPassword.encode("utf8")
+                + self.hashedSha256Password.encode("utf8")
                 + nonce.encode("utf8")
             )
             .hexdigest()
@@ -157,17 +154,29 @@ class Tapo:
         return deviceConfirm == (hashedNonces + nonce + self.cnonce)
 
     def getTag(self, request):
-        # this does not work
-        return "Todo"
+        tag = (
+            hashlib.sha256(
+                self.hashedSha256Password.encode("utf8") + self.cnonce.encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        tag = (
+            hashlib.sha256(
+                tag.encode("utf8")
+                + json.dumps(request).encode("utf8")
+                + str(self.seq).encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        return tag
 
     def generateEncryptionToken(self, tokenType, nonce):
-        hashedPassword = (
-            hashlib.sha256(str(self.password).encode("utf8")).hexdigest().upper()
-        )
         hashedKey = (
             hashlib.sha256(
                 self.cnonce.encode("utf8")
-                + hashedPassword.encode("utf8")
+                + self.hashedSha256Password.encode("utf8")
                 + nonce.encode("utf8")
             )
             .hexdigest()
@@ -227,17 +236,12 @@ class Tapo:
                 and "device_confirm" in responseData["result"]["data"]
             ):
                 nonce = responseData["result"]["data"]["nonce"]
-                hashedPassword = (
-                    hashlib.sha256(str(self.password).encode("utf8"))
-                    .hexdigest()
-                    .upper()
-                )
                 if self.validateDeviceConfirm(
                     nonce, responseData["result"]["data"]["device_confirm"]
                 ):  # password verified on client, now request stok
                     digestPasswd = (
                         hashlib.sha256(
-                            hashedPassword.encode("utf8")
+                            self.hashedSha256Password.encode("utf8")
                             + self.cnonce.encode("utf8")
                             + nonce.encode("utf8")
                         )
@@ -279,14 +283,15 @@ class Tapo:
             return self.stok
         raise Exception("Invalid authentication data")
 
-    def responseIsOK(self, res):
+    def responseIsOK(self, res, data=None):
         if res.status_code != 200:
             raise Exception(
                 "Error communicating with Tapo Camera. Status code: "
                 + str(res.status_code)
             )
         try:
-            data = res.json()
+            if data is None:
+                data = res.json()
             if "error_code" not in data or data["error_code"] == 0:
                 return True
         except Exception as e:
@@ -362,7 +367,6 @@ class Tapo:
         if self.seq is not None and self.isSecureConnection():
             self.headers["Seq"] = str(self.seq)
             # todo move under proper security condition
-            self.headers["Tapo_tag"] = self.getTag(fullRequest)
 
             fullRequest = {
                 "method": "securePassthrough",
@@ -372,6 +376,7 @@ class Tapo:
                     ).decode("utf8")
                 },
             }
+            self.headers["Tapo_tag"] = self.getTag(fullRequest)
             self.seq += 1
 
         res = self.request(
@@ -389,17 +394,15 @@ class Tapo:
         ):
             encryptedResponse = responseData["result"]["response"]
             encryptedResponse = base64.b64decode(responseData["result"]["response"])
-            data = json.loads(self.decryptResponse(encryptedResponse))
+            responseJSON = json.loads(self.decryptResponse(encryptedResponse))
         else:
-            data = res.json()
-        print(data)
-        sys.exit(0)
-        if not self.responseIsOK(res):
+            responseJSON = res.json()
+        if not self.responseIsOK(res, responseJSON):
             #  -40401: Invalid Stok
             if (
-                data
-                and "error_code" in data
-                and data["error_code"] == -40401
+                responseJSON
+                and "error_code" in responseJSON
+                and responseJSON["error_code"] == -40401
                 and loginRetryCount < MAX_LOGIN_RETRIES
             ):
                 self.refreshStok()
@@ -407,11 +410,11 @@ class Tapo:
             else:
                 raise Exception(
                     "Error: {}, Response: {}".format(
-                        self.getErrorMessage(data["error_code"]), json.dumps(data)
+                        self.getErrorMessage(responseJSON["error_code"]),
+                        json.dumps(responseJSON),
                     )
                 )
 
-        responseJSON = res.json()
         # strip away child device stuff to ensure consistent response format for HUB cameras
         if self.childID:
             responses = []
