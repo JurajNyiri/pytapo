@@ -30,7 +30,9 @@ class Tapo:
         superSecretKey="",
         childID=None,
         reuseSession=False,
+        redactDebugInformation=True,
     ):
+        self.redactDebugInformation = redactDebugInformation
         self.seq = None
         self.host = host
         self.lsk = None
@@ -119,7 +121,10 @@ class Tapo:
                 redactedKwargsHeaders["Referer"] = "REDACTED"
             redactedKwargs["headers"] = redactedKwargsHeaders
         print("")
-        print(redactedKwargs)
+        if self.redactDebugInformation:
+            print(redactedKwargs)
+        else:
+            print(kwargs)
         response = session.request(method, url, **kwargs)
         print(response.status_code)
         try:
@@ -134,7 +139,10 @@ class Tapo:
                         loadJson["result"]["data"]["nonce"] = "REDACTED"
                     if "device_confirm" in loadJson["result"]["data"]:
                         loadJson["result"]["data"]["device_confirm"] = "REDACTED"
-            print(loadJson)
+            if self.redactDebugInformation:
+                print(loadJson)
+            else:
+                print(response.text)
         except Exception as err:
             print("Failed to load json:" + str(err))
 
@@ -303,6 +311,7 @@ class Tapo:
                         self.ivb = self.generateEncryptionToken("ivb", nonce)
                         self.seq = responseData["result"]["start_seq"]
                 else:
+                    print("Determined actual wrong cloud password!")
                     raise Exception("Invalid authentication data")
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
