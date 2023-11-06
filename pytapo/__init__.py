@@ -725,6 +725,33 @@ class Tapo:
             }
         )
 
+    def getAudioConfig(self):
+        return self.executeFunction(
+            "getAudioConfig",
+            {"method": "get", "audio_config": {"name": ["speaker", "microphone"]}},
+        )
+
+    def setSpeakerVolume(self, volume):
+        return self.executeFunction(
+            "setSpeakerVolume",
+            {"method": "set", "audio_config": {"speaker": {"volume": volume}}},
+        )
+
+    def setMicrophone(self, volume=None, mute=None, noise_cancelling=None):
+        params = {"method": "set", "audio_config": {"microphone": {}}}
+        if volume is not None:
+            params["audio_config"]["microphone"]["volume"] = volume
+        if mute is not None:
+            params["audio_config"]["microphone"]["mute"] = "on" if mute else "off"
+        if noise_cancelling is not None:
+            params["audio_config"]["microphone"]["noise_cancelling"] = (
+                "on" if noise_cancelling else "off"
+            )
+        return self.executeFunction(
+            "setMicrophoneVolume",
+            params,
+        )
+
     # does not work for child devices, function discovery needed
     def getVhttpd(self):
         return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
@@ -1520,6 +1547,13 @@ class Tapo:
                     {
                         "method": "getRecordPlan",
                         "params": {"record_plan": {"name": ["chn1_channel"]}},
+                    },
+                    {
+                        "method": "getAudioConfig",
+                        "params": {
+                            "method": "get",
+                            "audio_config": {"name": ["speaker", "microphone"]},
+                        },
                     },
                 ]
             },
