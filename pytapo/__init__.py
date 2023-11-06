@@ -269,7 +269,11 @@ class Tapo:
         raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res, data=None):
-        if res.status_code != 200:
+        if (res.status_code != 200 and not self.isSecureConnection()) or (
+            res.status_code != 200
+            and res.status_code != 500
+            and self.isSecureConnection()  # pass responseIsOK for secure connections 500 which are communicating expiring session
+        ):
             raise Exception(
                 "Error communicating with Tapo Camera. Status code: "
                 + str(res.status_code)
@@ -279,6 +283,7 @@ class Tapo:
                 data = res.json()
             if "error_code" not in data or data["error_code"] == 0:
                 return True
+            return False
         except Exception as e:
             raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
@@ -385,7 +390,10 @@ class Tapo:
             if (
                 responseJSON
                 and "error_code" in responseJSON
-                and responseJSON["error_code"] == -40401
+                and (
+                    responseJSON["error_code"] == -40401
+                    or responseJSON["error_code"] == -1
+                )
                 and loginRetryCount < MAX_LOGIN_RETRIES
             ):
                 self.refreshStok()
