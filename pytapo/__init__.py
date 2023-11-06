@@ -430,6 +430,7 @@ class Tapo:
             responseJSON = json.loads(self.decryptResponse(encryptedResponse))
         else:
             responseJSON = res.json()
+        print(responseJSON)
         if not self.responseIsOK(res, responseJSON):
             #  -40401: Invalid Stok
             if (
