@@ -2,9 +2,7 @@
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
 import hashlib
-import sys
 import json
-import copy
 import requests
 import base64
 from datetime import datetime
