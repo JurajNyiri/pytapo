@@ -97,7 +97,6 @@ class Tapo:
             session = requests.session()
             session.mount("https://", TlsAdapter())
         response = session.request(method, url, **kwargs)
-
         if self.reuseSession is False:
             response.close()
             session.close()
@@ -263,7 +262,6 @@ class Tapo:
                         self.ivb = self.generateEncryptionToken("ivb", nonce)
                         self.seq = responseData["result"]["start_seq"]
                 else:
-                    print("Determined actual wrong cloud password!")
                     raise Exception("Invalid authentication data")
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
