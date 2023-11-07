@@ -212,8 +212,8 @@ class Tapo:
                 else:
                     pass
 
+        responseData = res.json()
         if self.isSecureConnection():
-            responseData = res.json()
             if (
                 "result" in responseData
                 and "data" in responseData["result"]
@@ -263,6 +263,19 @@ class Tapo:
                         self.seq = responseData["result"]["start_seq"]
                 else:
                     raise Exception("Invalid authentication data")
+
+        if (
+            "result" in responseData
+            and "data" in responseData["result"]
+            and "time" in responseData["result"]["data"]
+            and "max_time" in responseData["result"]["data"]
+            and "sec_left" in responseData["result"]["data"]
+            and responseData["result"]["data"]["sec_left"] > 0
+        ):
+            raise Exception(
+                f"Temporary Suspension: Try again in {str(responseData['result']['data']['sec_left'])} seconds"
+            )
+
         if self.responseIsOK(res):
             self.stok = res.json()["result"]["stok"]
             return self.stok
