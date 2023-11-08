@@ -641,6 +641,25 @@ class Tapo:
             },
         )
 
+    def getFirmwareAutoUpgradeConfig(self):
+        return self.executeFunction(
+            "getFirmwareAutoUpgradeConfig",
+            {"auto_upgrade": {"name": ["common"]}},
+        )
+
+    # enabled is boolean, time is string like "03:00", random_range is constant in app
+    def setFirmwareAutoUpgradeConfig(self, enabled=None, time=None):
+        params = {"random_range": 120}
+        if enabled is not None:
+            params["enabled"] = "on" if enabled else "off"
+        if time is not None:
+            params["time"] = time
+
+        return self.executeFunction(
+            "setFirmwareAutoUpgradeConfig",
+            {"auto_upgrade": {"common": params}},
+        )
+
     def getRotationStatus(self):
         return self.executeFunction(
             "getRotationStatus",
