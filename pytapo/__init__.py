@@ -128,6 +128,7 @@ class Tapo:
         return self.isSecureConnectionCached
 
     def validateDeviceConfirm(self, nonce, deviceConfirm):
+        self.passwordEncryptionMethod = None
         hashedNoncesWithSHA256 = (
             hashlib.sha256(
                 self.cnonce.encode("utf8")
