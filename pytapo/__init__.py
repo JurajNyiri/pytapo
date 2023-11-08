@@ -29,6 +29,7 @@ class Tapo:
         childID=None,
         reuseSession=False,
     ):
+        self.passwordEncryptionMethod = None
         self.seq = None
         self.host = host
         self.lsk = None
@@ -127,7 +128,7 @@ class Tapo:
         return self.isSecureConnectionCached
 
     def validateDeviceConfirm(self, nonce, deviceConfirm):
-        hashedNonces = (
+        hashedNoncesWithSHA256 = (
             hashlib.sha256(
                 self.cnonce.encode("utf8")
                 + self.hashedSha256Password.encode("utf8")
@@ -136,12 +137,25 @@ class Tapo:
             .hexdigest()
             .upper()
         )
-        return deviceConfirm == (hashedNonces + nonce + self.cnonce)
+        hashedNoncesWithMD5 = (
+            hashlib.sha256(
+                self.cnonce.encode("utf8")
+                + self.hashedPassword.encode("utf8")
+                + nonce.encode("utf8")
+            )
+            .hexdigest()
+            .upper()
+        )
+        if deviceConfirm == (hashedNoncesWithSHA256 + nonce + self.cnonce):
+            self.passwordEncryptionMethod = "sha256"
+        elif deviceConfirm == (hashedNoncesWithMD5 + nonce + self.cnonce):
+            self.passwordEncryptionMethod = "md5"
+        return self.passwordEncryptionMethod is not None
 
     def getTag(self, request):
         tag = (
             hashlib.sha256(
-                self.hashedSha256Password.encode("utf8") + self.cnonce.encode("utf8")
+                self.getHashedPassword().encode("utf8") + self.cnonce.encode("utf8")
             )
             .hexdigest()
             .upper()
@@ -161,7 +175,7 @@ class Tapo:
         hashedKey = (
             hashlib.sha256(
                 self.cnonce.encode("utf8")
-                + self.hashedSha256Password.encode("utf8")
+                + self.getHashedPassword().encode("utf8")
                 + nonce.encode("utf8")
             )
             .hexdigest()
@@ -175,6 +189,14 @@ class Tapo:
                 + hashedKey.encode("utf8")
             )
         ).digest()[:16]
+
+    def getHashedPassword(self):
+        if self.passwordEncryptionMethod == "md5":
+            return self.hashedPassword
+        elif self.passwordEncryptionMethod == "sha256":
+            return self.hashedSha256Password
+        else:
+            raise Exception("Failure detecting hashing algorithm.")
 
     def refreshStok(self):
         self.cnonce = generate_nonce(8).decode().upper()
@@ -223,10 +245,10 @@ class Tapo:
                 nonce = responseData["result"]["data"]["nonce"]
                 if self.validateDeviceConfirm(
                     nonce, responseData["result"]["data"]["device_confirm"]
-                ):  # password verified on client, now request stok
+                ):  # sets self.passwordEncryptionMethod, password verified on client, now request stok
                     digestPasswd = (
                         hashlib.sha256(
-                            self.hashedSha256Password.encode("utf8")
+                            self.getHashedPassword().encode("utf8")
                             + self.cnonce.encode("utf8")
                             + nonce.encode("utf8")
                         )
