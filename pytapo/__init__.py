@@ -1587,6 +1587,12 @@ class Tapo:
                             "audio_config": {"name": ["speaker", "microphone"]},
                         },
                     },
+                    {
+                        "method": "getFirmwareAutoUpgradeConfig",
+                        "params": {
+                            "auto_upgrade": {"name": ["common"]},
+                        },
+                    },
                 ]
             },
         }
