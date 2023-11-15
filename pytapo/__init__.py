@@ -362,6 +362,13 @@ class Tapo:
                         "result" in responseData
                         and "start_seq" in responseData["result"]
                     ):
+                        if (
+                            "user_group" in responseData["result"]
+                            and responseData["result"]["user_group"] != "root"
+                        ):
+                            # encrypted control via 3rd party account does not seem to be supported
+                            # see https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/456
+                            raise Exception("Invalid authentication data")
                         self.lsk = self.generateEncryptionToken("lsk", nonce)
                         self.ivb = self.generateEncryptionToken("ivb", nonce)
                         self.seq = responseData["result"]["start_seq"]
