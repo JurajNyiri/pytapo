@@ -17,7 +17,6 @@ from .media_stream._utils import (
     generate_nonce,
 )
 
-
 class Tapo:
     def __init__(
         self,
