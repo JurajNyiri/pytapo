@@ -450,6 +450,7 @@ class Tapo:
 
     def performRequest(self, requestData, loginRetryCount=0):
         self.ensureAuthenticated()
+        authValid = True
         url = self.getHostURL()
         if self.childID:
             fullRequest = {
@@ -481,7 +482,16 @@ class Tapo:
                 },
             }
             self.headers["Seq"] = str(self.seq)
-            self.headers["Tapo_tag"] = self.getTag(fullRequest)
+            try:
+                self.headers["Tapo_tag"] = self.getTag(fullRequest)
+            except Exception as err:
+                if str(err) == "Failure detecting hashing algorithm.":
+                    authValid = False
+                    self.debugLog(
+                        "Failure detecting hashing algorithm on getTag, reauthenticating."
+                    )
+                else:
+                    raise err
             self.seq += 1
 
         res = self.request(
@@ -492,7 +502,6 @@ class Tapo:
             verify=False,
         )
         responseData = res.json()
-        authValid = True
         if (
             self.isSecureConnection()
             and "result" in responseData
@@ -503,7 +512,11 @@ class Tapo:
             try:
                 responseJSON = json.loads(self.decryptResponse(encryptedResponse))
             except Exception as err:
-                if str(err) == "Padding is incorrect.":
+                if (
+                    str(err) == "Padding is incorrect."
+                    or str(err) == "PKCS#7 padding is incorrect."
+                ):
+                    self.debugLog(f"{str(err)} Reauthenticating.")
                     authValid = False
                 else:
                     raise err
