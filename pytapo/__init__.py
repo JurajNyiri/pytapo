@@ -492,6 +492,7 @@ class Tapo:
             verify=False,
         )
         responseData = res.json()
+        authValid = True
         if (
             self.isSecureConnection()
             and "result" in responseData
@@ -499,20 +500,28 @@ class Tapo:
         ):
             encryptedResponse = responseData["result"]["response"]
             encryptedResponse = base64.b64decode(responseData["result"]["response"])
-            responseJSON = json.loads(self.decryptResponse(encryptedResponse))
+            try:
+                responseJSON = json.loads(self.decryptResponse(encryptedResponse))
+            except Exception as err:
+                if str(err) == "Padding is incorrect.":
+                    authValid = False
+                else:
+                    raise err
         else:
             responseJSON = res.json()
-        if not self.responseIsOK(res, responseJSON):
+        if not authValid or not self.responseIsOK(res, responseJSON):
             #  -40401: Invalid Stok
             if (
-                responseJSON
-                and "error_code" in responseJSON
-                and (
-                    responseJSON["error_code"] == -40401
-                    or responseJSON["error_code"] == -1
+                not authValid
+                or (
+                    responseJSON
+                    and "error_code" in responseJSON
+                    and (
+                        responseJSON["error_code"] == -40401
+                        or responseJSON["error_code"] == -1
+                    )
                 )
-                and loginRetryCount < MAX_LOGIN_RETRIES
-            ):
+            ) and loginRetryCount < MAX_LOGIN_RETRIES:
                 self.refreshStok()
                 return self.performRequest(requestData, loginRetryCount + 1)
             else:
