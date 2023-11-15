@@ -5,6 +5,8 @@ import hashlib
 import json
 import requests
 import base64
+import copy
+
 from datetime import datetime
 from warnings import warn
 from Crypto.Cipher import AES
@@ -17,7 +19,14 @@ from .media_stream._utils import (
     generate_nonce,
 )
 
+
 class Tapo:
+    def debugLog(self, msg):
+        if self.printDebugInformation is True:
+            print(msg)
+        elif callable(self.printDebugInformation):
+            self.printDebugInformation(msg)
+
     def __init__(
         self,
         host,
@@ -27,7 +36,9 @@ class Tapo:
         superSecretKey="",
         childID=None,
         reuseSession=False,
+        printDebugInformation=False,
     ):
+        self.printDebugInformation = printDebugInformation
         self.passwordEncryptionMethod = None
         self.seq = None
         self.host = host
@@ -96,7 +107,78 @@ class Tapo:
         else:
             session = requests.session()
             session.mount("https://", TlsAdapter())
+        if self.printDebugInformation:
+            redactedKwargs = copy.deepcopy(kwargs)
+            if "data" in redactedKwargs:
+                redactedKwargsData = json.loads(redactedKwargs["data"])
+                if "params" in redactedKwargsData:
+                    if (
+                        "password" in redactedKwargsData["params"]
+                        and redactedKwargsData["params"]["password"] != ""
+                    ):
+                        redactedKwargsData["params"]["password"] = "REDACTED"
+                    if (
+                        "digest_passwd" in redactedKwargsData["params"]
+                        and redactedKwargsData["params"]["digest_passwd"] != ""
+                    ):
+                        redactedKwargsData["params"]["digest_passwd"] = "REDACTED"
+                    if (
+                        "cnonce" in redactedKwargsData["params"]
+                        and redactedKwargsData["params"]["cnonce"] != ""
+                    ):
+                        redactedKwargsData["params"]["cnonce"] = "REDACTED"
+                redactedKwargs["data"] = redactedKwargsData
+            if "headers" in redactedKwargs:
+                redactedKwargsHeaders = redactedKwargs["headers"]
+                if (
+                    "Tapo_tag" in redactedKwargsHeaders
+                    and redactedKwargsHeaders["Tapo_tag"] != ""
+                ):
+                    redactedKwargsHeaders["Tapo_tag"] = "REDACTED"
+                if (
+                    "Host" in redactedKwargsHeaders
+                    and redactedKwargsHeaders["Host"] != ""
+                ):
+                    redactedKwargsHeaders["Host"] = "REDACTED"
+                if (
+                    "Referer" in redactedKwargsHeaders
+                    and redactedKwargsHeaders["Referer"] != ""
+                ):
+                    redactedKwargsHeaders["Referer"] = "REDACTED"
+                redactedKwargs["headers"] = redactedKwargsHeaders
+            self.debugLog("New request:")
+            self.debugLog(redactedKwargs)
         response = session.request(method, url, **kwargs)
+        if self.printDebugInformation:
+            self.debugLog(response.status_code)
+            try:
+                loadJson = json.loads(response.text)
+                if "result" in loadJson:
+                    if (
+                        "stok" in loadJson["result"]
+                        and loadJson["result"]["stok"] != ""
+                    ):
+                        loadJson["result"]["stok"] = "REDACTED"
+                    if "data" in loadJson["result"]:
+                        if (
+                            "key" in loadJson["result"]["data"]
+                            and loadJson["result"]["data"]["key"] != ""
+                        ):
+                            loadJson["result"]["data"]["key"] = "REDACTED"
+                        if (
+                            "nonce" in loadJson["result"]["data"]
+                            and loadJson["result"]["data"]["nonce"] != ""
+                        ):
+                            loadJson["result"]["data"]["nonce"] = "REDACTED"
+                        if (
+                            "device_confirm" in loadJson["result"]["data"]
+                            and loadJson["result"]["data"]["device_confirm"] != ""
+                        ):
+                            loadJson["result"]["data"]["device_confirm"] = "REDACTED"
+                self.debugLog(loadJson)
+            except Exception as err:
+                self.debugLog("Failed to load json:" + str(err))
+
         if self.reuseSession is False:
             response.close()
             session.close()
