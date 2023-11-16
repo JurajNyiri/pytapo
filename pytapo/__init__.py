@@ -281,9 +281,11 @@ class Tapo:
             raise Exception("Failure detecting hashing algorithm.")
 
     def refreshStok(self):
+        self.debugLog("Refreshing stok...")
         self.cnonce = generate_nonce(8).decode().upper()
         url = "https://{host}".format(host=self.host)
         if self.isSecureConnection():
+            self.debugLog("Connection is secure.")
             data = {
                 "method": "login",
                 "params": {
@@ -293,6 +295,7 @@ class Tapo:
                 },
             }
         else:
+            self.debugLog("Connection is insecure.")
             data = {
                 "method": "login",
                 "params": {
@@ -304,11 +307,13 @@ class Tapo:
         res = self.request(
             "POST", url, data=json.dumps(data), headers=self.headers, verify=False
         )
+        self.debugLog("Status code: " + str(res.status_code))
 
         if res.status_code == 401:
             try:
                 data = res.json()
                 if data["result"]["data"]["code"] == -40411:
+                    self.debugLog("Code is -40411, raising Exception.")
                     raise Exception("Invalid authentication data")
             except Exception as e:
                 if str(e) == "Invalid authentication data":
@@ -318,16 +323,19 @@ class Tapo:
 
         responseData = res.json()
         if self.isSecureConnection():
+            self.debugLog("Processing secure response.")
             if (
                 "result" in responseData
                 and "data" in responseData["result"]
                 and "nonce" in responseData["result"]["data"]
                 and "device_confirm" in responseData["result"]["data"]
             ):
+                self.debugLog("Validating device confirm.")
                 nonce = responseData["result"]["data"]["nonce"]
                 if self.validateDeviceConfirm(
                     nonce, responseData["result"]["data"]["device_confirm"]
                 ):  # sets self.passwordEncryptionMethod, password verified on client, now request stok
+                    self.debugLog("Signing in with digestPasswd.")
                     digestPasswd = (
                         hashlib.sha256(
                             self.getHashedPassword().encode("utf8")
@@ -366,13 +374,18 @@ class Tapo:
                             "user_group" in responseData["result"]
                             and responseData["result"]["user_group"] != "root"
                         ):
+                            self.debugLog(
+                                "Incorrect user_group detected, raising Exception."
+                            )
                             # encrypted control via 3rd party account does not seem to be supported
                             # see https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/456
                             raise Exception("Invalid authentication data")
+                        self.debugLog("Geneerating encryption tokens.")
                         self.lsk = self.generateEncryptionToken("lsk", nonce)
                         self.ivb = self.generateEncryptionToken("ivb", nonce)
                         self.seq = responseData["result"]["start_seq"]
                 else:
+                    self.debugLog("Incorrect device_confirm value, raising Exception.")
                     raise Exception("Invalid authentication data")
 
         if (
@@ -388,8 +401,10 @@ class Tapo:
             )
 
         if self.responseIsOK(res):
+            self.debugLog("Saving stok.")
             self.stok = res.json()["result"]["stok"]
             return self.stok
+        self.debugLog("Response was not valid, raising Exception.")
         raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res, data=None):
