@@ -426,8 +426,17 @@ class Tapo:
             self.debugLog("Saving stok.")
             self.stok = res.json()["result"]["stok"]
             return self.stok
-        self.debugLog("Response was not valid, raising Exception.")
-        raise Exception("Invalid authentication data")
+        if (
+            "error_code" in responseData and responseData["error_code"] == -40413
+        ) and loginRetryCount < MAX_LOGIN_RETRIES:
+            loginRetryCount += 1
+            self.debugLog(
+                f"Unexpected reponse, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
+            )
+            return self.refreshStok(loginRetryCount)
+        else:
+            self.debugLog("Unexpected reponse, raising Exception.")
+            raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res, data=None):
         if (res.status_code != 200 and not self.isSecureConnection()) or (
