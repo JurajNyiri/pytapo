@@ -1794,6 +1794,13 @@ class Tapo:
                 else:  # some cameras are not returning method for error messages
                     returnData[requestData["params"]["requests"][i]["method"]] = False
             i += 1
+        # handle malformed / unexpected response from camera
+        for request in requestData["params"]["requests"]:
+            if request["method"] not in returnData:
+                self.debugLog(
+                    f"Detected missing method due to malformed response: {request['method']}"
+                )
+                returnData[request["method"]] = False
         if returnData["getPresetConfig"]:
             self.presets = self.processPresetsResponse(returnData["getPresetConfig"])
         return returnData
