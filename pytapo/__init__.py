@@ -1760,6 +1760,6 @@ class Tapo:
                 else:  # some cameras are not returning method for error messages
                     returnData[requestData["params"]["requests"][i]["method"]] = False
             i += 1
-        if returnData["getPresetConfig"]:
+        if "getPresetConfig" in returnData:
             self.presets = self.processPresetsResponse(returnData["getPresetConfig"])
         return returnData
