@@ -27,6 +27,9 @@ class Tapo:
         elif callable(self.printDebugInformation):
             self.printDebugInformation(msg)
 
+    def getControlHost(self):
+        return f"{self.host}:{self.controlPort}"
+
     def __init__(
         self,
         host,
@@ -37,11 +40,13 @@ class Tapo:
         childID=None,
         reuseSession=False,
         printDebugInformation=False,
+        controlPort=443
     ):
         self.printDebugInformation = printDebugInformation
         self.passwordEncryptionMethod = None
         self.seq = None
         self.host = host
+        self.controlPort = controlPort
         self.lsk = None
         self.cnonce = None
         self.ivb = None
@@ -56,8 +61,8 @@ class Tapo:
         self.reuseSession = reuseSession
         self.isSecureConnectionCached = None
         self.headers = {
-            "Host": self.host,
-            "Referer": "https://{host}".format(host=self.host),
+            "Host": self.getControlHost(),
+            "Referer": "https://{host}".format(host=self.getControlHost()),
             "Accept": "application/json",
             "Accept-Encoding": "gzip, deflate",
             "User-Agent": "Tapo CameraClient Android",
@@ -87,7 +92,7 @@ class Tapo:
             return False
 
     def getHostURL(self):
-        return "https://{host}/stok={stok}/ds".format(host=self.host, stok=self.stok)
+        return "https://{host}/stok={stok}/ds".format(host=self.getControlHost(), stok=self.stok)
 
     def getStreamURL(self):
         return "{host}:8800".format(host=self.host)
@@ -186,7 +191,7 @@ class Tapo:
 
     def isSecureConnection(self):
         if self.isSecureConnectionCached is None:
-            url = "https://{host}".format(host=self.host)
+            url = "https://{host}".format(host=self.getControlHost())
             data = {
                 "method": "login",
                 "params": {
@@ -283,7 +288,7 @@ class Tapo:
     def refreshStok(self):
         self.debugLog("Refreshing stok...")
         self.cnonce = generate_nonce(8).decode().upper()
-        url = "https://{host}".format(host=self.host)
+        url = "https://{host}".format(host=self.getControlHost())
         if self.isSecureConnection():
             self.debugLog("Connection is secure.")
             data = {
