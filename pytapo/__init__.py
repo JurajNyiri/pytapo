@@ -290,7 +290,7 @@ class Tapo:
         else:
             raise Exception("Failure detecting hashing algorithm.")
 
-    def refreshStok(self):
+    def refreshStok(self, loginRetryCount=0):
         self.debugLog("Refreshing stok...")
         self.cnonce = generate_nonce(8).decode().upper()
         url = "https://{host}".format(host=self.getControlHost())
@@ -395,8 +395,20 @@ class Tapo:
                         self.ivb = self.generateEncryptionToken("ivb", nonce)
                         self.seq = responseData["result"]["start_seq"]
                 else:
-                    self.debugLog("Incorrect device_confirm value, raising Exception.")
-                    raise Exception("Invalid authentication data")
+                    if (
+                        "error_code" in responseData
+                        and responseData["error_code"] == -40413
+                    ) and loginRetryCount < MAX_LOGIN_RETRIES:
+                        loginRetryCount += 1
+                        self.debugLog(
+                            f"Incorrect device_confirm value, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
+                        )
+                        return self.refreshStok(loginRetryCount)
+                    else:
+                        self.debugLog(
+                            "Incorrect device_confirm value, raising Exception."
+                        )
+                        raise Exception("Invalid authentication data")
 
         if (
             "result" in responseData
