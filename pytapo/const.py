@@ -13,3 +13,8 @@ ERROR_CODES = {
     "-71103": "User ID is not authorized",
 }
 MAX_LOGIN_RETRIES = 2
+
+
+class EncryptionMethod:
+    MD5 = "md5"
+    SHA256 = "sha256"

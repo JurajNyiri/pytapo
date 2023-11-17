@@ -6,6 +6,8 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 from pytapo.media_stream.error import NonceMissingException
+from pytapo.media_stream._utils import pwd_digest
+from pytapo.const import EncryptionMethod
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +22,13 @@ class AESHelper:
         nonce: bytes,
         cloud_password: bytes,
         super_secret_key: bytes,
+        encryptionMethod: EncryptionMethod,
     ):
         if not nonce:
             raise NonceMissingException()
         self.nonce = nonce
 
-        hashed_pwd = hashlib.md5(cloud_password).hexdigest().upper().encode()
+        hashed_pwd = pwd_digest(cloud_password, encryptionMethod)
         if username == b"none":
             logger.debug(
                 "Detected turned off media encryption, using super secret key."
@@ -47,7 +50,11 @@ class AESHelper:
 
     @classmethod
     def from_keyexchange_and_password(
-        cls, key_exchange: AnyStr, cloud_password: AnyStr, super_secret_key: AnyStr
+        cls,
+        key_exchange: AnyStr,
+        cloud_password: AnyStr,
+        super_secret_key: AnyStr,
+        encryptionMethod: EncryptionMethod,
     ):
         if type(cloud_password) == str:
             cloud_password = cloud_password.encode()
@@ -67,6 +74,7 @@ class AESHelper:
             key_exchange[b"nonce"],
             cloud_password,
             super_secret_key,
+            encryptionMethod,
         )
 
     def refresh(self):

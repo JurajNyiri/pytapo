@@ -12,7 +12,7 @@ from warnings import warn
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
-from .const import ERROR_CODES, MAX_LOGIN_RETRIES
+from .const import ERROR_CODES, MAX_LOGIN_RETRIES, EncryptionMethod
 from .media_stream.session import HttpMediaSession
 from .TlsAdapter import TlsAdapter
 from .media_stream._utils import (
@@ -40,7 +40,7 @@ class Tapo:
         childID=None,
         reuseSession=False,
         printDebugInformation=False,
-        controlPort=443
+        controlPort=443,
     ):
         self.printDebugInformation = printDebugInformation
         self.passwordEncryptionMethod = None
@@ -92,7 +92,9 @@ class Tapo:
             return False
 
     def getHostURL(self):
-        return "https://{host}/stok={stok}/ds".format(host=self.getControlHost(), stok=self.stok)
+        return "https://{host}/stok={stok}/ds".format(
+            host=self.getControlHost(), stok=self.stok
+        )
 
     def getStreamURL(self):
         return "{host}:8800".format(host=self.host)
@@ -234,9 +236,9 @@ class Tapo:
             .upper()
         )
         if deviceConfirm == (hashedNoncesWithSHA256 + nonce + self.cnonce):
-            self.passwordEncryptionMethod = "sha256"
+            self.passwordEncryptionMethod = EncryptionMethod.SHA256
         elif deviceConfirm == (hashedNoncesWithMD5 + nonce + self.cnonce):
-            self.passwordEncryptionMethod = "md5"
+            self.passwordEncryptionMethod = EncryptionMethod.MD5
         return self.passwordEncryptionMethod is not None
 
     def getTag(self, request):
@@ -277,10 +279,13 @@ class Tapo:
             )
         ).digest()[:16]
 
+    def getEncryptionMethod(self):
+        return self.passwordEncryptionMethod
+
     def getHashedPassword(self):
-        if self.passwordEncryptionMethod == "md5":
+        if self.passwordEncryptionMethod == EncryptionMethod.MD5:
             return self.hashedPassword
-        elif self.passwordEncryptionMethod == "sha256":
+        elif self.passwordEncryptionMethod == EncryptionMethod.SHA256:
             return self.hashedSha256Password
         else:
             raise Exception("Failure detecting hashing algorithm.")
@@ -590,7 +595,10 @@ class Tapo:
 
     def getMediaSession(self):
         return HttpMediaSession(
-            self.host, self.cloudPassword, self.superSecretKey
+            self.host,
+            self.cloudPassword,
+            self.superSecretKey,
+            self.getEncryptionMethod(),
         )  # pragma: no cover
 
     def getChildDevices(self):

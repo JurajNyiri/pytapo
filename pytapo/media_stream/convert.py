@@ -35,7 +35,7 @@ class Convert:
                 inputAudioFile=tempAudioFileLocation,
                 outputFile=fileLocation,
                 videoLength=str(datetime.timedelta(seconds=fileLength)),
-                devnull=os.devnull
+                devnull=os.devnull,
             )
             os.system(cmd)
 

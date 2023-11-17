@@ -4,6 +4,7 @@ import json
 import logging
 import random
 import warnings
+from pytapo.const import EncryptionMethod
 from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
 from typing import Optional, Mapping, Generator, MutableMapping
@@ -12,7 +13,7 @@ from rtp import PayloadType
 
 from pytapo.media_stream._utils import (
     generate_nonce,
-    md5digest,
+    pwd_digest,
     parse_http_response,
     parse_http_headers,
 )
@@ -33,6 +34,7 @@ class HttpMediaSession:
         ip: str,
         cloud_password: str,
         super_secret_key: str,
+        encryptionMethod: EncryptionMethod,
         window_size=500,  # 500 is a sweet point for download speed
         port: int = 8800,
         username: str = "admin",
@@ -42,7 +44,10 @@ class HttpMediaSession:
         self.window_size = window_size
         self.cloud_password = cloud_password
         self.super_secret_key = super_secret_key
-        self.hashed_password = md5digest(cloud_password.encode()).decode()
+        self.encryptionMethod = encryptionMethod
+        self.hashed_password = pwd_digest(
+            cloud_password.encode(), self.encryptionMethod
+        ).decode()
         self.port = port
         self.username = username
         self.client_boundary = multipart_boundary
@@ -185,6 +190,7 @@ class HttpMediaSession:
                 self._key_exchange.encode(),
                 self.cloud_password.encode(),
                 self.super_secret_key.encode(),
+                self.encryptionMethod,
             )
 
             logger.debug("AES key exchange performed")

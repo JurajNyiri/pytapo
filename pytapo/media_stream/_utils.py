@@ -1,11 +1,22 @@
 import hashlib
 import os
+from pytapo.const import EncryptionMethod
 
 from typing import Mapping, Tuple, Optional
 
 
-def md5digest(to_hash: bytes) -> bytes:
-    return hashlib.md5(to_hash).digest().hex().upper().encode()
+def pwd_digest(
+    to_hash: bytes,
+    encryptionMethod: EncryptionMethod,
+) -> bytes:
+    if encryptionMethod == EncryptionMethod.MD5:
+        return hashlib.md5(to_hash).digest().hex().upper().encode()
+    elif encryptionMethod == EncryptionMethod.SHA256:
+        return hashlib.sha256(to_hash).digest().hex().upper().encode()
+    else:
+        raise Exception(
+            f"Failure generating digest password, incorrect hashing method: {encryptionMethod}"
+        )
 
 
 def generate_nonce(length: int) -> bytes:
