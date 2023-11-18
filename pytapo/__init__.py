@@ -1632,7 +1632,7 @@ class Tapo:
 
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
-    def getMost(self):
+    def getMost(self, omit_methods=[]):
         requestData = {
             "method": "multipleRequest",
             "params": {
@@ -1778,6 +1778,14 @@ class Tapo:
                 ]
             },
         }
+        if len(omit_methods) != 0:
+            filtered_requests = [
+                request
+                for request in requestData["params"]["requests"]
+                if request.get("method") not in omit_methods
+            ]
+            requestData["params"]["requests"] = filtered_requests
+
         results = self.performRequest(requestData)
 
         returnData = {}
@@ -1794,13 +1802,22 @@ class Tapo:
                 else:  # some cameras are not returning method for error messages
                     returnData[requestData["params"]["requests"][i]["method"]] = False
             i += 1
+
         # handle malformed / unexpected response from camera
-        for request in requestData["params"]["requests"]:
-            if request["method"] not in returnData:
-                self.debugLog(
-                    f"Detected missing method due to malformed response: {request['method']}"
-                )
-                returnData[request["method"]] = False
+        if len(requestData["params"]["requests"]) != len(
+            results["result"]["responses"]
+        ):
+            if len(omit_methods) == 0:
+                # It was found in https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/455
+                # that on Tapo hubs with encryption enabled having getAudioConfig results in malformed
+                # response, where camera returns invalid json and incorrect number of responses (1)
+                # containing all the others. When getAudioConfig is not requested in this function
+                # it returns everything as expected.
+                return self.getMost(["getAudioConfig"])
+            else:
+                raise Exception(f"Unexpected camera response: {results}")
+        for omittedMethod in omit_methods:
+            returnData[omittedMethod] = False
         if returnData["getPresetConfig"]:
             self.presets = self.processPresetsResponse(returnData["getPresetConfig"])
         return returnData
