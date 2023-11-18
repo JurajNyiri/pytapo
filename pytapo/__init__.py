@@ -563,7 +563,7 @@ class Tapo:
             encryptedResponse = responseData["result"]["response"]
             encryptedResponse = base64.b64decode(responseData["result"]["response"])
             try:
-                responseJSON = json.loads(self.decryptResponse(encryptedResponse))
+                responseJSON = json.loads(self.decryptResponse(encryptedResponse).decode('utf-8'))
             except Exception as err:
                 if (
                     str(err) == "Padding is incorrect."
