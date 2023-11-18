@@ -567,7 +567,7 @@ class Tapo:
                 
                 # Check if the response is wrapped with double curly braces
                 if decodedResponse.startswith('{{') and decodedResponse.endswith('}}'):
-                  decodedResponse = decodedResponse.replace('{{', '{').replace('}}', '}')
+                    decodedResponse = decodedResponse[1:-1]
 
                 responseJSON = json.loads(decodedResponse)
             except Exception as err:
