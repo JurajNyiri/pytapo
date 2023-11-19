@@ -409,7 +409,8 @@ class Tapo:
                             "Incorrect device_confirm value, raising Exception."
                         )
                         raise Exception("Invalid authentication data")
-
+        else:
+            self.passwordEncryptionMethod = EncryptionMethod.MD5
         if (
             "result" in responseData
             and "data" in responseData["result"]
