@@ -460,7 +460,7 @@ class Tapo:
             )
             return self.refreshStok(loginRetryCount)
         else:
-            self.debugLog("Unexpected reponse, raising Exception.")
+            self.debugLog("Unexpected response, raising Exception.")
             raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res, data=None):
