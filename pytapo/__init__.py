@@ -422,6 +422,16 @@ class Tapo:
             raise Exception(
                 f"Temporary Suspension: Try again in {str(responseData['result']['data']['sec_left'])} seconds"
             )
+        if (
+            "data" in responseData
+            and "code" in responseData["data"]
+            and "sec_left" in responseData["data"]
+            and responseData["data"]["code"] == -40404
+            and responseData["data"]["sec_left"] > 0
+        ):
+            raise Exception(
+                f"Temporary Suspension: Try again in {str(responseData['data']['sec_left'])} seconds"
+            )
 
         if self.responseIsOK(res):
             self.debugLog("Saving stok.")
@@ -432,7 +442,7 @@ class Tapo:
         ) and loginRetryCount < MAX_LOGIN_RETRIES:
             loginRetryCount += 1
             self.debugLog(
-                f"Unexpected reponse, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
+                f"Unexpected response, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
             )
             return self.refreshStok(loginRetryCount)
         else:
