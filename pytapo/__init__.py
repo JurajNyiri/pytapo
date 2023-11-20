@@ -41,7 +41,11 @@ class Tapo:
         reuseSession=False,
         printDebugInformation=False,
         controlPort=443,
+        retryStok=True,
+        redactConfidentialInformation=True,
     ):
+        self.retryStok = retryStok
+        self.redactConfidentialInformation = redactConfidentialInformation
         self.printDebugInformation = printDebugInformation
         self.passwordEncryptionMethod = None
         self.seq = None
@@ -116,43 +120,44 @@ class Tapo:
             session.mount("https://", TlsAdapter())
         if self.printDebugInformation:
             redactedKwargs = copy.deepcopy(kwargs)
-            if "data" in redactedKwargs:
-                redactedKwargsData = json.loads(redactedKwargs["data"])
-                if "params" in redactedKwargsData:
+            if self.redactConfidentialInformation:
+                if "data" in redactedKwargs:
+                    redactedKwargsData = json.loads(redactedKwargs["data"])
+                    if "params" in redactedKwargsData:
+                        if (
+                            "password" in redactedKwargsData["params"]
+                            and redactedKwargsData["params"]["password"] != ""
+                        ):
+                            redactedKwargsData["params"]["password"] = "REDACTED"
+                        if (
+                            "digest_passwd" in redactedKwargsData["params"]
+                            and redactedKwargsData["params"]["digest_passwd"] != ""
+                        ):
+                            redactedKwargsData["params"]["digest_passwd"] = "REDACTED"
+                        if (
+                            "cnonce" in redactedKwargsData["params"]
+                            and redactedKwargsData["params"]["cnonce"] != ""
+                        ):
+                            redactedKwargsData["params"]["cnonce"] = "REDACTED"
+                    redactedKwargs["data"] = redactedKwargsData
+                if "headers" in redactedKwargs:
+                    redactedKwargsHeaders = redactedKwargs["headers"]
                     if (
-                        "password" in redactedKwargsData["params"]
-                        and redactedKwargsData["params"]["password"] != ""
+                        "Tapo_tag" in redactedKwargsHeaders
+                        and redactedKwargsHeaders["Tapo_tag"] != ""
                     ):
-                        redactedKwargsData["params"]["password"] = "REDACTED"
+                        redactedKwargsHeaders["Tapo_tag"] = "REDACTED"
                     if (
-                        "digest_passwd" in redactedKwargsData["params"]
-                        and redactedKwargsData["params"]["digest_passwd"] != ""
+                        "Host" in redactedKwargsHeaders
+                        and redactedKwargsHeaders["Host"] != ""
                     ):
-                        redactedKwargsData["params"]["digest_passwd"] = "REDACTED"
+                        redactedKwargsHeaders["Host"] = "REDACTED"
                     if (
-                        "cnonce" in redactedKwargsData["params"]
-                        and redactedKwargsData["params"]["cnonce"] != ""
+                        "Referer" in redactedKwargsHeaders
+                        and redactedKwargsHeaders["Referer"] != ""
                     ):
-                        redactedKwargsData["params"]["cnonce"] = "REDACTED"
-                redactedKwargs["data"] = redactedKwargsData
-            if "headers" in redactedKwargs:
-                redactedKwargsHeaders = redactedKwargs["headers"]
-                if (
-                    "Tapo_tag" in redactedKwargsHeaders
-                    and redactedKwargsHeaders["Tapo_tag"] != ""
-                ):
-                    redactedKwargsHeaders["Tapo_tag"] = "REDACTED"
-                if (
-                    "Host" in redactedKwargsHeaders
-                    and redactedKwargsHeaders["Host"] != ""
-                ):
-                    redactedKwargsHeaders["Host"] = "REDACTED"
-                if (
-                    "Referer" in redactedKwargsHeaders
-                    and redactedKwargsHeaders["Referer"] != ""
-                ):
-                    redactedKwargsHeaders["Referer"] = "REDACTED"
-                redactedKwargs["headers"] = redactedKwargsHeaders
+                        redactedKwargsHeaders["Referer"] = "REDACTED"
+                    redactedKwargs["headers"] = redactedKwargsHeaders
             self.debugLog("New request:")
             self.debugLog(redactedKwargs)
         response = session.request(method, url, **kwargs)
@@ -160,28 +165,31 @@ class Tapo:
             self.debugLog(response.status_code)
             try:
                 loadJson = json.loads(response.text)
-                if "result" in loadJson:
-                    if (
-                        "stok" in loadJson["result"]
-                        and loadJson["result"]["stok"] != ""
-                    ):
-                        loadJson["result"]["stok"] = "REDACTED"
-                    if "data" in loadJson["result"]:
+                if self.redactConfidentialInformation:
+                    if "result" in loadJson:
                         if (
-                            "key" in loadJson["result"]["data"]
-                            and loadJson["result"]["data"]["key"] != ""
+                            "stok" in loadJson["result"]
+                            and loadJson["result"]["stok"] != ""
                         ):
-                            loadJson["result"]["data"]["key"] = "REDACTED"
-                        if (
-                            "nonce" in loadJson["result"]["data"]
-                            and loadJson["result"]["data"]["nonce"] != ""
-                        ):
-                            loadJson["result"]["data"]["nonce"] = "REDACTED"
-                        if (
-                            "device_confirm" in loadJson["result"]["data"]
-                            and loadJson["result"]["data"]["device_confirm"] != ""
-                        ):
-                            loadJson["result"]["data"]["device_confirm"] = "REDACTED"
+                            loadJson["result"]["stok"] = "REDACTED"
+                        if "data" in loadJson["result"]:
+                            if (
+                                "key" in loadJson["result"]["data"]
+                                and loadJson["result"]["data"]["key"] != ""
+                            ):
+                                loadJson["result"]["data"]["key"] = "REDACTED"
+                            if (
+                                "nonce" in loadJson["result"]["data"]
+                                and loadJson["result"]["data"]["nonce"] != ""
+                            ):
+                                loadJson["result"]["data"]["nonce"] = "REDACTED"
+                            if (
+                                "device_confirm" in loadJson["result"]["data"]
+                                and loadJson["result"]["data"]["device_confirm"] != ""
+                            ):
+                                loadJson["result"]["data"][
+                                    "device_confirm"
+                                ] = "REDACTED"
                 self.debugLog(loadJson)
             except Exception as err:
                 self.debugLog("Failed to load json:" + str(err))
@@ -396,9 +404,13 @@ class Tapo:
                         self.seq = responseData["result"]["start_seq"]
                 else:
                     if (
-                        "error_code" in responseData
-                        and responseData["error_code"] == -40413
-                    ) and loginRetryCount < MAX_LOGIN_RETRIES:
+                        self.retryStok
+                        and (
+                            "error_code" in responseData
+                            and responseData["error_code"] == -40413
+                        )
+                        and loginRetryCount < MAX_LOGIN_RETRIES
+                    ):
                         loginRetryCount += 1
                         self.debugLog(
                             f"Incorrect device_confirm value, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
@@ -438,8 +450,10 @@ class Tapo:
             self.stok = res.json()["result"]["stok"]
             return self.stok
         if (
-            "error_code" in responseData and responseData["error_code"] == -40413
-        ) and loginRetryCount < MAX_LOGIN_RETRIES:
+            self.retryStok
+            and ("error_code" in responseData and responseData["error_code"] == -40413)
+            and loginRetryCount < MAX_LOGIN_RETRIES
+        ):
             loginRetryCount += 1
             self.debugLog(
                 f"Unexpected response, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
