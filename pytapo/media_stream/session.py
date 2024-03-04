@@ -286,6 +286,13 @@ class HttpMediaSession:
                 ciphertext = None
                 plaintext = data
             # print(plaintext)
+
+            # # Update our own sequence numbers to avoid collisions
+            # if (seq is not None) and (seq > self._seq_counter):
+            #     self._seq_counter = seq + 1
+
+            queue: Optional[Queue] = None
+
             # JSON responses sometimes have the above info in the payload,
             # not the headers. Let's parse it.
             if mimetype == "application/json":
@@ -297,11 +304,22 @@ class HttpMediaSession:
                     if "params" in json_data and "session_id" in json_data["params"]:
                         session = int(json_data["params"]["session_id"])
                         # print("Setting session")
+                    elif ("type" in json_data 
+                        and json_data["type"] == "notification"
+                        and "params" in json_data
+                        and "event_type" in json["params"]
+                        and json_data["params"]["event_type"] == "stream_status"
+                        and "status" in json_data["params"]
+                        and json_data["params"]["status"] == "finished"
+                        and len(self._sessions) > 0):
+                        # use next queue item to inject this info, since no id session can be inferred
+                        queue = next(iter(self._sessions.values()))
                 except JSONDecodeError:
                     logger.warning("Unable to parse JSON sent from device")
 
             if (
-                (session is None)
+                (queue is None)
+                and (session is None)
                 and (seq is None)
                 or (
                     (session is not None)
@@ -316,15 +334,12 @@ class HttpMediaSession:
                 )
                 continue
 
-            # # Update our own sequence numbers to avoid collisions
-            # if (seq is not None) and (seq > self._seq_counter):
-            #     self._seq_counter = seq + 1
-
-            queue: Optional[Queue] = None
+            
 
             # Move queue to use sessions from now on
             if (
-                (session is not None)
+                (queue is None)
+                and (session is not None)
                 and (seq is not None)
                 and (session not in self._sessions)
                 and (seq in self._sequence_numbers)
