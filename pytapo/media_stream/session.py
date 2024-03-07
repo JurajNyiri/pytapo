@@ -307,7 +307,7 @@ class HttpMediaSession:
                     elif ("type" in json_data 
                         and json_data["type"] == "notification"
                         and "params" in json_data
-                        and "event_type" in json["params"]
+                        and "event_type" in json_data["params"]
                         and json_data["params"]["event_type"] == "stream_status"
                         and "status" in json_data["params"]
                         and json_data["params"]["status"] == "finished"

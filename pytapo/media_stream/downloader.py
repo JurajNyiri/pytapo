@@ -1,11 +1,14 @@
 from pytapo.media_stream.convert import Convert
 from pytapo import Tapo
 from datetime import datetime
+from json import JSONDecodeError
 
 import json
 import os
 import hashlib
+import logging
 
+logger = logging.getLogger(__name__)
 
 class Downloader:
     FRESH_RECORDING_TIME_SECONDS = 60
@@ -180,7 +183,7 @@ class Downloader:
                                 if ("type" in json_data
                                     and json_data["type"] == "notification"
                                     and "params" in json_data
-                                    and "event_type" in json["params"]
+                                    and "event_type" in json_data["params"]
                                     and json_data["params"]["event_type"] == "stream_status"
                                     and "status" in json_data["params"]
                                     and json_data["params"]["status"] == "finished"):
