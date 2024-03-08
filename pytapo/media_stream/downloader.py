@@ -6,9 +6,6 @@ from json import JSONDecodeError
 import json
 import os
 import hashlib
-import logging
-
-logger = logging.getLogger(__name__)
 
 class Downloader:
     FRESH_RECORDING_TIME_SECONDS = 60
@@ -199,7 +196,7 @@ class Downloader:
                                     downloading = False
                                     break
                             except JSONDecodeError:
-                                logger.warning("Unable to parse JSON sent from device")
+                                self.tapo.debugLog("Unable to parse JSON sent from device")
                     if downloading:
                         # Handle case where camera randomly stopped respoding
                         if not downloadedFull and not retry:
