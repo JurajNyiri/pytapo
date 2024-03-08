@@ -236,13 +236,9 @@ class HttpMediaSession:
 
             logger.debug("Handling new server response")
 
-            # print("got response")
-
             # Read and parse headers
             headers_block = await self._reader.readuntil(b"\r\n\r\n")
             headers = parse_http_headers(headers_block)
-            # print(headers)
-
             mimetype = headers["Content-Type"]
             length = int(headers["Content-Length"])
             encrypted = bool(int(headers["X-If-Encrypt"]))
@@ -252,26 +248,14 @@ class HttpMediaSession:
             if "X-Data-Sequence" in headers:
                 seq = int(headers["X-Data-Sequence"])
 
-            # print(headers)
-
             # Now we know the content length, let's read it and decrypt it
             json_data = None
-            # print("TEST0")
             data = await self._reader.readexactly(length)
             if encrypted:
-                # print("encrypted")
                 ciphertext = data
-                # print("TEST1")
                 try:
-                    # print("lolo")
-                    # print(ciphertext)
                     plaintext = self._aes.decrypt(ciphertext)
-                    # if length == 384:
-                    # print(plaintext)
-                    # print("lala")
-                    # print(plaintext)
                 except ValueError as e:
-                    # print(e)
                     if "padding is incorrect" in e.args[0].lower():
                         e = ValueError(
                             e.args[0]
@@ -282,14 +266,8 @@ class HttpMediaSession:
                 except Exception as e:
                     plaintext = e
             else:
-                # print("plaintext")
                 ciphertext = None
                 plaintext = data
-            # print(plaintext)
-
-            # # Update our own sequence numbers to avoid collisions
-            # if (seq is not None) and (seq > self._seq_counter):
-            #     self._seq_counter = seq + 1
 
             queue: Optional[Queue] = None
 
@@ -299,11 +277,9 @@ class HttpMediaSession:
                 try:
                     json_data = json.loads(plaintext.decode())
                     if "seq" in json_data:
-                        # print("Setting seq")
                         seq = json_data["seq"]
                     if "params" in json_data and "session_id" in json_data["params"]:
                         session = int(json_data["params"]["session_id"])
-                        # print("Setting session")
                     elif ("type" in json_data 
                         and json_data["type"] == "notification"
                         and "params" in json_data
@@ -334,8 +310,6 @@ class HttpMediaSession:
                 )
                 continue
 
-            
-
             # Move queue to use sessions from now on
             if (
                 (queue is None)
@@ -365,7 +339,6 @@ class HttpMediaSession:
             )
 
             if seq is not None and seq % self.window_size == 0:  # never ack live stream
-                # print("sending ack")
                 data = {
                     "type": "notification",
                     "params": {"event_type": "stream_sequence"},
@@ -382,7 +355,6 @@ class HttpMediaSession:
                 await self._send_http_request(b"--" + self.client_boundary, headers)
                 chunk_size = 4096
                 for i in range(0, len(data), chunk_size):
-                    # print(data[i : i + chunk_size])
                     self._writer.write(data[i : i + chunk_size])
                     await self._writer.drain()
 
@@ -470,9 +442,8 @@ class HttpMediaSession:
         await self._send_http_request(b"--" + self.client_boundary, headers)
 
         chunk_size = 4096
-        # print("Sending:")
+        
         for i in range(0, len(data), chunk_size):
-            # print(data[i : i + chunk_size])
             self._writer.write(data[i : i + chunk_size])
             await self._writer.drain()
 
@@ -523,7 +494,7 @@ class HttpMediaSession:
                     session = resp.session
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
                     raise resp.plaintext
-                # print(resp.plaintext)
+                
                 tsReader.setBuffer(list(resp.plaintext))
                 pkt = tsReader.getPacket()
                 if pkt:
