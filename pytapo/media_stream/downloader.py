@@ -1,11 +1,11 @@
 from pytapo.media_stream.convert import Convert
 from pytapo import Tapo
 from datetime import datetime
+from json import JSONDecodeError
 
 import json
 import os
 import hashlib
-
 
 class Downloader:
     FRESH_RECORDING_TIME_SECONDS = 60
@@ -172,6 +172,31 @@ class Downloader:
                                 convert.save(fileName, segmentLength)
                                 downloading = False
                                 break
+                        # in case a finished stream notification is caught, save the chunks as is
+                        elif resp.mimetype == "application/json":
+                            try:
+                                json_data = json.loads(resp.plaintext.decode())
+
+                                if ("type" in json_data
+                                    and json_data["type"] == "notification"
+                                    and "params" in json_data
+                                    and "event_type" in json_data["params"]
+                                    and json_data["params"]["event_type"] == "stream_status"
+                                    and "status" in json_data["params"]
+                                    and json_data["params"]["status"] == "finished"):
+                                    downloadedFull = True
+                                    currentAction = "Converting"
+                                    yield {
+                                        "currentAction": currentAction,
+                                        "fileName": fileName,
+                                        "progress": 0,
+                                        "total": 0,
+                                    }
+                                    convert.save(fileName, convert.getLength())
+                                    downloading = False
+                                    break
+                            except JSONDecodeError:
+                                self.tapo.debugLog("Unable to parse JSON sent from device")
                     if downloading:
                         # Handle case where camera randomly stopped respoding
                         if not downloadedFull and not retry:
