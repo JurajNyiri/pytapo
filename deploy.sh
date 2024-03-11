@@ -5,4 +5,4 @@ echo "Setting $version in version.py..."
 echo "PYTAPO_VERSION = '$version'" > pytapo/version.py
 rm -rf dist/*
 python3 setup.py sdist bdist_wheel
-python3 -m twine upload dist/*
+python3 -m twine upload --repository pytapo dist/*
