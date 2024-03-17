@@ -834,18 +834,37 @@ class Tapo:
                 {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
             )["msg_alarm"]["chn1_msg_alarm_info"]
 
-    def getAlarmConfig(self):
+    def getAlarmConfig(self,key="msg_alarm"):
         return self.executeFunction(
             "multipleRequest",
             {
                 "requests": [
-                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
-                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
-                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
-                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
-                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                    {"method": "getAlarmConfig", "params": {key: {}}},
+                    {"method": "getAlarmPlan", "params": {key: {}}},
+                    {"method": "getSirenTypeList", "params": {key: {}}},
+                    {"method": "getLightTypeList", "params": {key: {}}},
+                    {"method": "getSirenStatus", "params": {key: {}}},
                 ]
             },
+        )
+
+    def setSirenStatus(self, status,key="msg_alarm"):
+        return self.executeFunction(
+            "setSirenStatus",
+            {key: {"status": "on" if status else "off"}}
+        )
+
+    def setSirenConfig(self, duration=None, siren_type=None, volume=None,key="msg_alarm"):
+        params = {key: {}}
+        if duration is not None:
+            params[key]["duration"] = duration
+        if siren_type is not None:
+            params[key]["siren_type"] = siren_type
+        if volume is not None:
+            params[key]["volume"] = volume
+        return self.executeFunction(
+            "setSirenConfig",
+            params
         )
 
     def getFirmwareAutoUpgradeConfig(self):
@@ -1616,6 +1635,11 @@ class Tapo:
             }
         )
 
+    def getBatteryStatus(self):
+        return self.executeFunction(
+            "getBatteryStatus", {"battery": {"name": "status"}}
+        )
+
     @staticmethod
     def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
@@ -1800,6 +1824,10 @@ class Tapo:
                             "auto_upgrade": {"name": ["common"]},
                         },
                     },
+                    {"method_alias": "getSirenSirenStatus", "method": "getSirenStatus", "params": {"siren": {}}},
+                    {"method_alias": "getSirenSirenConfig", "method": "getSirenConfig", "params": {"siren": {}}},
+                    {"method_alias": "getSirenSirenTypeList", "method": "getSirenTypeList", "params": {"siren": {}}},
+                    {"getBatteryStatus", {"battery": {"name": "status"}} },
                 ]
             },
         }
@@ -1817,15 +1845,17 @@ class Tapo:
         # todo finish on child
         i = 0
         for result in results["result"]["responses"]:
+
+            method = requestData["params"]["requests"][i]["method"]
+            if "method_alias" in requestData["params"]["requests"][i]:
+                method = ["params"]["requests"][i]["method_alias"]
+
             if (
                 "error_code" in result and result["error_code"] == 0
             ) and "result" in result:
-                returnData[result["method"]] = result["result"]
+                returnData[method] = result["result"]
             else:
-                if "method" in result:
-                    returnData[result["method"]] = False
-                else:  # some cameras are not returning method for error messages
-                    returnData[requestData["params"]["requests"][i]["method"]] = False
+                returnData[method] = False
             i += 1
 
         # handle malformed / unexpected response from camera
