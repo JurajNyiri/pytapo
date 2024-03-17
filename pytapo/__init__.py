@@ -509,9 +509,11 @@ class Tapo:
                 return self.executeFunction(method, params, True)
             raise Exception(
                 "Error: {}, Response: {}".format(
-                    data["err_msg"]
-                    if "err_msg" in data
-                    else self.getErrorMessage(data["error_code"]),
+                    (
+                        data["err_msg"]
+                        if "err_msg" in data
+                        else self.getErrorMessage(data["error_code"])
+                    ),
                     json.dumps(data),
                 )
             )
@@ -834,7 +836,7 @@ class Tapo:
                 {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
             )["msg_alarm"]["chn1_msg_alarm_info"]
 
-    def getAlarmConfig(self,key="msg_alarm"):
+    def getAlarmConfig(self, key="msg_alarm"):
         return self.executeFunction(
             "multipleRequest",
             {
@@ -848,13 +850,14 @@ class Tapo:
             },
         )
 
-    def setSirenStatus(self, status,key="msg_alarm"):
+    def setSirenStatus(self, status, key="msg_alarm"):
         return self.executeFunction(
-            "setSirenStatus",
-            {key: {"status": "on" if status else "off"}}
+            "setSirenStatus", {key: {"status": "on" if status else "off"}}
         )
 
-    def setSirenConfig(self, duration=None, siren_type=None, volume=None,key="msg_alarm"):
+    def setSirenConfig(
+        self, duration=None, siren_type=None, volume=None, key="msg_alarm"
+    ):
         params = {key: {}}
         if duration is not None:
             params[key]["duration"] = duration
@@ -862,10 +865,7 @@ class Tapo:
             params[key]["siren_type"] = siren_type
         if volume is not None:
             params[key]["volume"] = volume
-        return self.executeFunction(
-            "setSirenConfig",
-            params
-        )
+        return self.executeFunction("setSirenConfig", params)
 
     def getFirmwareAutoUpgradeConfig(self):
         return self.executeFunction(
@@ -1281,9 +1281,9 @@ class Tapo:
             )
 
         if sensitivity:
-            data["motion_detection"]["motion_det"][
-                "digital_sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["motion_detection"]["motion_det"]["digital_sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
         # child devices always need digital_sensitivity setting
         if (
             self.childID
@@ -1306,9 +1306,9 @@ class Tapo:
             "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["people_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["people_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
         return self.executeFunction("setPersonDetectionConfig", data)
 
     def getVehicleDetection(self):
@@ -1322,9 +1322,9 @@ class Tapo:
             "vehicle_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["vehicle_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["vehicle_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
         return self.executeFunction("setVehicleDetectionConfig", data)
 
     def getPetDetection(self):
@@ -1336,9 +1336,9 @@ class Tapo:
     def setPetDetection(self, enabled, sensitivity=False):
         data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
-            data["pet_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["pet_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setPetDetectionConfig", data)
 
@@ -1359,9 +1359,9 @@ class Tapo:
             "bark_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["bark_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["bark_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setBarkDetectionConfig", data)
 
@@ -1370,9 +1370,9 @@ class Tapo:
             "meow_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["meow_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["meow_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setMeowDetectionConfig", data)
 
@@ -1387,9 +1387,9 @@ class Tapo:
             "glass_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["glass_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["glass_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setGlassDetectionConfig", data)
 
@@ -1636,9 +1636,7 @@ class Tapo:
         )
 
     def getBatteryStatus(self):
-        return self.executeFunction(
-            "getBatteryStatus", {"battery": {"name": "status"}}
-        )
+        return self.executeFunction("getBatteryStatus", {"battery": {"name": "status"}})
 
     @staticmethod
     def getErrorMessage(errorCode):
@@ -1824,10 +1822,22 @@ class Tapo:
                             "auto_upgrade": {"name": ["common"]},
                         },
                     },
-                    {"method_alias": "getSirenSirenStatus", "method": "getSirenStatus", "params": {"siren": {}}},
-                    {"method_alias": "getSirenSirenConfig", "method": "getSirenConfig", "params": {"siren": {}}},
-                    {"method_alias": "getSirenSirenTypeList", "method": "getSirenTypeList", "params": {"siren": {}}},
-                    {"getBatteryStatus", {"battery": {"name": "status"}} },
+                    {
+                        "method_alias": "getSirenSirenStatus",
+                        "method": "getSirenStatus",
+                        "params": {"siren": {}},
+                    },
+                    {
+                        "method_alias": "getSirenSirenConfig",
+                        "method": "getSirenConfig",
+                        "params": {"siren": {}},
+                    },
+                    {
+                        "method_alias": "getSirenSirenTypeList",
+                        "method": "getSirenTypeList",
+                        "params": {"siren": {}},
+                    },
+                    {"getBatteryStatus", {"battery": {"name": "status"}}},
                 ]
             },
         }

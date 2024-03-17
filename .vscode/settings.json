@@ -5,6 +5,6 @@
     "python.pythonPath": "/usr/local/bin/python3",
     "python.formatting.provider": "none",
     "[python]": {
-        "editor.defaultFormatter": "ms-python.autopep8"
+        "editor.defaultFormatter": "ms-python.black-formatter"
     }
 }
