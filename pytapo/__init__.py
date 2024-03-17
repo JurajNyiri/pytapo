@@ -842,7 +842,7 @@ class Tapo:
             {
                 "requests": [
                     {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
-                    {"method": "getAlarmPlan", "params": {"msg_alarm": {}}},
+                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
                     {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
