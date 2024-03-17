@@ -836,36 +836,46 @@ class Tapo:
                 {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
             )["msg_alarm"]["chn1_msg_alarm_info"]
 
-    def getAlarmConfig(self, key="msg_alarm"):
+    def getAlarmConfig(self):
         return self.executeFunction(
             "multipleRequest",
             {
                 "requests": [
-                    {"method": "getAlarmConfig", "params": {key: {}}},
-                    {"method": "getAlarmPlan", "params": {key: {}}},
-                    {"method": "getSirenTypeList", "params": {key: {}}},
-                    {"method": "getLightTypeList", "params": {key: {}}},
-                    {"method": "getSirenStatus", "params": {key: {}}},
+                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
+                    {"method": "getAlarmPlan", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
                 ]
             },
         )
 
-    def setSirenStatus(self, status, key="msg_alarm"):
+    def setHubSirenStatus(self, status):
         return self.executeFunction(
-            "setSirenStatus", {key: {"status": "on" if status else "off"}}
+            "setSirenStatus", {"siren": {"status": "on" if status else "off"}}
+        )
+    def getHubSirenStatus(self, status):
+        return self.executeFunction(
+            "getSirenStatus", {"siren": {}}
         )
 
-    def setSirenConfig(
-        self, duration=None, siren_type=None, volume=None, key="msg_alarm"
+    def setHubSirenConfig(
+        self, duration=None, siren_type=None, volume=None
     ):
-        params = {key: {}}
+        params = {"siren": {}}
         if duration is not None:
-            params[key]["duration"] = duration
+            params["siren"]["duration"] = duration
         if siren_type is not None:
-            params[key]["siren_type"] = siren_type
+            params["siren"]["siren_type"] = siren_type
         if volume is not None:
-            params[key]["volume"] = volume
+            params["siren"]["volume"] = volume
         return self.executeFunction("setSirenConfig", params)
+    
+    def getHubSirenConfig(self):
+        return self.executeFunction("getSirenConfig", {"siren": {}})
+    
+    def getHubSirenTypeList(self):
+        return self.executeFunction("getSirenTypeList", {"siren": {}})
 
     def getFirmwareAutoUpgradeConfig(self):
         return self.executeFunction(
@@ -1823,17 +1833,17 @@ class Tapo:
                         },
                     },
                     {
-                        "method_alias": "getSirenSirenStatus",
+                        "method_alias": "getHubSirenStatus",
                         "method": "getSirenStatus",
                         "params": {"siren": {}},
                     },
                     {
-                        "method_alias": "getSirenSirenConfig",
+                        "method_alias": "getHubSirenConfig",
                         "method": "getSirenConfig",
                         "params": {"siren": {}},
                     },
                     {
-                        "method_alias": "getSirenSirenTypeList",
+                        "method_alias": "getHubSirenTypeList",
                         "method": "getSirenTypeList",
                         "params": {"siren": {}},
                     },
