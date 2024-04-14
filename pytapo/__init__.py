@@ -1831,7 +1831,7 @@ class Tapo:
                         "params": {
                             "auto_upgrade": {"name": ["common"]},
                         },
-                    }
+                    },
                 ]
             },
         }
