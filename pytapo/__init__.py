@@ -1831,23 +1831,7 @@ class Tapo:
                         "params": {
                             "auto_upgrade": {"name": ["common"]},
                         },
-                    },
-                    {
-                        "method_alias": "getHubSirenStatus",
-                        "method": "getSirenStatus",
-                        "params": {"siren": {}},
-                    },
-                    {
-                        "method_alias": "getHubSirenConfig",
-                        "method": "getSirenConfig",
-                        "params": {"siren": {}},
-                    },
-                    {
-                        "method_alias": "getHubSirenTypeList",
-                        "method": "getSirenTypeList",
-                        "params": {"siren": {}},
-                    },
-                    {"getBatteryStatus", {"battery": {"name": "status"}}},
+                    }
                 ]
             },
         }
@@ -1865,17 +1849,15 @@ class Tapo:
         # todo finish on child
         i = 0
         for result in results["result"]["responses"]:
-
-            method = requestData["params"]["requests"][i]["method"]
-            if "method_alias" in requestData["params"]["requests"][i]:
-                method = ["params"]["requests"][i]["method_alias"]
-
             if (
                 "error_code" in result and result["error_code"] == 0
             ) and "result" in result:
-                returnData[method] = result["result"]
+                returnData[result["method"]] = result["result"]
             else:
-                returnData[method] = False
+                if "method" in result:
+                    returnData[result["method"]] = False
+                else:  # some cameras are not returning method for error messages
+                    returnData[requestData["params"]["requests"][i]["method"]] = False
             i += 1
 
         # handle malformed / unexpected response from camera
