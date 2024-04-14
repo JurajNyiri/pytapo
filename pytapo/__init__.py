@@ -854,7 +854,7 @@ class Tapo:
         return self.executeFunction(
             "setSirenStatus", {"siren": {"status": "on" if status else "off"}}
         )
-    def getHubSirenStatus(self, status):
+    def getHubSirenStatus(self):
         return self.executeFunction(
             "getSirenStatus", {"siren": {}}
         )
