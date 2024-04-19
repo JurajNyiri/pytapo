@@ -854,14 +854,11 @@ class Tapo:
         return self.executeFunction(
             "setSirenStatus", {"siren": {"status": "on" if status else "off"}}
         )
-    def getHubSirenStatus(self):
-        return self.executeFunction(
-            "getSirenStatus", {"siren": {}}
-        )
 
-    def setHubSirenConfig(
-        self, duration=None, siren_type=None, volume=None
-    ):
+    def getHubSirenStatus(self):
+        return self.executeFunction("getSirenStatus", {"siren": {}})
+
+    def setHubSirenConfig(self, duration=None, siren_type=None, volume=None):
         params = {"siren": {}}
         if duration is not None:
             params["siren"]["duration"] = duration
@@ -870,10 +867,10 @@ class Tapo:
         if volume is not None:
             params["siren"]["volume"] = volume
         return self.executeFunction("setSirenConfig", params)
-    
+
     def getHubSirenConfig(self):
         return self.executeFunction("getSirenConfig", {"siren": {}})
-    
+
     def getHubSirenTypeList(self):
         return self.executeFunction("getSirenTypeList", {"siren": {}})
 
@@ -1772,7 +1769,11 @@ class Tapo:
                     },
                     {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
                     {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
-                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {
+                        "method": "getSirenTypeList",
+                        "params": {"msg_alarm": {}, "siren": {}},
+                    },
+                    {"method": "getSirenConfig", "params": {"siren": {}}},
                     {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
                     {
