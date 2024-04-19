@@ -509,9 +509,11 @@ class Tapo:
                 return self.executeFunction(method, params, True)
             raise Exception(
                 "Error: {}, Response: {}".format(
-                    data["err_msg"]
-                    if "err_msg" in data
-                    else self.getErrorMessage(data["error_code"]),
+                    (
+                        data["err_msg"]
+                        if "err_msg" in data
+                        else self.getErrorMessage(data["error_code"])
+                    ),
                     json.dumps(data),
                 )
             )
@@ -847,6 +849,33 @@ class Tapo:
                 ]
             },
         )
+
+    def setHubSirenStatus(self, status):
+        return self.executeFunction(
+            "setSirenStatus", {"siren": {"status": "on" if status else "off"}}
+        )
+    def getHubSirenStatus(self):
+        return self.executeFunction(
+            "getSirenStatus", {"siren": {}}
+        )
+
+    def setHubSirenConfig(
+        self, duration=None, siren_type=None, volume=None
+    ):
+        params = {"siren": {}}
+        if duration is not None:
+            params["siren"]["duration"] = duration
+        if siren_type is not None:
+            params["siren"]["siren_type"] = siren_type
+        if volume is not None:
+            params["siren"]["volume"] = volume
+        return self.executeFunction("setSirenConfig", params)
+    
+    def getHubSirenConfig(self):
+        return self.executeFunction("getSirenConfig", {"siren": {}})
+    
+    def getHubSirenTypeList(self):
+        return self.executeFunction("getSirenTypeList", {"siren": {}})
 
     def getFirmwareAutoUpgradeConfig(self):
         return self.executeFunction(
@@ -1262,9 +1291,9 @@ class Tapo:
             )
 
         if sensitivity:
-            data["motion_detection"]["motion_det"][
-                "digital_sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["motion_detection"]["motion_det"]["digital_sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
         # child devices always need digital_sensitivity setting
         if (
             self.childID
@@ -1287,9 +1316,9 @@ class Tapo:
             "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["people_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["people_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
         return self.executeFunction("setPersonDetectionConfig", data)
 
     def getVehicleDetection(self):
@@ -1303,9 +1332,9 @@ class Tapo:
             "vehicle_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["vehicle_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["vehicle_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
         return self.executeFunction("setVehicleDetectionConfig", data)
 
     def getPetDetection(self):
@@ -1317,9 +1346,9 @@ class Tapo:
     def setPetDetection(self, enabled, sensitivity=False):
         data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
-            data["pet_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["pet_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setPetDetectionConfig", data)
 
@@ -1340,9 +1369,9 @@ class Tapo:
             "bark_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["bark_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["bark_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setBarkDetectionConfig", data)
 
@@ -1351,9 +1380,9 @@ class Tapo:
             "meow_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["meow_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["meow_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setMeowDetectionConfig", data)
 
@@ -1368,9 +1397,9 @@ class Tapo:
             "glass_detection": {"detection": {"enabled": "on" if enabled else "off"}}
         }
         if sensitivity:
-            data["glass_detection"]["detection"][
-                "sensitivity"
-            ] = self.__getSensitivityNumber(sensitivity)
+            data["glass_detection"]["detection"]["sensitivity"] = (
+                self.__getSensitivityNumber(sensitivity)
+            )
 
         return self.executeFunction("setGlassDetectionConfig", data)
 
@@ -1615,6 +1644,9 @@ class Tapo:
                 "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},
             }
         )
+
+    def getBatteryStatus(self):
+        return self.executeFunction("getBatteryStatus", {"battery": {"name": "status"}})
 
     @staticmethod
     def getErrorMessage(errorCode):
