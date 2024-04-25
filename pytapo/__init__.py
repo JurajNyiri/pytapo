@@ -1774,6 +1774,7 @@ class Tapo:
                     {"method": "getSirenConfig", "params": {"siren": {}}},
                     {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenStatus", "params": {"siren": {}}},
                     {
                         "method": "getLightFrequencyInfo",
                         "params": {"image": {"name": "common"}},
