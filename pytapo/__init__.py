@@ -1769,10 +1769,8 @@ class Tapo:
                     },
                     {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
                     {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
-                    {
-                        "method": "getSirenTypeList",
-                        "params": {"msg_alarm": {}, "siren": {}},
-                    },
+                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenTypeList", "params": {"siren": {}}},
                     {"method": "getSirenConfig", "params": {"siren": {}}},
                     {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
@@ -1823,7 +1821,6 @@ class Tapo:
                     {
                         "method": "getAudioConfig",
                         "params": {
-                            "method": "get",
                             "audio_config": {"name": ["speaker", "microphone"]},
                         },
                     },
@@ -1846,9 +1843,35 @@ class Tapo:
 
         results = self.performRequest(requestData)
 
-        returnData = {}
-        # todo finish on child
+        processedData = []
         i = 0
+
+        for request in requestData["params"]["requests"]:
+            result = results["result"]["responses"][i]
+            requestResponseObj = {
+                "request": request,
+                "response": {
+                    "result": False,
+                    "method": request["method"],
+                },
+            }
+            if (
+                "error_code" in result and result["error_code"] == 0
+            ) and "result" in result:
+                requestResponseObj["response"]["result"] = result["result"]
+                if (
+                    "method" in result
+                    and requestResponseObj["request"]["method"] != result["method"]
+                ):
+                    raise Exception(
+                        f"Unexpected camera order of responses. Request: {requestData} Response: {results}"
+                    )
+            processedData.append(requestResponseObj)
+            print(requestResponseObj)
+            i += 1
+
+        i = 0
+        returnData = {}
         for result in results["result"]["responses"]:
             if (
                 "error_code" in result and result["error_code"] == 0
