@@ -1868,22 +1868,26 @@ class Tapo:
                         f"Unexpected camera order of responses. Request: {requestData} Response: {results}"
                     )
             processedData.append(requestResponseObj)
-            print(requestResponseObj)
             i += 1
 
-        i = 0
         returnData = {}
-        for result in results["result"]["responses"]:
+        for request in processedData:
             if (
-                "error_code" in result and result["error_code"] == 0
-            ) and "result" in result:
-                returnData[result["method"]] = result["result"]
+                request["request"]["method"] in returnData
+            ):  # handle case where there is one function there multiple times
+                if type(returnData[request["request"]["method"]]) is not list:
+                    returnData[request["request"]["method"]] = [
+                        returnData[request["request"]["method"]]
+                    ]
+                returnData[request["request"]["method"]].append(
+                    request["response"]["result"]
+                )
             else:
-                if "method" in result:
-                    returnData[result["method"]] = False
-                else:  # some cameras are not returning method for error messages
-                    returnData[requestData["params"]["requests"][i]["method"]] = False
-            i += 1
+                returnData[request["request"]["method"]] = request["response"]["result"]
+
+        for method in returnData:
+            print(method)
+            print(returnData[method])
 
         # handle malformed / unexpected response from camera
         if len(requestData["params"]["requests"]) != len(
