@@ -1860,26 +1860,36 @@ class Tapo:
 
         returnData = {}
 
+        # pre-allocate responses due to some devices not returning methods back
         for request in requestData["params"]["requests"]:
-            returnData[request["method"]] = [False]
+            if request["method"] in returnData:
+                returnData[request["method"]].append(False)
+            else:
+                returnData[request["method"]] = [False]
 
+        for omittedMethod in omit_methods:
+            returnData[omittedMethod] = [False]
+
+        # Fill the False responses with data
+        # It was found in https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/pull/559 that hubs respond in
+        # a different order than requested, therefore we do not know which response relates to which request
         for result in results["result"]["responses"]:
             if (
                 "error_code" in result and result["error_code"] == 0
             ) and "result" in result:
-                if result["method"] not in returnData or (
-                    returnData[result["method"]][0] is False
-                ):
-                    returnData[result["method"]] = [result["result"]]
-                else:
-                    returnData[result["method"]].append(result["result"])
+                if result["method"] not in returnData:
+                    raise Exception(
+                        f"Method which was not requested has been returned. Response: {results}"
+                    )
+                for i in range(len(returnData[result["method"]])):
+                    if returnData[result["method"]][i] is False:
+                        returnData[result["method"]][i] = result["result"]
+                        break
 
         for method in returnData:
             print(method)
             print(returnData[method])
 
-        for omittedMethod in omit_methods:
-            returnData[omittedMethod] = False
         if returnData["getPresetConfig"]:
             if len(returnData["getPresetConfig"]) == 1:
                 self.presets = self.processPresetsResponse(
