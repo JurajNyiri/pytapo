@@ -854,14 +854,11 @@ class Tapo:
         return self.executeFunction(
             "setSirenStatus", {"siren": {"status": "on" if status else "off"}}
         )
-    def getHubSirenStatus(self):
-        return self.executeFunction(
-            "getSirenStatus", {"siren": {}}
-        )
 
-    def setHubSirenConfig(
-        self, duration=None, siren_type=None, volume=None
-    ):
+    def getHubSirenStatus(self):
+        return self.executeFunction("getSirenStatus", {"siren": {}})
+
+    def setHubSirenConfig(self, duration=None, siren_type=None, volume=None):
         params = {"siren": {}}
         if duration is not None:
             params["siren"]["duration"] = duration
@@ -870,10 +867,10 @@ class Tapo:
         if volume is not None:
             params["siren"]["volume"] = volume
         return self.executeFunction("setSirenConfig", params)
-    
+
     def getHubSirenConfig(self):
         return self.executeFunction("getSirenConfig", {"siren": {}})
-    
+
     def getHubSirenTypeList(self):
         return self.executeFunction("getSirenTypeList", {"siren": {}})
 
@@ -1773,8 +1770,11 @@ class Tapo:
                     {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
                     {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
                     {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenTypeList", "params": {"siren": {}}},
+                    {"method": "getSirenConfig", "params": {"siren": {}}},
                     {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                    {"method": "getSirenStatus", "params": {"siren": {}}},
                     {
                         "method": "getLightFrequencyInfo",
                         "params": {"image": {"name": "common"}},
@@ -1822,7 +1822,6 @@ class Tapo:
                     {
                         "method": "getAudioConfig",
                         "params": {
-                            "method": "get",
                             "audio_config": {"name": ["speaker", "microphone"]},
                         },
                     },
@@ -1845,21 +1844,6 @@ class Tapo:
 
         results = self.performRequest(requestData)
 
-        returnData = {}
-        # todo finish on child
-        i = 0
-        for result in results["result"]["responses"]:
-            if (
-                "error_code" in result and result["error_code"] == 0
-            ) and "result" in result:
-                returnData[result["method"]] = result["result"]
-            else:
-                if "method" in result:
-                    returnData[result["method"]] = False
-                else:  # some cameras are not returning method for error messages
-                    returnData[requestData["params"]["requests"][i]["method"]] = False
-            i += 1
-
         # handle malformed / unexpected response from camera
         if len(requestData["params"]["requests"]) != len(
             results["result"]["responses"]
@@ -1873,8 +1857,46 @@ class Tapo:
                 return self.getMost(["getAudioConfig"])
             else:
                 raise Exception(f"Unexpected camera response: {results}")
+
+        returnData = {}
+
+        # pre-allocate responses due to some devices not returning methods back
+        for request in requestData["params"]["requests"]:
+            if request["method"] in returnData:
+                returnData[request["method"]].append(False)
+            else:
+                returnData[request["method"]] = [False]
+
         for omittedMethod in omit_methods:
-            returnData[omittedMethod] = False
-        if returnData["getPresetConfig"]:
-            self.presets = self.processPresetsResponse(returnData["getPresetConfig"])
+            returnData[omittedMethod] = [False]
+
+        # Fill the False responses with data
+        # It was found in https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/pull/559 that hubs respond in
+        # a different order than requested, therefore we do not know which response relates to which request
+        for result in results["result"]["responses"]:
+            if (
+                "error_code" in result and result["error_code"] == 0
+            ) and "result" in result:
+                if result["method"] not in returnData:
+                    raise Exception(
+                        f"Method {result['method']} was not requested and has been returned. Response: {results}"
+                    )
+                foundAllocationForResponse = False
+                for i in range(len(returnData[result["method"]])):
+                    if returnData[result["method"]][i] is False:
+                        returnData[result["method"]][i] = result["result"]
+                        foundAllocationForResponse = True
+                        break
+                if not foundAllocationForResponse:
+                    raise Exception(
+                        f"Method {result['method']} has been returned more times than expected. Response: {results}"
+                    )
+
+        if len(returnData["getPresetConfig"]) == 1:
+            if returnData["getPresetConfig"][0]:
+                self.presets = self.processPresetsResponse(
+                    returnData["getPresetConfig"][0]
+                )
+        else:
+            raise Exception("Unexpected number of getPresetConfig responses")
         return returnData
