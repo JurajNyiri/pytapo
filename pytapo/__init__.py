@@ -1890,11 +1890,11 @@ class Tapo:
             print(method)
             print(returnData[method])
 
-        if returnData["getPresetConfig"]:
-            if len(returnData["getPresetConfig"]) == 1:
+        if len(returnData["getPresetConfig"]) == 1:
+            if returnData["getPresetConfig"][0]:
                 self.presets = self.processPresetsResponse(
                     returnData["getPresetConfig"][0]
                 )
-            else:
-                raise Exception("Unexpected number of getPresetConfig responses")
+        else:
+            raise Exception("Unexpected number of getPresetConfig responses")
         return returnData
