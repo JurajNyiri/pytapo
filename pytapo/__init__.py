@@ -1844,7 +1844,6 @@ class Tapo:
 
         results = self.performRequest(requestData)
 
-
         # handle malformed / unexpected response from camera
         if len(requestData["params"]["requests"]) != len(
             results["result"]["responses"]
@@ -1858,23 +1857,23 @@ class Tapo:
                 return self.getMost(["getAudioConfig"])
             else:
                 raise Exception(f"Unexpected camera response: {results}")
-        
+
         returnData = {}
 
         for request in requestData["params"]["requests"]:
-            returnData[request["method"]] = False
+            returnData[request["method"]] = [False]
 
         for result in results["result"]["responses"]:
             if (
                 "error_code" in result and result["error_code"] == 0
             ) and "result" in result:
-                if result["method"] not in returnData or (returnData[result["method"]] is False):
-                    returnData[result["method"]] = result["result"]
+                if result["method"] not in returnData or (
+                    returnData[result["method"]][0] is False
+                ):
+                    returnData[result["method"]] = [result["result"]]
                 else:
-                    raise Exception(
-                        f"Unexpected two valid responses for same method. Method: {result['method']} Responses: {returnData[result['method']]} and {result['result']}"
-                    )
-        
+                    returnData[result["method"]].append(result["result"])
+
         for method in returnData:
             print(method)
             print(returnData[method])
@@ -1882,5 +1881,10 @@ class Tapo:
         for omittedMethod in omit_methods:
             returnData[omittedMethod] = False
         if returnData["getPresetConfig"]:
-            self.presets = self.processPresetsResponse(returnData["getPresetConfig"])
+            if len(returnData["getPresetConfig"]) == 1:
+                self.presets = self.processPresetsResponse(
+                    returnData["getPresetConfig"][0]
+                )
+            else:
+                raise Exception("Unexpected number of getPresetConfig responses")
         return returnData
