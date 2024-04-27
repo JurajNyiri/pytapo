@@ -1844,50 +1844,6 @@ class Tapo:
 
         results = self.performRequest(requestData)
 
-        processedData = []
-        i = 0
-
-        for request in requestData["params"]["requests"]:
-            result = results["result"]["responses"][i]
-            requestResponseObj = {
-                "request": request,
-                "response": {
-                    "result": False,
-                    "method": request["method"],
-                },
-            }
-            if (
-                "error_code" in result and result["error_code"] == 0
-            ) and "result" in result:
-                requestResponseObj["response"]["result"] = result["result"]
-                if (
-                    "method" in result
-                    and requestResponseObj["request"]["method"] != result["method"]
-                ):
-                    raise Exception(
-                        f"Unexpected camera order of responses. Request: {requestData} Response: {results}"
-                    )
-            processedData.append(requestResponseObj)
-            i += 1
-
-        returnData = {}
-        for request in processedData:
-            if (
-                request["request"]["method"] in returnData
-            ):  # handle case where there is one function there multiple times
-                if type(returnData[request["request"]["method"]]) is not list:
-                    returnData[request["request"]["method"]] = [
-                        returnData[request["request"]["method"]]
-                    ]
-                returnData[request["request"]["method"]].append(
-                    request["response"]["result"]
-                )
-            else:
-                returnData[request["request"]["method"]] = request["response"]["result"]
-
-        for method in returnData:
-            print(method)
-            print(returnData[method])
 
         # handle malformed / unexpected response from camera
         if len(requestData["params"]["requests"]) != len(
@@ -1902,6 +1858,27 @@ class Tapo:
                 return self.getMost(["getAudioConfig"])
             else:
                 raise Exception(f"Unexpected camera response: {results}")
+        
+        returnData = {}
+
+        for request in requestData["params"]["requests"]:
+            returnData[request["method"]] = False
+
+        for result in results["result"]["responses"]:
+            if (
+                "error_code" in result and result["error_code"] == 0
+            ) and "result" in result:
+                if result["method"] not in returnData or (returnData[result["method"]] is False):
+                    returnData[result["method"]] = result["result"]
+                else:
+                    raise Exception(
+                        f"Unexpected two valid responses for same method. Method: {result['method']} Responses: {returnData[result['method']]} and {result['result']}"
+                    )
+        
+        for method in returnData:
+            print(method)
+            print(returnData[method])
+
         for omittedMethod in omit_methods:
             returnData[omittedMethod] = False
         if returnData["getPresetConfig"]:
