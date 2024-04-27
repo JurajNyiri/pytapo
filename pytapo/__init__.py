@@ -1879,12 +1879,18 @@ class Tapo:
             ) and "result" in result:
                 if result["method"] not in returnData:
                     raise Exception(
-                        f"Method which was not requested has been returned. Response: {results}"
+                        f"Method {result['method']} was not requested and has been returned. Response: {results}"
                     )
+                foundAllocationForResponse = False
                 for i in range(len(returnData[result["method"]])):
                     if returnData[result["method"]][i] is False:
                         returnData[result["method"]][i] = result["result"]
+                        foundAllocationForResponse = True
                         break
+                if not foundAllocationForResponse:
+                    raise Exception(
+                        f"Method {result['method']} has been returned more times than expected. Response: {results}"
+                    )
 
         for method in returnData:
             print(method)
