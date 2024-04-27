@@ -1892,10 +1892,6 @@ class Tapo:
                         f"Method {result['method']} has been returned more times than expected. Response: {results}"
                     )
 
-        for method in returnData:
-            print(method)
-            print(returnData[method])
-
         if len(returnData["getPresetConfig"]) == 1:
             if returnData["getPresetConfig"][0]:
                 self.presets = self.processPresetsResponse(
