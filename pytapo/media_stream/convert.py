@@ -17,6 +17,8 @@ class Convert:
         self.known_lengths = {}
         self.addedChunks = 0
         self.lengthLastCalculatedAtChunk = 0
+        if not self.is_ffmpeg_installed():
+            raise Exception('ffmpeg is not installed')
 
     # cuts and saves the video
     def save(self, fileLocation, fileLength, method="ffmpeg"):
@@ -114,3 +116,10 @@ class Convert:
     def write(self, data: bytes, audioData: bytes):
         self.addedChunks += 1
         return self.writer.write(data) and self.audioWriter.write(audioData)
+    
+    def is_ffmpeg_installed(self):
+        try:
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return False
