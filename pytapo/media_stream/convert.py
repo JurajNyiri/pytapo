@@ -4,6 +4,7 @@ import subprocess
 import os
 import datetime
 import tempfile
+import aiofiles
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -19,16 +20,14 @@ class Convert:
         self.lengthLastCalculatedAtChunk = 0
 
     # cuts and saves the video
-    def save(self, fileLocation, fileLength, method="ffmpeg"):
+    async def save(self, fileLocation, fileLength, method="ffmpeg"):
         if method == "ffmpeg":
             tempVideoFileLocation = fileLocation + ".ts"
-            file = open(tempVideoFileLocation, "wb")
-            file.write(self.writer.getvalue())
-            file.close()
+            async with aiofiles.open(tempVideoFileLocation, "wb") as file:
+                await file.write(self.writer.getvalue())
             tempAudioFileLocation = fileLocation + ".alaw"
-            file = open(tempAudioFileLocation, "wb")
-            file.write(self.audioWriter.getvalue())
-            file.close()
+            async with aiofiles.open(tempAudioFileLocation, "wb") as file:
+                await file.write(self.audioWriter.getvalue())
 
             cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
                 inputVideoFile=tempVideoFileLocation,
