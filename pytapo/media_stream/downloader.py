@@ -1,4 +1,4 @@
-from pytapo.media_stream.convert import Convert
+from .convert import Convert
 from pytapo import Tapo
 from datetime import datetime
 from json import JSONDecodeError
