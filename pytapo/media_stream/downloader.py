@@ -59,7 +59,7 @@ class Downloader:
         if callbackFunc is not None:
             callbackFunc("Finished download")
 
-        md5Hash = self.md5(status["fileName"])
+        md5Hash = await self.md5(status["fileName"])
 
         status["md5"] = "" if md5Hash is False else md5Hash
 
