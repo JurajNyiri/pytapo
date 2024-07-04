@@ -1,4 +1,4 @@
-from pytapo.media_stream.convert import Convert
+from .convert import Convert
 from pytapo import Tapo
 from datetime import datetime
 from json import JSONDecodeError
@@ -6,6 +6,8 @@ from json import JSONDecodeError
 import json
 import os
 import hashlib
+import aiofiles
+
 
 class Downloader:
     FRESH_RECORDING_TIME_SECONDS = 60
@@ -40,13 +42,11 @@ class Downloader:
         else:
             self.window_size = int(window_size)
 
-    def md5(self, fileName):
+    async def md5(self, fileName):
         if os.path.isfile(fileName):
-            with open(fileName, "rb") as f:
-                file_hash = hashlib.md5()
-                while chunk := f.read(8192):
-                    file_hash.update(chunk)
-            return file_hash.hexdigest()
+            async with aiofiles.open(fileName, "rb") as file:
+                contents = await file.read()
+            return hashlib.md5(contents).hexdigest()
         return False
 
     async def downloadFile(self, callbackFunc=None):
@@ -59,7 +59,7 @@ class Downloader:
         if callbackFunc is not None:
             callbackFunc("Finished download")
 
-        md5Hash = self.md5(status["fileName"])
+        md5Hash = await self.md5(status["fileName"])
 
         status["md5"] = "" if md5Hash is False else md5Hash
 
@@ -169,7 +169,7 @@ class Downloader:
                                     "progress": 0,
                                     "total": 0,
                                 }
-                                convert.save(fileName, segmentLength)
+                                await convert.save(fileName, segmentLength)
                                 downloading = False
                                 break
                         # in case a finished stream notification is caught, save the chunks as is
@@ -177,13 +177,16 @@ class Downloader:
                             try:
                                 json_data = json.loads(resp.plaintext.decode())
 
-                                if ("type" in json_data
+                                if (
+                                    "type" in json_data
                                     and json_data["type"] == "notification"
                                     and "params" in json_data
                                     and "event_type" in json_data["params"]
-                                    and json_data["params"]["event_type"] == "stream_status"
+                                    and json_data["params"]["event_type"]
+                                    == "stream_status"
                                     and "status" in json_data["params"]
-                                    and json_data["params"]["status"] == "finished"):
+                                    and json_data["params"]["status"] == "finished"
+                                ):
                                     downloadedFull = True
                                     currentAction = "Converting"
                                     yield {
@@ -192,11 +195,13 @@ class Downloader:
                                         "progress": 0,
                                         "total": 0,
                                     }
-                                    convert.save(fileName, convert.getLength())
+                                    await convert.save(fileName, convert.getLength())
                                     downloading = False
                                     break
                             except JSONDecodeError:
-                                self.tapo.debugLog("Unable to parse JSON sent from device")
+                                self.tapo.debugLog(
+                                    "Unable to parse JSON sent from device"
+                                )
                     if downloading:
                         # Handle case where camera randomly stopped respoding
                         if not downloadedFull and not retry:
@@ -221,7 +226,7 @@ class Downloader:
                                     "progress": 0,
                                     "total": 0,
                                 }
-                                convert.save(fileName, segmentLength)
+                                await convert.save(fileName, segmentLength)
                             else:
                                 currentAction = "Giving up"
                                 yield {
