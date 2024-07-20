@@ -867,6 +867,11 @@ class Tapo:
             "setSirenStatus", {"siren": {"status": "on" if status else "off"}}
         )
 
+    def setSirenStatus(self, status):
+        return self.executeFunction(
+            "setSirenStatus", {"msg_alarm": {"status": "on" if status else "off"}}
+        )
+
     def setHDR(self, status):
         return self.executeFunction(
             "setHDR",
