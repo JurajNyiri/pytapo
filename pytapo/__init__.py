@@ -1126,7 +1126,14 @@ class Tapo:
         )
 
     # todo child
-    def setAlarm(self, enabled, soundEnabled=True, lightEnabled=True):
+    def setAlarm(
+        self,
+        enabled,
+        soundEnabled=True,
+        lightEnabled=True,
+        alarmVolume=None,
+        alarmDuration=None,
+    ):
         alarm_mode = []
 
         if not soundEnabled and not lightEnabled:
@@ -1147,6 +1154,10 @@ class Tapo:
                     "alarm_mode": alarm_mode,
                 }
             }
+            if alarmVolume is not None:
+                data["msg_alarm"]["alarm_volume"] = alarmVolume
+            if alarmDuration is not None:
+                data["msg_alarm"]["alarm_duration"] = alarmDuration
             return self.executeFunction("setAlarmConfig", data)
         else:
             data = {
@@ -1160,6 +1171,12 @@ class Tapo:
                     }
                 },
             }
+            if alarmVolume is not None:
+                data["msg_alarm"]["chn1_msg_alarm_info"]["alarm_volume"] = alarmVolume
+            if alarmDuration is not None:
+                data["msg_alarm"]["chn1_msg_alarm_info"][
+                    "alarm_duration"
+                ] = alarmDuration
             return self.performRequest(data)
 
     # todo child
