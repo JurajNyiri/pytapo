@@ -1128,16 +1128,13 @@ class Tapo:
     # todo child
     def setAlarm(
         self,
-        enabled,
-        soundEnabled=True,
-        lightEnabled=True,
+        enabled=None,
+        soundEnabled=None,
+        lightEnabled=None,
         alarmVolume=None,
         alarmDuration=None,
     ):
         alarm_mode = []
-
-        if not soundEnabled and not lightEnabled:
-            raise Exception("You need to use at least sound or light for alarm")
 
         if soundEnabled:
             if self.childID:
@@ -1150,10 +1147,13 @@ class Tapo:
         if self.childID:
             data = {
                 "msg_alarm": {
-                    "enabled": "on" if enabled else "off",
                     "alarm_mode": alarm_mode,
                 }
             }
+            if enabled is not None:
+                data["msg_alarm"]["enabled"] = "on" if enabled else "off"
+            if soundEnabled is not None or lightEnabled is not None:
+                data["msg_alarm"]["alarm_mode"] = alarm_mode
             if alarmVolume is not None:
                 data["msg_alarm"]["alarm_volume"] = alarmVolume
             if alarmDuration is not None:
