@@ -1136,6 +1136,7 @@ class Tapo:
     ):
         alarm_mode = []
 
+        # if this is not set the structure is then missing alarm_mode after update, it needs to be there always!
         if not soundEnabled and not lightEnabled:
             raise Exception("You need to use at least sound or light for alarm")
 
