@@ -896,8 +896,14 @@ class Tapo:
 
     def getAlertConfig(self):
         return self.executeFunction(
-            "getAlertConfig", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}}
-        )["msg_alarm"]["chn1_msg_alarm_info"]
+            "getAlertConfig",
+            {
+                "msg_alarm": {
+                    "name": ["chn1_msg_alarm_info", "capability"],
+                    "table": ["usr_def_audio"],
+                }
+            },
+        )
 
     def getHubSirenTypeList(self):
         return self.executeFunction("getSirenTypeList", {"siren": {}})
@@ -1844,7 +1850,12 @@ class Tapo:
                     {"method": "getSirenConfig", "params": {"siren": {}}},
                     {
                         "method": "getAlertConfig",
-                        "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                        "params": {
+                            "msg_alarm": {
+                                "name": ["chn1_msg_alarm_info", "capability"],
+                                "table": ["usr_def_audio"],
+                            }
+                        },
                     },
                     {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
