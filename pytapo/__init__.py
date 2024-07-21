@@ -894,8 +894,18 @@ class Tapo:
     def getHubSirenConfig(self):
         return self.executeFunction("getSirenConfig", {"siren": {}})
 
+    def getAlertConfig(self):
+        return self.executeFunction(
+            "getAlertConfig", {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}}
+        )["msg_alarm"]["chn1_msg_alarm_info"]
+
     def getHubSirenTypeList(self):
         return self.executeFunction("getSirenTypeList", {"siren": {}})
+
+    def getAlertTypeList(self):
+        return self.executeFunction(
+            "getAlertTypeList", {"msg_alarm": {"name": "alert_type"}}
+        )
 
     def getFirmwareAutoUpgradeConfig(self):
         return self.executeFunction(
@@ -1610,6 +1620,12 @@ class Tapo:
             "getNightVisionModeConfig", {"image": {"name": "switch"}}
         )
 
+    def getNightVisionCapability(self):
+        return self.executeFunction(
+            "getNightVisionCapability",
+            {"image_capability": {"name": ["supplement_lamp"]}},
+        )
+
     def setNightVisionModeConfig(self, mode):
         return self.executeFunction(
             "setNightVisionModeConfig",
@@ -1738,6 +1754,14 @@ class Tapo:
             "params": {
                 "requests": [
                     {
+                        "method": "getAlertTypeList",
+                        "params": {"msg_alarm": {"name": "alert_type"}},
+                    },
+                    {
+                        "method": "getNightVisionCapability",
+                        "params": {"image_capability": {"name": ["supplement_lamp"]}},
+                    },
+                    {
                         "method": "getDeviceInfo",
                         "params": {"device_info": {"name": ["basic_info"]}},
                     },
@@ -1818,6 +1842,10 @@ class Tapo:
                     {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenTypeList", "params": {"siren": {}}},
                     {"method": "getSirenConfig", "params": {"siren": {}}},
+                    {
+                        "method": "getAlertConfig",
+                        "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                    },
                     {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
                     {"method": "getSirenStatus", "params": {"siren": {}}},
