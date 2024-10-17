@@ -862,6 +862,23 @@ class Tapo:
             },
         )
 
+    def setTimezone(self, timezone, zoneID, timingMode="ntp"):
+        return self.executeFunction(
+            "setTimezone",
+            {
+                "system": {
+                    "basic": {
+                        "timing_mode": timingMode,
+                        "timezone": timezone,
+                        "zone_id": zoneID,
+                    }
+                }
+            },
+        )
+
+    def getTimezone(self):
+        return self.executeFunction("getTimezone", {"system": {"name": ["basic"]}})
+
     def setHubSirenStatus(self, status):
         return self.executeFunction(
             "setSirenStatus", {"siren": {"status": "on" if status else "off"}}
@@ -1759,6 +1776,10 @@ class Tapo:
             "method": "multipleRequest",
             "params": {
                 "requests": [
+                    {
+                        "method": "getTimezone",
+                        "params": {"system": {"name": ["basic"]}},
+                    },
                     {
                         "method": "getAlertTypeList",
                         "params": {"msg_alarm": {"name": "alert_type"}},
