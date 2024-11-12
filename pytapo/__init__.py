@@ -1097,6 +1097,9 @@ class Tapo:
             "getClockStatus", {"system": {"name": "clock_status"}}
         )
 
+    def getDSTRule(self):
+        return self.executeFunction("getDstRule", {"system": {"name": "dst"}})
+
     # does not work for child devices, function discovery needed
     def getMotorCapability(self):
         return self.performRequest({"method": "get", "motor": {"name": ["capability"]}})
@@ -1776,6 +1779,14 @@ class Tapo:
             "method": "multipleRequest",
             "params": {
                 "requests": [
+                    {
+                        "method": "getDstRule",
+                        "params": {"system": {"name": "dst"}},
+                    },
+                    {
+                        "method": "getClockStatus",
+                        "params": {"system": {"name": "clock_status"}},
+                    },
                     {
                         "method": "getTimezone",
                         "params": {"system": {"name": ["basic"]}},
