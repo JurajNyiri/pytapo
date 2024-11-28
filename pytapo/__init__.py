@@ -911,15 +911,19 @@ class Tapo:
     def getHubSirenConfig(self):
         return self.executeFunction("getSirenConfig", {"siren": {}})
 
-    def getAlertConfig(self):
+    def getAlertConfig(self, includeCapability=False, includeUserDefinedAudio=True):
+        data = {
+            "msg_alarm": {
+                "name": ["chn1_msg_alarm_info"],
+            }
+        }
+        if includeCapability:
+            data["msg_alarm"]["name"].append("capability")
+        if includeUserDefinedAudio:
+            data["msg_alarm"]["table"] = ["usr_def_audio"]
         return self.executeFunction(
             "getAlertConfig",
-            {
-                "msg_alarm": {
-                    "name": ["chn1_msg_alarm_info", "capability"],
-                    "table": ["usr_def_audio"],
-                }
-            },
+            data,
         )
 
     def getHubSirenTypeList(self):
@@ -1434,12 +1438,12 @@ class Tapo:
     def testUsrDefAudio(self, id: int, enabled: bool, force: int = 1):
         if enabled:
             data = {
-                "msg_alarm": {"test_usr_def_audio": {"force": str(force), "id": str(id)}}
+                "msg_alarm": {
+                    "test_usr_def_audio": {"force": str(force), "id": str(id)}
+                }
             }
         else:
-            data = {
-                "msg_alarm": {"test_usr_def_audio": {"action": "stop"}}
-            }
+            data = {"msg_alarm": {"test_usr_def_audio": {"action": "stop"}}}
 
         return self.executeFunction("testUsrDefAudio", data)
 
@@ -1927,6 +1931,15 @@ class Tapo:
                         "params": {
                             "msg_alarm": {
                                 "name": ["chn1_msg_alarm_info", "capability"],
+                                "table": ["usr_def_audio"],
+                            }
+                        },
+                    },
+                    {
+                        "method": "getAlertConfig",
+                        "params": {
+                            "msg_alarm": {
+                                "name": ["chn1_msg_alarm_info"],
                                 "table": ["usr_def_audio"],
                             }
                         },
