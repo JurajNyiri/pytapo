@@ -1431,6 +1431,32 @@ class Tapo:
 
         return self.executeFunction("setPetDetectionConfig", data)
 
+    def getAlertEventType(self):
+        return self.executeFunction(
+            "getAlertEventType",
+            {"msg_alarm": {"table": "msg_alarm_type"}},
+        )["msg_alarm"]["msg_alarm_type"]
+
+    def setAlertEventType(self, name: str, enabled: bool):
+        availableAlertEventTypes = self.getAlertEventType()
+        eventTypes = []
+        typeFound = False
+        for eventType in availableAlertEventTypes:
+            if name == eventType["name"]:
+                eventTypes.append(
+                    {"name": eventType["name"], "enabled": "on" if enabled else "off"}
+                )
+                typeFound = True
+            else:
+                eventTypes.append(
+                    {"name": eventType["name"], "enabled": eventType["enabled"]}
+                )
+        if typeFound is False:
+            raise Exception(f"Invalid alert name. {name} is not supported on camera.")
+        data = {"msg_alarm": {"msg_alarm_type": eventTypes}}
+
+        return self.executeFunction("setAlertEventType", data)
+
     def getBarkDetection(self):
         return self.executeFunction(
             "getBarkDetectionConfig",
@@ -1779,6 +1805,10 @@ class Tapo:
             "method": "multipleRequest",
             "params": {
                 "requests": [
+                    {
+                        "method": "getAlertEventType",
+                        "params": {"msg_alarm": {"table": "msg_alarm_type"}},
+                    },
                     {
                         "method": "getDstRule",
                         "params": {"system": {"name": "dst"}},
