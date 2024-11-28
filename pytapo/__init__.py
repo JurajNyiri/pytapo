@@ -1431,6 +1431,18 @@ class Tapo:
 
         return self.executeFunction("setPetDetectionConfig", data)
 
+    def testUsrDefAudio(self, id: int, enabled: bool, force: int = 1):
+        if enabled:
+            data = {
+                "msg_alarm": {"test_usr_def_audio": {"force": str(force), "id": str(id)}}
+            }
+        else:
+            data = {
+                "msg_alarm": {"test_usr_def_audio": {"action": "stop"}}
+            }
+
+        return self.executeFunction("testUsrDefAudio", data)
+
     def getAlertEventType(self):
         return self.executeFunction(
             "getAlertEventType",
