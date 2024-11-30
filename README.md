@@ -1,7 +1,8 @@
 # PyTapo
 
 Python library for communication with Tapo Cameras.
-Mainly created to be used inside Home Assistant Integration [HomeAssistant-Tapo-Control](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control).
+
+Used inside Home Assistant Integration [HomeAssistant-Tapo-Control](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control).
 
 ## Install:
 
