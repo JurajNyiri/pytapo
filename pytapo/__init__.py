@@ -1145,7 +1145,7 @@ class Tapo:
     ### TODO: UNTESTED
     def getFloodlightCapability(self):
         return self.executeFunction(
-            "getFloodlightConfig", {"floodlight": {"name": "capability"}}
+            "getFloodlightCapability", {"floodlight": {"name": "capability"}}
         )
 
     ### TODO: UNTESTED
@@ -1907,10 +1907,8 @@ class Tapo:
                     },
                     ### TODO: UNTESTED
                     {
-                        "method": "getFloodlightConfig",
-                        "params": {
-                            "floodlight": {"name": "capability"}
-                        },  # TODO: can this be done in one call?
+                        "method": "getFloodlightCapability",
+                        "params": {"floodlight": {"name": "capability"}},
                     },
                     ### TODO: UNTESTED
                     {
@@ -1920,9 +1918,7 @@ class Tapo:
                     ### TODO: UNTESTED
                     {
                         "method": "getPirDetConfig",
-                        "params": {
-                            "pir_detection": {"name": "pir_det"}
-                        },  # TODO: can this be done in one call?
+                        "params": {"pir_detection": {"name": "pir_det"}},
                     },
                     {
                         "method": "getAlertEventType",
