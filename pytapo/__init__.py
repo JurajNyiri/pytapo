@@ -1086,6 +1086,80 @@ class Tapo:
             "getWhitelampStatus", {"image": {"get_wtl_status": ["null"]}}
         )
 
+    ### TODO: UNTESTED
+    def getFloodlightStatus(self):
+        return self.executeFunction(
+            "getFloodlightStatus", {"floodlight": {"get_floodlight_status": ""}}
+        )
+
+    ### TODO: UNTESTED
+    def setFloodlightStatus(self, status):
+        return self.executeFunction(
+            "setFloodlightStatus",
+            {"floodlight": {"set_floodlight_status": 1 if status else 0}},
+        )
+
+    ### TODO: UNTESTED
+    def getFloodlightConfig(self):
+        return self.executeFunction(
+            "getFloodlightConfig", {"floodlight": {"name": "config"}}
+        )
+
+    ### TODO: UNTESTED
+    def setFloodlightConfig(
+        self,
+        autoOffEnabled: bool,
+        scheduleMode,
+        endTime,
+        imgDetTriEnabled: bool,
+        intensityLevel: int,
+        scheduleEnabled: bool,
+        manualDuration: int,
+        startTime: int,
+        sunriseOffset: int,
+        sunsetOffset: int,
+        triggerDuration: int,
+    ):
+        ### TODO: Can we set only one value, not all?
+        return self.executeFunction(
+            "setFloodlightConfig",
+            {
+                "floodlight": {
+                    "config": {
+                        "schedule_mode": scheduleMode,
+                        "auto_off_enabled": "on" if autoOffEnabled else "off",
+                        "end_time": endTime,
+                        "img_det_tri_enabled": "on" if imgDetTriEnabled else "off",
+                        "intensity_level": str(intensityLevel),
+                        "schedule_enabled": "on" if scheduleEnabled else "off",
+                        "manual_duration": str(manualDuration),
+                        "start_time": str(startTime),
+                        "sunrise_offset": str(sunriseOffset),
+                        "sunset_offset": str(sunsetOffset),
+                        "trigger_duration": str(triggerDuration),
+                    }
+                }
+            },
+        )
+
+    ### TODO: UNTESTED
+    def getFloodlightCapability(self):
+        return self.executeFunction(
+            "getFloodlightConfig", {"floodlight": {"name": "capability"}}
+        )
+
+    ### TODO: UNTESTED
+    def getPirDetCapability(self):
+        return self.executeFunction(
+            "getPirDetCapability", {"pir_detection": {"name": "pir_capability"}}
+        )
+
+    ### TODO: UNTESTED
+    def getPirDetConfig(self):
+        return self.executeFunction(
+            "getPirDetConfig", {"pir_detection": {"name": "pir_det"}}
+        )
+
     def reverseWhitelampStatus(self):
         return self.executeFunction(
             "reverseWhitelampStatus", {"image": {"reverse_wtl_status": ["null"]}}
@@ -1821,6 +1895,35 @@ class Tapo:
             "method": "multipleRequest",
             "params": {
                 "requests": [
+                    ### TODO: UNTESTED
+                    {
+                        "method": "getFloodlightStatus",
+                        "params": {"floodlight": {"get_floodlight_status": ""}},
+                    },
+                    ### TODO: UNTESTED
+                    {
+                        "method": "getFloodlightConfig",
+                        "params": {"floodlight": {"name": "config"}},
+                    },
+                    ### TODO: UNTESTED
+                    {
+                        "method": "getFloodlightConfig",
+                        "params": {
+                            "floodlight": {"name": "capability"}
+                        },  # TODO: can this be done in one call?
+                    },
+                    ### TODO: UNTESTED
+                    {
+                        "method": "getPirDetCapability",
+                        "params": {"pir_detection": {"name": "pir_capability"}},
+                    },
+                    ### TODO: UNTESTED
+                    {
+                        "method": "getPirDetConfig",
+                        "params": {
+                            "pir_detection": {"name": "pir_det"}
+                        },  # TODO: can this be done in one call?
+                    },
                     {
                         "method": "getAlertEventType",
                         "params": {"msg_alarm": {"table": "msg_alarm_type"}},
