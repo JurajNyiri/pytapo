@@ -1086,6 +1086,97 @@ class Tapo:
             "getWhitelampStatus", {"image": {"get_wtl_status": ["null"]}}
         )
 
+    def getFloodlightStatus(self):
+        return self.executeFunction(
+            "getFloodlightStatus", {"floodlight": {"get_floodlight_status": ""}}
+        )
+
+    def manualFloodlightOp(self, status: bool):
+        return self.executeFunction(
+            "manualFloodlightOp",
+            {
+                "floodlight": {
+                    "manual_floodlight_op": {"action": "start" if status else "stop"}
+                }
+            },
+        )
+
+    def getFloodlightConfig(self):
+        return self.executeFunction(
+            "getFloodlightConfig", {"floodlight": {"name": "config"}}
+        )["floodlight"]["config"]
+
+    def setFloodlightConfig(
+        self,
+        autoOffEnabled: bool = None,
+        scheduleMode=None,
+        endTime=None,
+        imgDetTriEnabled: bool = None,
+        intensityLevel: int = None,
+        scheduleEnabled: bool = None,
+        manualDuration: int = None,
+        startTime: int = None,
+        sunriseOffset: int = None,
+        sunsetOffset: int = None,
+        triggerDuration: int = None,
+    ):
+        config = {}
+        if scheduleMode is not None:
+            config["schedule_mode"] = scheduleMode
+        if autoOffEnabled is not None:
+            config["auto_off_enabled"] = "on" if autoOffEnabled else "off"
+        if endTime is not None:
+            config["end_time"] = endTime
+        if imgDetTriEnabled is not None:
+            config["img_det_tri_enabled"] = imgDetTriEnabled
+        if intensityLevel is not None:
+            config["intensity_level"] = str(intensityLevel)
+        if scheduleEnabled is not None:
+            config["schedule_enabled"] = "on" if scheduleEnabled else "off"
+        if manualDuration is not None:
+            config["manual_duration"] = str(manualDuration)
+        if startTime is not None:
+            config["start_time"] = str(startTime)
+        if sunriseOffset is not None:
+            config["sunrise_offset"] = str(sunriseOffset)
+        if sunsetOffset is not None:
+            config["sunset_offset"] = str(sunsetOffset)
+        if triggerDuration is not None:
+            config["trigger_duration"] = str(triggerDuration)
+        return self.executeFunction(
+            "setFloodlightConfig",
+            {"floodlight": {"config": config}},
+        )
+
+    def getFloodlightCapability(self):
+        return self.executeFunction(
+            "getFloodlightCapability", {"floodlight": {"name": "capability"}}
+        )["floodlight"]["capability"]
+
+    def getPirDetCapability(self):
+        return self.executeFunction(
+            "getPirDetCapability", {"pir_detection": {"name": "pir_capability"}}
+        )["pir_detection"]["pir_capability"]
+
+    def getPirDetConfig(self):
+        return self.executeFunction(
+            "getPirDetConfig", {"pir_detection": {"name": "pir_det"}}
+        )["pir_detection"]["pir_det"]
+
+    # channels example: ['off', 'on', 'off']
+    # sensitivity example: ['10', '10', '10']
+    def setPirDetConfig(self, enabled: bool = None, channels=[], sensitivity=[]):
+        config = {}
+        if enabled is not None:
+            config["enabled"] = "on" if enabled else "off"
+        if channels:
+            config["channel_enabled"] = channels
+        if sensitivity:
+            config["sensitivity"] = sensitivity
+        return self.executeFunction(
+            "setPirDetConfig", {"pir_detection": {"pir_det": config}}
+        )
+
     def reverseWhitelampStatus(self):
         return self.executeFunction(
             "reverseWhitelampStatus", {"image": {"reverse_wtl_status": ["null"]}}
@@ -1821,6 +1912,26 @@ class Tapo:
             "method": "multipleRequest",
             "params": {
                 "requests": [
+                    {
+                        "method": "getFloodlightStatus",
+                        "params": {"floodlight": {"get_floodlight_status": ""}},
+                    },
+                    {
+                        "method": "getFloodlightConfig",
+                        "params": {"floodlight": {"name": "config"}},
+                    },
+                    {
+                        "method": "getFloodlightCapability",
+                        "params": {"floodlight": {"name": "capability"}},
+                    },
+                    {
+                        "method": "getPirDetCapability",
+                        "params": {"pir_detection": {"name": "pir_capability"}},
+                    },
+                    {
+                        "method": "getPirDetConfig",
+                        "params": {"pir_detection": {"name": "pir_det"}},
+                    },
                     {
                         "method": "getAlertEventType",
                         "params": {"msg_alarm": {"table": "msg_alarm_type"}},
