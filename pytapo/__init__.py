@@ -1086,7 +1086,6 @@ class Tapo:
             "getWhitelampStatus", {"image": {"get_wtl_status": ["null"]}}
         )
 
-    ### TODO: UNTESTED
     def getFloodlightStatus(self):
         return self.executeFunction(
             "getFloodlightStatus", {"floodlight": {"get_floodlight_status": ""}}
@@ -1099,11 +1098,10 @@ class Tapo:
             {"floodlight": {"set_floodlight_status": 1 if status else 0}},
         )
 
-    ### TODO: UNTESTED
     def getFloodlightConfig(self):
         return self.executeFunction(
             "getFloodlightConfig", {"floodlight": {"name": "config"}}
-        )
+        )["floodlight"]["config"]
 
     ### TODO: UNTESTED
     def setFloodlightConfig(
@@ -1142,23 +1140,20 @@ class Tapo:
             },
         )
 
-    ### TODO: UNTESTED
     def getFloodlightCapability(self):
         return self.executeFunction(
             "getFloodlightCapability", {"floodlight": {"name": "capability"}}
-        )
+        )["floodlight"]["capability"]
 
-    ### TODO: UNTESTED
     def getPirDetCapability(self):
         return self.executeFunction(
             "getPirDetCapability", {"pir_detection": {"name": "pir_capability"}}
-        )
+        )["pir_detection"]["pir_capability"]
 
-    ### TODO: UNTESTED
     def getPirDetConfig(self):
         return self.executeFunction(
             "getPirDetConfig", {"pir_detection": {"name": "pir_det"}}
-        )
+        )["pir_detection"]["pir_det"]
 
     def reverseWhitelampStatus(self):
         return self.executeFunction(
@@ -1895,27 +1890,22 @@ class Tapo:
             "method": "multipleRequest",
             "params": {
                 "requests": [
-                    ### TODO: UNTESTED
                     {
                         "method": "getFloodlightStatus",
                         "params": {"floodlight": {"get_floodlight_status": ""}},
                     },
-                    ### TODO: UNTESTED
                     {
                         "method": "getFloodlightConfig",
                         "params": {"floodlight": {"name": "config"}},
                     },
-                    ### TODO: UNTESTED
                     {
                         "method": "getFloodlightCapability",
                         "params": {"floodlight": {"name": "capability"}},
                     },
-                    ### TODO: UNTESTED
                     {
                         "method": "getPirDetCapability",
                         "params": {"pir_detection": {"name": "pir_capability"}},
                     },
-                    ### TODO: UNTESTED
                     {
                         "method": "getPirDetConfig",
                         "params": {"pir_detection": {"name": "pir_det"}},
