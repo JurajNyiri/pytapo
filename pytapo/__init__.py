@@ -1091,11 +1091,14 @@ class Tapo:
             "getFloodlightStatus", {"floodlight": {"get_floodlight_status": ""}}
         )
 
-    ### TODO: UNTESTED
-    def setFloodlightStatus(self, status):
+    def manualFloodlightOp(self, status: bool):
         return self.executeFunction(
-            "setFloodlightStatus",
-            {"floodlight": {"set_floodlight_status": 1 if status else 0}},
+            "manualFloodlightOp",
+            {
+                "floodlight": {
+                    "manual_floodlight_op": {"action": "start" if status else "stop"}
+                }
+            },
         )
 
     def getFloodlightConfig(self):
