@@ -1103,41 +1103,46 @@ class Tapo:
             "getFloodlightConfig", {"floodlight": {"name": "config"}}
         )["floodlight"]["config"]
 
-    ### TODO: UNTESTED
     def setFloodlightConfig(
         self,
-        autoOffEnabled: bool,
-        scheduleMode,
-        endTime,
-        imgDetTriEnabled: bool,
-        intensityLevel: int,
-        scheduleEnabled: bool,
-        manualDuration: int,
-        startTime: int,
-        sunriseOffset: int,
-        sunsetOffset: int,
-        triggerDuration: int,
+        autoOffEnabled: bool = None,
+        scheduleMode=None,
+        endTime=None,
+        imgDetTriEnabled: bool = None,
+        intensityLevel: int = None,
+        scheduleEnabled: bool = None,
+        manualDuration: int = None,
+        startTime: int = None,
+        sunriseOffset: int = None,
+        sunsetOffset: int = None,
+        triggerDuration: int = None,
     ):
-        ### TODO: Can we set only one value, not all?
+        config = {}
+        if scheduleMode is not None:
+            config["schedule_mode"] = scheduleMode
+        if autoOffEnabled is not None:
+            config["auto_off_enabled"] = "on" if autoOffEnabled else "off"
+        if endTime is not None:
+            config["end_time"] = endTime
+        if imgDetTriEnabled is not None:
+            config["img_det_tri_enabled"] = imgDetTriEnabled
+        if intensityLevel is not None:
+            config["intensity_level"] = str(intensityLevel)
+        if scheduleEnabled is not None:
+            config["schedule_enabled"] = "on" if scheduleEnabled else "off"
+        if manualDuration is not None:
+            config["manual_duration"] = str(manualDuration)
+        if startTime is not None:
+            config["start_time"] = str(startTime)
+        if sunriseOffset is not None:
+            config["sunrise_offset"] = str(sunriseOffset)
+        if sunsetOffset is not None:
+            config["sunset_offset"] = str(sunsetOffset)
+        if triggerDuration is not None:
+            config["trigger_duration"] = str(triggerDuration)
         return self.executeFunction(
             "setFloodlightConfig",
-            {
-                "floodlight": {
-                    "config": {
-                        "schedule_mode": scheduleMode,
-                        "auto_off_enabled": "on" if autoOffEnabled else "off",
-                        "end_time": endTime,
-                        "img_det_tri_enabled": "on" if imgDetTriEnabled else "off",
-                        "intensity_level": str(intensityLevel),
-                        "schedule_enabled": "on" if scheduleEnabled else "off",
-                        "manual_duration": str(manualDuration),
-                        "start_time": str(startTime),
-                        "sunrise_offset": str(sunriseOffset),
-                        "sunset_offset": str(sunsetOffset),
-                        "trigger_duration": str(triggerDuration),
-                    }
-                }
-            },
+            {"floodlight": {"config": config}},
         )
 
     def getFloodlightCapability(self):
