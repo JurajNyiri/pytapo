@@ -1163,6 +1163,20 @@ class Tapo:
             "getPirDetConfig", {"pir_detection": {"name": "pir_det"}}
         )["pir_detection"]["pir_det"]
 
+    # channels example: ['off', 'on', 'off']
+    # sensitivity example: ['10', '10', '10']
+    def setPirDetConfig(self, enabled: bool = None, channels=[], sensitivity=[]):
+        config = {}
+        if enabled is not None:
+            config["enabled"] = "on" if enabled else "off"
+        if channels:
+            config["channel_enabled"] = channels
+        if sensitivity:
+            config["sensitivity"] = sensitivity
+        return self.executeFunction(
+            "setPirDetConfig", {"pir_detection": {"pir_det": config}}
+        )
+
     def reverseWhitelampStatus(self):
         return self.executeFunction(
             "reverseWhitelampStatus", {"image": {"reverse_wtl_status": ["null"]}}
