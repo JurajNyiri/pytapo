@@ -1906,13 +1906,10 @@ class Tapo:
             raise Exception("No new firmware available.")
 
     def playQuickResponse(self, id):
-        try:
-            return self.executeFunction(
-                "playQuickResp",
-                {"quick_response": {"play_quick_resp_audio": {"id": id, "force": "force"}}},
-            )
-        except Exception as e:
-            raise Exception("Quick response with id {} not found or not supported.".format(id))
+        return self.executeFunction(
+            "playQuickResp",
+            {"quick_response": {"play_quick_resp_audio": {"id": id, "force": "force"}}},
+        )
 
     def getQuickResponseList(self):
         return self.executeFunction(
