@@ -2122,6 +2122,10 @@ class Tapo:
                         "method": "getVideoCapability",
                         "params": {"video_capability": {"name": "main"}},
                     },
+                    {
+                        "method": "getQuickRespList",
+                        "params": {"quick_response": {}},
+                    },
                 ]
             },
         }
