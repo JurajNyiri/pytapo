@@ -1907,7 +1907,7 @@ class Tapo:
 
     def playQuickResponse(self, id):
         try:
-            self.performRequest({
+            return self.performRequest({
                 "method": "playQuickResp",
                 "params": {"quick_response": {"play_quick_resp_audio": {"id": id, "force": "force"}}},
             })
