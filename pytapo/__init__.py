@@ -1907,18 +1907,18 @@ class Tapo:
 
     def playQuickResponse(self, id):
         try:
-            return self.performRequest({
-                "method": "playQuickResp",
-                "params": {"quick_response": {"play_quick_resp_audio": {"id": id, "force": "force"}}},
-            })
+            return self.executeFunction(
+                "playQuickResp",
+                {"quick_response": {"play_quick_resp_audio": {"id": id, "force": "force"}}},
+            )
         except Exception as e:
             raise Exception("Quick response with id {} not found or not supported.".format(id))
 
     def getQuickResponseList(self):
-        return self.performRequest({
-            "method": "getQuickRespList",
-            "params": {"quick_response": {}},
-        })
+        return self.executeFunction(
+            "getQuickRespList",
+            {"quick_response": {}},
+        )
 
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
