@@ -1905,6 +1905,15 @@ class Tapo:
         except Exception:
             raise Exception("No new firmware available.")
 
+    def playQuickResponse(self, id):
+        try:
+            self.performRequest({
+                "method": "playQuickResp",
+                "params": {"quick_response": {"play_quick_resp_audio": {"id": id, "force": "force"}}},
+            })
+        except Exception as e:
+            raise Exception("Quick response with id {} not found or not supported.".format(id))
+
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
     def getMost(self, omit_methods=[]):
