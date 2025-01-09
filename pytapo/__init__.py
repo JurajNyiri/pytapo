@@ -1914,6 +1914,12 @@ class Tapo:
         except Exception as e:
             raise Exception("Quick response with id {} not found or not supported.".format(id))
 
+    def getQuickResponseList(self):
+        return self.performRequest({
+            "method": "getQuickRespList",
+            "params": {"quick_response": {}},
+        })
+
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
     def getMost(self, omit_methods=[]):
