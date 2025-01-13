@@ -1905,6 +1905,18 @@ class Tapo:
         except Exception:
             raise Exception("No new firmware available.")
 
+    def playQuickResponse(self, id):
+        return self.executeFunction(
+            "playQuickResp",
+            {"quick_response": {"play_quick_resp_audio": {"id": id, "force": "force"}}},
+        )
+
+    def getQuickResponseList(self):
+        return self.executeFunction(
+            "getQuickRespList",
+            {"quick_response": {}},
+        )
+
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
     def getMost(self, omit_methods=[]):
@@ -2121,6 +2133,10 @@ class Tapo:
                     {
                         "method": "getVideoCapability",
                         "params": {"video_capability": {"name": "main"}},
+                    },
+                    {
+                        "method": "getQuickRespList",
+                        "params": {"quick_response": {}},
                     },
                 ]
             },

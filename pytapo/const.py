@@ -11,6 +11,7 @@ ERROR_CODES = {
     "-40209": "Invalid login credentials",
     "-64304": "Maximum Pan/Tilt range reached",
     "-71103": "User ID is not authorized",
+    "72102": "Quick response id not found",
 }
 MAX_LOGIN_RETRIES = 2
 
