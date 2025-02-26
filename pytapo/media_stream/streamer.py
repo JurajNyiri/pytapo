@@ -19,67 +19,20 @@ class Streamer:
         window_size=None,
         fileName=None,
     ):
-        self.currentAction = "Streaming"
+        self.currentAction = "Idle"
         self.callbackFunction = callbackFunction
         self.tapo = tapo
         self.fileName = fileName or "stream_output.ts"
         self.outputDirectory = outputDirectory
-        if window_size is None:
-            self.window_size = 200
-        else:
-            self.window_size = int(window_size)
+        self.window_size = int(window_size) if window_size else 200
         self.buffer = bytearray()  # Local buffer for storing retrieved data
-
-    async def download(self):
-        convert = Convert()
-        mediaSession = self.tapo.getMediaSession()
-        mediaSession.set_window_size(self.window_size)
-        output_path = os.path.join(self.outputDirectory, self.fileName)
-
-        async with mediaSession:
-            payload = json.dumps(
-                {
-                    "type": "request",
-                    "seq": 1,
-                    "params": {
-                        "preview": {
-                            "audio": ["default"],  # Ensure audio is included
-                            "channels": [0],
-                            "resolutions": ["HD"],
-                        },
-                        "method": "get",
-                    },
-                }
-            )
-
-            dataChunks = 0
-            async for resp in mediaSession.transceive(payload):
-                if resp.mimetype == "video/mp2t":
-                    dataChunks += 1
-                    convert.write(resp.plaintext, resp.audioPayload)
-
-                    # Store the received data in buffer
-                    self.buffer.extend(resp.plaintext)
-                    if resp.audioPayload:
-                        self.buffer.extend(resp.audioPayload)
-
-                    # Save to file for debugging purposes
-                    if dataChunks % self.CHUNK_SAVE_INTERVAL == 0:
-                        await self.save_to_file(output_path)
-
-                    self.callbackFunction({"currentAction": self.currentAction})
-
-                    await asyncio.sleep(0.1)  # Prevent tight loop
-
-    async def save_to_file(self, path):
-        """Appends buffered data to a file and clears the buffer."""
-        async with aiofiles.open(path, "ab") as f:
-            print(f"Saving chunk to {path}")
-            await f.write(self.buffer)
-        self.buffer.clear()  # Clear buffer after writing
+        self.process = None
+        self.hls_task = None
+        self.running = False
 
     async def start_hls(self):
         """Starts HLS stream using ffmpeg with proper codecs."""
+        self.currentAction = "FFMpeg Starting"
         os.makedirs(self.outputDirectory, exist_ok=True)
         output_path = os.path.join(self.outputDirectory, "stream.m3u8")
 
@@ -94,33 +47,43 @@ class Streamer:
             "-loglevel",
             "debug",  # Verbose logs
             "-probesize",
-            "32",  # Reduce probe size
+            "32",
             "-f",
-            "mpegts",  # Assume input is H.264 to prevent unnecessary analysis
+            "mpegts",
             "-i",
-            "pipe:0",  # Read from stdin
+            "pipe:0",
             "-map",
-            "0:v:0",  # Select first video stream
+            "0:v:0",
             "-c:v",
-            "copy",  # Copy video without re-encoding
+            "copy",
             "-f",
             "hls",
             "-hls_time",
-            "5",  # Shorter segment duration for lower latency
+            "5",
             "-hls_list_size",
-            "10",  # Maintain buffer for smooth playback
+            "10",
             "-hls_flags",
-            "delete_segments",  # Remove old segments
+            "delete_segments",
             output_path,
         ]
 
         self.process = await asyncio.create_subprocess_exec(
             *cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        await asyncio.sleep(1)  # Give FFmpeg time to initialize
+        self.currentAction = "FFMpeg Running"
 
+        self.running = True
+
+        if self.hls_task is None or self.hls_task.done():
+            self.hls_task = asyncio.create_task(self._stream_to_ffmpeg())
+
+        print("HLS stream started.")
+
+    async def _stream_to_ffmpeg(self):
+        """Handles mediaSession streaming in the background."""
         mediaSession = self.tapo.getMediaSession()
         mediaSession.set_window_size(self.window_size)
+        self.currentAction = "Stream Starting"
 
         async with mediaSession:
             payload = json.dumps(
@@ -137,6 +100,7 @@ class Streamer:
                     },
                 }
             )
+
             print(f"Starting HLS stream at: {self.outputDirectory}")
 
             async def log_ffmpeg():
@@ -157,22 +121,44 @@ class Streamer:
             print(f"FFmpeg PID: {self.process.pid}")
 
             async for resp in mediaSession.transceive(payload):
+                if not self.running:
+                    break
                 if resp.mimetype == "video/mp2t":
+                    self.currentAction = "Streaming"
                     try:
-                        # Ensure full TS packets before writing
                         if len(resp.plaintext) % 188 != 0:
                             print(
                                 f"Warning: Dropping incomplete TS packet ({len(resp.plaintext)} bytes)"
                             )
-                            continue  # Skip writing incomplete packets
+                            continue
 
                         self.process.stdin.write(resp.plaintext)
                         if resp.audioPayload:
                             self.process.stdin.write(resp.audioPayload)
-                        await self.process.stdin.drain()  # Ensure data is flushed asynchronously
-                    except BrokenPipeError:
+                        await self.process.stdin.drain()
+                    except (BrokenPipeError, AttributeError):
+                        self.currentAction = "FFMpeg crashed"
                         print("FFmpeg process closed unexpectedly.")
-                        break  # Stop the loop if ffmpeg exits
+                        break
 
-            stderr_output = self.process.stderr.read().decode()
-            print(stderr_output)  # Print FFmpeg errors
+    async def stop_hls(self):
+        """Stops the HLS streaming process."""
+        self.currentAction = "Stopping HLS..."
+        self.running = False
+        if self.hls_task:
+            self.hls_task.cancel()
+            try:
+                await self.hls_task
+            except asyncio.CancelledError:
+                pass
+        if self.process:
+            self.currentAction = "Stopping ffmpeg..."
+            self.process.terminate()
+            self.process.stdin.close()
+            await self.process.wait()
+            self.currentAction = "Idle"
+            self.callbackFunction(
+                {
+                    "currentAction": self.currentAction,
+                }
+            )
