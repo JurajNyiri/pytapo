@@ -11,7 +11,16 @@ class Streamer:
     FRESH_RECORDING_TIME_SECONDS = 60
     CHUNK_SAVE_INTERVAL = 150  # Save after 10 chunks
 
-    def __init__(self, tapo, outputDirectory="./", window_size=None, fileName=None):
+    def __init__(
+        self,
+        tapo,
+        callbackFunction,
+        outputDirectory="./",
+        window_size=None,
+        fileName=None,
+    ):
+        self.currentAction = "Streaming"
+        self.callbackFunction = callbackFunction
         self.tapo = tapo
         self.fileName = fileName or "stream_output.ts"
         self.outputDirectory = outputDirectory
@@ -58,7 +67,7 @@ class Streamer:
                     if dataChunks % self.CHUNK_SAVE_INTERVAL == 0:
                         await self.save_to_file(output_path)
 
-                    yield {"currentAction": "Streaming"}
+                    self.callbackFunction({"currentAction": self.currentAction})
 
                     await asyncio.sleep(0.1)  # Prevent tight loop
 
@@ -110,7 +119,6 @@ class Streamer:
         )
         await asyncio.sleep(1)  # Give FFmpeg time to initialize
 
-        convert = Convert()
         mediaSession = self.tapo.getMediaSession()
         mediaSession.set_window_size(self.window_size)
 
@@ -137,14 +145,18 @@ class Streamer:
                     if self.process.stderr.at_eof():
                         break
                     line = await self.process.stderr.readline()
-                    print("[FFmpeg]", line.decode().strip())
+                    self.callbackFunction(
+                        {
+                            "currentAction": self.currentAction,
+                            "ffmpeg_log": line.decode().strip(),
+                        }
+                    )
 
             asyncio.create_task(log_ffmpeg())  # Run as a background task
 
             print(f"FFmpeg PID: {self.process.pid}")
 
             async for resp in mediaSession.transceive(payload):
-                yield {"currentAction": "Streaming"}
                 if resp.mimetype == "video/mp2t":
                     try:
                         # Ensure full TS packets before writing
