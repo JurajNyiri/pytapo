@@ -65,17 +65,19 @@ class PES:
                 ts = 0
                 hasPTS = 0b1000_0000
                 if flags & hasPTS:
-                    ts = parse_time(self.Payload[self.minHeaderSize :])
+                    ts = parse_time(self.Payload[self.minHeaderSize :]) % (2**32)
 
                 streamType = None
                 for var_name, var_value in vars(PayloadType).items():
                     if var_value == self.StreamType:
                         streamType = PayloadType[var_name]
                 pkt = RTP(
-                    payload=annexB2AVC(payload), payloadType=streamType, timestamp=ts,
+                    payload=annexB2AVC(payload),
+                    payloadType=streamType,
+                    timestamp=ts,
                 )
             elif self.StreamType == self.StreamTypePCMATapo:
-                self.Sequence = (self.Sequence+1) % 2**16
+                self.Sequence = (self.Sequence + 1) % 2**16
                 self.Timestamp += len(payload)
 
                 streamType = None
