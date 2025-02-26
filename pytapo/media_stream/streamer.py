@@ -51,8 +51,8 @@ class Streamer:
 
                     # Store the received data in buffer
                     self.buffer.extend(resp.plaintext)
-                    if resp.audioPayload:
-                        self.buffer.extend(resp.audioPayload)
+                    # if resp.audioPayload:
+                    #    self.buffer.extend(resp.audioPayload)
 
                     # Save to file for debugging purposes
                     if dataChunks % self.CHUNK_SAVE_INTERVAL == 0:
@@ -80,22 +80,28 @@ class Streamer:
 
         cmd = [
             "ffmpeg",
+            "-bsf:v",
+            "h264_mp4toannexb",
             "-loglevel",
             "debug",  # Verbose logs
-            "-f",
-            "mpegts",  # Force input format as MPEG-TS
-            "-probesize",
-            "8M",  # Optimize probing for faster stream start
             "-analyzeduration",
-            "2M",  # Reduce latency while keeping stream stability
+            "0",  # Stop probing
+            "-probesize",
+            "32",  # Reduce probe size
+            "-f",
+            "mpegts",  # Assume input is H.264 to prevent unnecessary analysis
             "-i",
             "pipe:0",  # Read from stdin
+            "-map",
+            "0:v:0",  # Select first video stream
+            "-map",
+            "-0:1",  # Exclude stream 1 (if it's causing issues)
+            "-map_metadata",
+            "-1",  # Remove metadata
+            "-map_chapters",
+            "-1",  # Remove chapters
             "-c:v",
-            "copy",  # Copy video without re-encoding (Tapo uses H.264)
-            "-c:a",
-            "aac",  # Convert audio if needed
-            "-b:a",
-            "64k",  # Set AAC bitrate
+            "copy",  # Copy video without re-encoding
             "-f",
             "hls",
             "-hls_time",
@@ -106,6 +112,8 @@ class Streamer:
             "delete_segments",  # Remove old segments
             output_path,
         ]
+
+        print(output_path)
 
         self.process = await asyncio.create_subprocess_exec(
             *cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -157,6 +165,8 @@ class Streamer:
                             continue  # Skip writing incomplete packets
 
                         self.process.stdin.write(resp.plaintext)
+                        if resp.audioPayload:
+                            self.process.stdin.write(resp.audioPayload)
                         await self.process.stdin.drain()  # Ensure data is flushed asynchronously
                     except BrokenPipeError:
                         print("FFmpeg process closed unexpectedly.")
