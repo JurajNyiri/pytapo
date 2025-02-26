@@ -51,8 +51,8 @@ class Streamer:
 
                     # Store the received data in buffer
                     self.buffer.extend(resp.plaintext)
-                    # if resp.audioPayload:
-                    #    self.buffer.extend(resp.audioPayload)
+                    if resp.audioPayload:
+                        self.buffer.extend(resp.audioPayload)
 
                     # Save to file for debugging purposes
                     if dataChunks % self.CHUNK_SAVE_INTERVAL == 0:
@@ -84,8 +84,6 @@ class Streamer:
             "h264_mp4toannexb",
             "-loglevel",
             "debug",  # Verbose logs
-            "-analyzeduration",
-            "0",  # Stop probing
             "-probesize",
             "32",  # Reduce probe size
             "-f",
@@ -94,26 +92,18 @@ class Streamer:
             "pipe:0",  # Read from stdin
             "-map",
             "0:v:0",  # Select first video stream
-            "-map",
-            "-0:1",  # Exclude stream 1 (if it's causing issues)
-            "-map_metadata",
-            "-1",  # Remove metadata
-            "-map_chapters",
-            "-1",  # Remove chapters
             "-c:v",
             "copy",  # Copy video without re-encoding
             "-f",
             "hls",
             "-hls_time",
-            "2",  # Shorter segment duration for lower latency
+            "5",  # Shorter segment duration for lower latency
             "-hls_list_size",
             "10",  # Maintain buffer for smooth playback
             "-hls_flags",
             "delete_segments",  # Remove old segments
             output_path,
         ]
-
-        print(output_path)
 
         self.process = await asyncio.create_subprocess_exec(
             *cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
