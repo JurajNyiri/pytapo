@@ -3,8 +3,8 @@ from .convert import Convert
 import json
 import os
 import aiofiles
-
 import asyncio
+import subprocess
 
 
 class Streamer:
@@ -34,7 +34,7 @@ class Streamer:
                     "seq": 1,
                     "params": {
                         "preview": {
-                            "audio": ["default"],
+                            "audio": ["default"],  # Ensure audio is included
                             "channels": [0],
                             "resolutions": ["HD"],
                         },
@@ -65,6 +65,102 @@ class Streamer:
     async def save_to_file(self, path):
         """Appends buffered data to a file and clears the buffer."""
         async with aiofiles.open(path, "ab") as f:
-            print(path)
+            print(f"Saving chunk to {path}")
             await f.write(self.buffer)
         self.buffer.clear()  # Clear buffer after writing
+
+    async def start_hls(self):
+        """Starts HLS stream using ffmpeg with proper codecs."""
+        os.makedirs(self.outputDirectory, exist_ok=True)
+        output_path = os.path.join(self.outputDirectory, "stream.m3u8")
+
+        # Clean up old HLS files
+        for f in os.listdir(self.outputDirectory):
+            os.remove(os.path.join(self.outputDirectory, f))
+
+        cmd = [
+            "ffmpeg",
+            "-loglevel",
+            "debug",  # Verbose logs
+            "-f",
+            "mpegts",  # Force input format as MPEG-TS
+            "-probesize",
+            "8M",  # Optimize probing for faster stream start
+            "-analyzeduration",
+            "2M",  # Reduce latency while keeping stream stability
+            "-i",
+            "pipe:0",  # Read from stdin
+            "-c:v",
+            "copy",  # Copy video without re-encoding (Tapo uses H.264)
+            "-c:a",
+            "aac",  # Convert audio if needed
+            "-b:a",
+            "64k",  # Set AAC bitrate
+            "-f",
+            "hls",
+            "-hls_time",
+            "2",  # Shorter segment duration for lower latency
+            "-hls_list_size",
+            "10",  # Maintain buffer for smooth playback
+            "-hls_flags",
+            "delete_segments",  # Remove old segments
+            output_path,
+        ]
+
+        self.process = await asyncio.create_subprocess_exec(
+            *cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        await asyncio.sleep(1)  # Give FFmpeg time to initialize
+
+        convert = Convert()
+        mediaSession = self.tapo.getMediaSession()
+        mediaSession.set_window_size(self.window_size)
+
+        async with mediaSession:
+            payload = json.dumps(
+                {
+                    "type": "request",
+                    "seq": 1,
+                    "params": {
+                        "preview": {
+                            "audio": ["default"],  # Ensure audio is included
+                            "channels": [0],
+                            "resolutions": ["HD"],
+                        },
+                        "method": "get",
+                    },
+                }
+            )
+            print(f"Starting HLS stream at: {self.outputDirectory}")
+
+            async def log_ffmpeg():
+                """Continuously print FFmpeg logs."""
+                while True:
+                    if self.process.stderr.at_eof():
+                        break
+                    line = await self.process.stderr.readline()
+                    print("[FFmpeg]", line.decode().strip())
+
+            asyncio.create_task(log_ffmpeg())  # Run as a background task
+
+            print(f"FFmpeg PID: {self.process.pid}")
+
+            async for resp in mediaSession.transceive(payload):
+                yield {"currentAction": "Streaming"}
+                if resp.mimetype == "video/mp2t":
+                    try:
+                        # Ensure full TS packets before writing
+                        if len(resp.plaintext) % 188 != 0:
+                            print(
+                                f"Warning: Dropping incomplete TS packet ({len(resp.plaintext)} bytes)"
+                            )
+                            continue  # Skip writing incomplete packets
+
+                        self.process.stdin.write(resp.plaintext)
+                        await self.process.stdin.drain()  # Ensure data is flushed asynchronously
+                    except BrokenPipeError:
+                        print("FFmpeg process closed unexpectedly.")
+                        break  # Stop the loop if ffmpeg exits
+
+            stderr_output = self.process.stderr.read().decode()
+            print(stderr_output)  # Print FFmpeg errors
