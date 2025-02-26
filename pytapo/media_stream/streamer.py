@@ -69,14 +69,8 @@ class Streamer:
             await f.write(self.buffer)
         self.buffer.clear()  # Clear buffer after writing
 
-    async def _process_logs(self, log_generator):
-        """Consumes logs from FFmpeg and prints them."""
-        async for log in log_generator:
-            print(log)
-
     async def start_hls(self):
         """Starts HLS stream using ffmpeg with proper codecs."""
-        currentAction = "Streaming"
         os.makedirs(self.outputDirectory, exist_ok=True)
         output_path = os.path.join(self.outputDirectory, "stream.m3u8")
 
@@ -138,34 +132,26 @@ class Streamer:
             print(f"Starting HLS stream at: {self.outputDirectory}")
 
             async def log_ffmpeg():
-                """Continuously read and yield FFmpeg logs."""
+                """Continuously print FFmpeg logs."""
                 while True:
-                    line = await self.process.stderr.readline()
-                    if not line:
+                    if self.process.stderr.at_eof():
                         break
-                    yield {
-                        "currentAction": currentAction,
-                        "ffmpeg_log": line.decode().strip(),
-                    }
+                    line = await self.process.stderr.readline()
+                    print("[FFmpeg]", line.decode().strip())
 
-            # Consume logs in a background task
-            async def consume_logs():
-                async for log in log_ffmpeg():
-                    yield log
+            asyncio.create_task(log_ffmpeg())  # Run as a background task
 
             print(f"FFmpeg PID: {self.process.pid}")
 
-            log_task = asyncio.create_task(self._process_logs(log_ffmpeg()))
-
             async for resp in mediaSession.transceive(payload):
-
+                yield {"currentAction": "Streaming"}
                 if resp.mimetype == "video/mp2t":
                     try:
                         # Ensure full TS packets before writing
                         if len(resp.plaintext) % 188 != 0:
-                            yield {
-                                "warning": f"Dropping incomplete TS packet ({len(resp.plaintext)} bytes)"
-                            }
+                            print(
+                                f"Warning: Dropping incomplete TS packet ({len(resp.plaintext)} bytes)"
+                            )
                             continue  # Skip writing incomplete packets
 
                         self.process.stdin.write(resp.plaintext)
@@ -173,8 +159,8 @@ class Streamer:
                             self.process.stdin.write(resp.audioPayload)
                         await self.process.stdin.drain()  # Ensure data is flushed asynchronously
                     except BrokenPipeError:
-                        yield {"error": "FFmpeg process closed unexpectedly."}
+                        print("FFmpeg process closed unexpectedly.")
                         break  # Stop the loop if ffmpeg exits
 
-            # Wait for FFmpeg logs task to finish
-            await log_task
+            stderr_output = self.process.stderr.read().decode()
+            print(stderr_output)  # Print FFmpeg errors
