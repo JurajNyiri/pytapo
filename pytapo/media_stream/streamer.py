@@ -28,6 +28,7 @@ class Streamer:
         self.buffer = bytearray()  # Local buffer for storing retrieved data
         self.audioProcess = None
         self.videoProcess = None
+        self.mergedProcess = None
         self.hls_task = None
         self.running = False
 
@@ -106,6 +107,7 @@ class Streamer:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+
         self.currentAction = "FFMpeg Running"
 
         self.running = True
@@ -165,11 +167,29 @@ class Streamer:
                         }
                     )
 
-            asyncio.create_task(log_ffmpeg_audio())
-            asyncio.create_task(log_ffmpeg_video())
+            async def log_ffmpeg_merge():
+                """Continuously print FFmpeg logs."""
+                while True:
+                    if self.mergedProcess is not None:
+                        if self.mergedProcess.stderr.at_eof():
+                            break
+                        line = await self.mergedProcess.stderr.readline()
+                        self.callbackFunction(
+                            {
+                                "currentAction": self.currentAction,
+                                "ffmpeg_log": line.decode().strip(),
+                            }
+                        )
+                    else:
+                        await asyncio.sleep(1)  # Use asyncio.sleep()
+
+            # asyncio.create_task(log_ffmpeg_audio())
+            # asyncio.create_task(log_ffmpeg_video())
+            asyncio.create_task(log_ffmpeg_merge())
 
             print(f"FFmpeg Audio PID: {self.audioProcess.pid}")
             print(f"FFmpeg Video PID: {self.videoProcess.pid}")
+            # print(f"FFmpeg Merged PID: {self.mergedProcess.pid}")
 
             async for resp in mediaSession.transceive(payload):
                 if not self.running:
@@ -190,6 +210,46 @@ class Streamer:
                             await self.audioProcess.stdin.drain()
 
                         await self.videoProcess.stdin.drain()
+                        if self.mergedProcess is None:
+                            video_m3u8 = os.path.join(
+                                self.outputDirectory, "video.m3u8"
+                            )
+                            audio_m3u8 = os.path.join(
+                                self.outputDirectory, "audio.m3u8"
+                            )
+                            if os.path.exists(video_m3u8) and os.path.exists(
+                                audio_m3u8
+                            ):
+                                merge_cmd = [
+                                    "ffmpeg",
+                                    "-i",
+                                    os.path.join(self.outputDirectory, "video.m3u8"),
+                                    "-i",
+                                    os.path.join(self.outputDirectory, "audio.m3u8"),
+                                    "-c:v",
+                                    "copy",
+                                    "-c:a",
+                                    "copy",
+                                    "-f",
+                                    "hls",
+                                    "-hls_time",
+                                    "5",
+                                    "-hls_list_size",
+                                    "10",
+                                    "-hls_flags",
+                                    "delete_segments",
+                                    os.path.join(
+                                        self.outputDirectory, "final_stream.m3u8"
+                                    ),
+                                ]
+                                self.mergedProcess = (
+                                    await asyncio.create_subprocess_exec(
+                                        *merge_cmd,
+                                        stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                    )
+                                )
                     except (BrokenPipeError, AttributeError):
                         self.currentAction = "FFMpeg crashed"
                         print("FFmpeg process closed unexpectedly.")
@@ -221,6 +281,17 @@ class Streamer:
             self.videoProcess.terminate()
             self.videoProcess.stdin.close()
             await self.videoProcess.wait()
+            self.currentAction = "Idle"
+            self.callbackFunction(
+                {
+                    "currentAction": self.currentAction,
+                }
+            )
+        if self.mergedProcess:
+            self.currentAction = "Stopping ffmpeg..."
+            self.mergedProcess.terminate()
+            self.mergedProcess.stdin.close()
+            await self.mergedProcess.wait()
             self.currentAction = "Idle"
             self.callbackFunction(
                 {
