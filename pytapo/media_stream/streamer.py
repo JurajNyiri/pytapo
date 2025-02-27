@@ -101,7 +101,7 @@ class Streamer:
                     "params": {
                         "preview": {
                             "audio": ["default"],  # Ensure audio is included
-                            "channels": [0],
+                            "channels": [0, 1],
                             "resolutions": ["HD"],
                         },
                         "method": "get",
