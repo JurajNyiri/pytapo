@@ -45,9 +45,9 @@ class Streamer:
             "-bsf:v",
             "h264_mp4toannexb",
             "-loglevel",
-            "debug",  # Verbose logs
+            "debug",
             "-probesize",
-            "32",
+            "10M",  # Increase probe size
             "-f",
             "mpegts",
             "-i",
@@ -59,11 +59,15 @@ class Streamer:
             "-c:v",
             "copy",
             "-c:a",
-            "pcm_alaw",
-            "-ar:a",
+            "aac",  # Convert A-law to AAC
+            "-b:a",
+            "128k",
+            "-ar",
             "8000",
-            "-ac:a",
+            "-ac",
             "1",
+            "-sample_fmt",
+            "s16",  # Ensure compatibility for A-law conversion
             "-f",
             "hls",
             "-hls_time",
