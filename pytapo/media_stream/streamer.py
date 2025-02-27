@@ -54,8 +54,16 @@ class Streamer:
             "pipe:0",
             "-map",
             "0:v:0",
+            "-map",
+            "0:a:0?",
             "-c:v",
             "copy",
+            "-c:a",
+            "pcm_alaw",
+            "-ar:a",
+            "8000",
+            "-ac:a",
+            "1",
             "-f",
             "hls",
             "-hls_time",
@@ -64,7 +72,7 @@ class Streamer:
             "10",
             "-hls_flags",
             "delete_segments",
-            output_path,
+            os.path.join(self.outputDirectory, "stream.m3u8"),
         ]
 
         self.process = await asyncio.create_subprocess_exec(
@@ -133,8 +141,11 @@ class Streamer:
                             continue
 
                         self.process.stdin.write(resp.plaintext)
+
+                        # Ensure audio is also sent
                         if resp.audioPayload:
                             self.process.stdin.write(resp.audioPayload)
+
                         await self.process.stdin.drain()
                     except (BrokenPipeError, AttributeError):
                         self.currentAction = "FFMpeg crashed"
