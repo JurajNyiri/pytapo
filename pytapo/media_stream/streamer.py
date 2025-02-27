@@ -42,32 +42,18 @@ class Streamer:
 
         cmd = [
             "ffmpeg",
-            "-bsf:v",
-            "h264_mp4toannexb",
             "-loglevel",
             "debug",
-            "-probesize",
-            "10M",  # Increase probe size
             "-f",
-            "mpegts",
-            "-i",
-            "pipe:0",
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a:0?",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",  # Convert A-law to AAC
-            "-b:a",
-            "128k",
+            "alaw",  # Tell FFmpeg that input is raw a-law audio
             "-ar",
             "8000",
-            "-ac",
-            "1",
-            "-sample_fmt",
-            "s16",  # Ensure compatibility for A-law conversion
+            "-i",
+            "pipe:0",  # Use another pipe for audio
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
             "-f",
             "hls",
             "-hls_time",
@@ -76,7 +62,7 @@ class Streamer:
             "10",
             "-hls_flags",
             "delete_segments",
-            os.path.join(self.outputDirectory, "stream.m3u8"),
+            os.path.join(self.outputDirectory, "audio.m3u8"),
         ]
 
         self.process = await asyncio.create_subprocess_exec(
@@ -144,7 +130,7 @@ class Streamer:
                             )
                             continue
 
-                        self.process.stdin.write(resp.plaintext)
+                        # self.process.stdin.write(resp.plaintext)
 
                         # Ensure audio is also sent
                         if resp.audioPayload:
