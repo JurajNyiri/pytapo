@@ -26,7 +26,8 @@ class Streamer:
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 200
         self.buffer = bytearray()  # Local buffer for storing retrieved data
-        self.process = None
+        self.audioProcess = None
+        self.videoProcess = None
         self.hls_task = None
         self.running = False
 
@@ -40,7 +41,7 @@ class Streamer:
         for f in os.listdir(self.outputDirectory):
             os.remove(os.path.join(self.outputDirectory, f))
 
-        cmd = [
+        audio_cmd = [
             "ffmpeg",
             "-loglevel",
             "debug",
@@ -65,8 +66,45 @@ class Streamer:
             os.path.join(self.outputDirectory, "audio.m3u8"),
         ]
 
-        self.process = await asyncio.create_subprocess_exec(
-            *cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        video_cmd = [
+            "ffmpeg",
+            "-bsf:v",
+            "h264_mp4toannexb",
+            "-loglevel",
+            "debug",
+            "-probesize",
+            "32",
+            "-f",
+            "mpegts",
+            "-i",
+            "pipe:0",
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "copy",
+            "-f",
+            "hls",
+            "-hls_time",
+            "5",
+            "-hls_list_size",
+            "10",
+            "-hls_flags",
+            "delete_segments",
+            os.path.join(self.outputDirectory, "video.m3u8"),
+        ]
+
+        self.audioProcess = await asyncio.create_subprocess_exec(
+            *audio_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.videoProcess = await asyncio.create_subprocess_exec(
+            *video_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         self.currentAction = "FFMpeg Running"
 
@@ -101,12 +139,12 @@ class Streamer:
 
             print(f"Starting HLS stream at: {self.outputDirectory}")
 
-            async def log_ffmpeg():
+            async def log_ffmpeg_audio():
                 """Continuously print FFmpeg logs."""
                 while True:
-                    if self.process.stderr.at_eof():
+                    if self.audioProcess.stderr.at_eof():
                         break
-                    line = await self.process.stderr.readline()
+                    line = await self.audioProcess.stderr.readline()
                     self.callbackFunction(
                         {
                             "currentAction": self.currentAction,
@@ -114,9 +152,24 @@ class Streamer:
                         }
                     )
 
-            asyncio.create_task(log_ffmpeg())  # Run as a background task
+            async def log_ffmpeg_video():
+                """Continuously print FFmpeg logs."""
+                while True:
+                    if self.videoProcess.stderr.at_eof():
+                        break
+                    line = await self.videoProcess.stderr.readline()
+                    self.callbackFunction(
+                        {
+                            "currentAction": self.currentAction,
+                            "ffmpeg_log": line.decode().strip(),
+                        }
+                    )
 
-            print(f"FFmpeg PID: {self.process.pid}")
+            asyncio.create_task(log_ffmpeg_audio())
+            asyncio.create_task(log_ffmpeg_video())
+
+            print(f"FFmpeg Audio PID: {self.audioProcess.pid}")
+            print(f"FFmpeg Video PID: {self.videoProcess.pid}")
 
             async for resp in mediaSession.transceive(payload):
                 if not self.running:
@@ -130,13 +183,13 @@ class Streamer:
                             )
                             continue
 
-                        # self.process.stdin.write(resp.plaintext)
+                        self.videoProcess.stdin.write(resp.plaintext)
 
-                        # Ensure audio is also sent
                         if resp.audioPayload:
-                            self.process.stdin.write(resp.audioPayload)
+                            self.audioProcess.stdin.write(resp.audioPayload)
+                            await self.audioProcess.stdin.drain()
 
-                        await self.process.stdin.drain()
+                        await self.videoProcess.stdin.drain()
                     except (BrokenPipeError, AttributeError):
                         self.currentAction = "FFMpeg crashed"
                         print("FFmpeg process closed unexpectedly.")
@@ -152,11 +205,22 @@ class Streamer:
                 await self.hls_task
             except asyncio.CancelledError:
                 pass
-        if self.process:
+        if self.audioProcess:
             self.currentAction = "Stopping ffmpeg..."
-            self.process.terminate()
-            self.process.stdin.close()
-            await self.process.wait()
+            self.audioProcess.terminate()
+            self.audioProcess.stdin.close()
+            await self.audioProcess.wait()
+            self.currentAction = "Idle"
+            self.callbackFunction(
+                {
+                    "currentAction": self.currentAction,
+                }
+            )
+        if self.videoProcess:
+            self.currentAction = "Stopping ffmpeg..."
+            self.videoProcess.terminate()
+            self.videoProcess.stdin.close()
+            await self.videoProcess.wait()
             self.currentAction = "Idle"
             self.callbackFunction(
                 {
