@@ -7,7 +7,7 @@ import asyncio
 import subprocess
 import os
 
-HLS_TIME = 2
+HLS_TIME = 1
 HLS_LIST_SIZE = 3
 HLS_FLAGS = "delete_segments+append_list"
 ANALYZE_DURATION = 0
