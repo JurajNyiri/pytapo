@@ -8,7 +8,7 @@ HLS_LIST_SIZE = 3
 HLS_FLAGS = "delete_segments+append_list"
 ANALYZE_DURATION = 0
 PROBE_SIZE = 32
-FFMPEG_LOG_LEVEL = "debug"
+FFMPEG_LOG_LEVEL = "info"
 
 
 class Streamer:
@@ -29,7 +29,6 @@ class Streamer:
         self.fileName = fileName or "stream_output.m3u8"
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 200
-        self.buffer = bytearray()
         self.hls_task = None
         self.running = False
 
