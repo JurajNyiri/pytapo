@@ -20,6 +20,7 @@ class Streamer:
         tapo,
         callbackFunction,
         outputDirectory="./",
+        quality="HD",
         window_size=None,
         fileName=None,
     ):
@@ -30,12 +31,17 @@ class Streamer:
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 50
         self.hls_task = None
+        self.quality = quality
         self.running = False
 
     async def start_hls(self):
         """Starts HLS stream using ffmpeg without writing intermediate files."""
         self.currentAction = "FFMpeg Starting"
         os.makedirs(self.outputDirectory, exist_ok=True)
+
+        # Clean up old HLS files
+        for f in os.listdir(self.outputDirectory):
+            os.remove(os.path.join(self.outputDirectory, f))
 
         self.audio_r, self.audio_w = os.pipe()
 
@@ -116,8 +122,8 @@ class Streamer:
                     "params": {
                         "preview": {
                             "audio": ["default"],
-                            "channels": [0, 1],
-                            "resolutions": ["HD"],
+                            "channels": [0],
+                            "resolutions": [self.quality],
                         },
                         "method": "get",
                     },
