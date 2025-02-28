@@ -6,6 +6,12 @@ import aiofiles
 import asyncio
 import subprocess
 
+HLS_TIME = 2
+HLS_LIST_SIZE = 3
+HLS_FLAGS = "delete_segments+append_list"
+ANALYZE_DURATION = 0
+FFMPEG_LOG_LEVEL = "warning"
+
 
 class Streamer:
     FRESH_RECORDING_TIME_SECONDS = 60
@@ -45,7 +51,11 @@ class Streamer:
         audio_cmd = [
             "ffmpeg",
             "-loglevel",
-            "debug",
+            f"{FFMPEG_LOG_LEVEL}",
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            f"{ANALYZE_DURATION}",
             "-f",
             "alaw",  # Tell FFmpeg that input is raw a-law audio
             "-ar",
@@ -59,22 +69,22 @@ class Streamer:
             "-f",
             "hls",
             "-hls_time",
-            "5",
+            f"{HLS_TIME}",
             "-hls_list_size",
-            "10",
+            f"{HLS_LIST_SIZE}",
             "-hls_flags",
-            "delete_segments",
+            HLS_FLAGS,
             os.path.join(self.outputDirectory, "audio.m3u8"),
         ]
 
         video_cmd = [
             "ffmpeg",
-            "-bsf:v",
-            "h264_mp4toannexb",
             "-loglevel",
-            "debug",
+            f"{FFMPEG_LOG_LEVEL}",
             "-probesize",
             "32",
+            "-analyzeduration",
+            f"{ANALYZE_DURATION}",
             "-f",
             "mpegts",
             "-i",
@@ -86,11 +96,11 @@ class Streamer:
             "-f",
             "hls",
             "-hls_time",
-            "5",
+            f"{HLS_TIME}",
             "-hls_list_size",
-            "10",
+            f"{HLS_LIST_SIZE}",
             "-hls_flags",
-            "delete_segments",
+            HLS_FLAGS,
             os.path.join(self.outputDirectory, "video.m3u8"),
         ]
 
@@ -222,6 +232,8 @@ class Streamer:
                             ):
                                 merge_cmd = [
                                     "ffmpeg",
+                                    "-loglevel",
+                                    f"{FFMPEG_LOG_LEVEL}",
                                     "-i",
                                     os.path.join(self.outputDirectory, "video.m3u8"),
                                     "-i",
@@ -233,11 +245,11 @@ class Streamer:
                                     "-f",
                                     "hls",
                                     "-hls_time",
-                                    "5",
+                                    f"{HLS_TIME}",
                                     "-hls_list_size",
-                                    "10",
+                                    f"{HLS_LIST_SIZE}",
                                     "-hls_flags",
-                                    "delete_segments",
+                                    HLS_FLAGS,
                                     os.path.join(
                                         self.outputDirectory, "final_stream.m3u8"
                                     ),
