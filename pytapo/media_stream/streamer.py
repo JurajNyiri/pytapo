@@ -28,7 +28,7 @@ class Streamer:
         self.tapo = tapo
         self.fileName = fileName or "stream_output.m3u8"
         self.outputDirectory = outputDirectory
-        self.window_size = int(window_size) if window_size else 200
+        self.window_size = int(window_size) if window_size else 50
         self.hls_task = None
         self.running = False
 
