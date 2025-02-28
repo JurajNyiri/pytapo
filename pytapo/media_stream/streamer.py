@@ -6,9 +6,6 @@ import subprocess
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
 HLS_FLAGS = "delete_segments+append_list"
-ANALYZE_DURATION = 0
-PROBE_SIZE = 32
-FFMPEG_LOG_LEVEL = "info"
 
 
 class Streamer:
@@ -23,6 +20,9 @@ class Streamer:
         quality="HD",
         window_size=None,
         fileName=None,
+        logLevel="warning",
+        probeSize=32,
+        analyzeDuration=0,
     ):
         self.currentAction = "Idle"
         self.callbackFunction = callbackFunction
@@ -33,6 +33,9 @@ class Streamer:
         self.hls_task = None
         self.quality = quality
         self.running = False
+        self.logLevel = logLevel
+        self.probeSize = probeSize
+        self.analyzeDuration = analyzeDuration
 
     async def start_hls(self):
         """Starts HLS stream using ffmpeg without writing intermediate files."""
@@ -48,11 +51,11 @@ class Streamer:
         hls_cmd = [
             "ffmpeg",
             "-loglevel",
-            f"{FFMPEG_LOG_LEVEL}",
+            f"{self.logLevel}",
             "-probesize",
-            f"{PROBE_SIZE}",
+            f"{self.probeSize}",
             "-analyzeduration",
-            f"{ANALYZE_DURATION}",
+            f"{self.analyzeDuration}",
             "-f",
             "mpegts",
             "-i",
@@ -94,8 +97,6 @@ class Streamer:
 
         asyncio.create_task(self._print_ffmpeg_logs(self.hlsProcess.stderr))
 
-        print("FFmpeg process started")
-
         self.running = True
         if self.hls_task is None or self.hls_task.done():
             self.hls_task = asyncio.create_task(self._stream_to_ffmpeg())
@@ -107,7 +108,12 @@ class Streamer:
             line = await stderr.readline()
             if not line:
                 break
-            print(f"FFmpeg: {line.decode().strip()}")
+            self.callbackFunction(
+                {
+                    "currentAction": self.currentAction,
+                    "ffmpegLog": line.decode().strip(),
+                }
+            )
 
     async def _stream_to_ffmpeg(self):
         """Streams both video and audio to ffmpeg in memory."""
