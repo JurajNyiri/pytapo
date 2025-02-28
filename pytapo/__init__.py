@@ -871,6 +871,30 @@ class Tapo:
             },
         )
 
+    def setChimeRingPlan(self, enabled=None, ringPlan=None):
+        params = {}
+        if enabled is None or ringPlan is None:
+            chimeRingPlan = self.getChimeRingPlan()
+
+        if enabled is not None:
+            params["enabled"] = "on" if enabled else "off"
+        else:
+            params["enabled"] = chimeRingPlan["chime_ring_plan"][
+                "chn1_chime_ring_plan"
+            ]["enabled"]
+
+        if ringPlan is not None:
+            params["ring_plan_1"] = ringPlan
+        else:
+            params["ring_plan_1"] = chimeRingPlan["chime_ring_plan"][
+                "chn1_chime_ring_plan"
+            ]["ring_plan_1"]
+
+        return self.executeFunction(
+            "setChimeRingPlan",
+            {"chime_ring_plan": {"chn1_chime_ring_plan": params}},
+        )
+
     def setTimezone(self, timezone, zoneID, timingMode="ntp"):
         return self.executeFunction(
             "setTimezone",
