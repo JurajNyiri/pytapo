@@ -99,6 +99,7 @@ class Streamer:
         self.running = True
         if self.hls_task is None or self.hls_task.done():
             self.hls_task = asyncio.create_task(self._stream_to_ffmpeg())
+        return {"ffmpegProcess": self.hlsProcess, "streamProcess": self.hls_task}
 
     async def _print_ffmpeg_logs(self, stderr):
         """Reads and prints FFmpeg logs asynchronously."""
