@@ -1872,6 +1872,11 @@ class Tapo:
             }
         )
 
+    def getChimeRingPlan(self):
+        return self.executeFunction(
+            "getChimeRingPlan", {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}}
+        )
+
     def getBatteryStatus(self):
         return self.executeFunction("getBatteryStatus", {"battery": {"name": "status"}})
 
@@ -2146,6 +2151,10 @@ class Tapo:
                     {
                         "method": "getQuickRespList",
                         "params": {"quick_response": {}},
+                    },
+                    {
+                        "method": "getChimeRingPlan",
+                        "params": {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}},
                     },
                 ]
             },
