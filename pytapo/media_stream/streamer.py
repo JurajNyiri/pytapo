@@ -20,7 +20,7 @@ class Streamer:
         quality="HD",
         window_size=None,
         fileName=None,
-        logLevel="warning",
+        logLevel="debug",
         probeSize=32,
         analyzeDuration=0,
     ):

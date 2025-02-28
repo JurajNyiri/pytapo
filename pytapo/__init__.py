@@ -43,6 +43,7 @@ class Tapo:
         controlPort=443,
         retryStok=True,
         redactConfidentialInformation=True,
+        streamPort=8880,
     ):
         self.retryStok = retryStok
         self.redactConfidentialInformation = redactConfidentialInformation
@@ -64,6 +65,7 @@ class Tapo:
         self.timeCorrection = False
         self.reuseSession = reuseSession
         self.isSecureConnectionCached = None
+        self.streamPort = streamPort
         self.headers = {
             "Host": self.getControlHost(),
             "Referer": "https://{host}".format(host=self.getControlHost()),
@@ -101,7 +103,7 @@ class Tapo:
         )
 
     def getStreamURL(self):
-        return "{host}:8800".format(host=self.host)
+        return "{host}:{streamPort}".format(host=self.host, streamPort=self.streamPort)
 
     def ensureAuthenticated(self):
         if not self.stok:
@@ -647,6 +649,7 @@ class Tapo:
             self.cloudPassword,
             self.superSecretKey,
             self.getEncryptionMethod(),
+            port=self.streamPort,
         )  # pragma: no cover
 
     def getChildDevices(self):
