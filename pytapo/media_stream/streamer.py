@@ -54,9 +54,9 @@ class Streamer:
             "-loglevel",
             "debug",  # Enable detailed logs
             "-probesize",
-            "1000000",  # Increase probe size
+            "32",  # Increase probe size
             "-analyzeduration",
-            "10000000",  # Increase analysis duration
+            f"{ANALYZE_DURATION}",  # Increase analysis duration
             "-f",
             "mpegts",
             "-i",
@@ -138,6 +138,7 @@ class Streamer:
             async for resp in mediaSession.transceive(payload):
                 if not self.running:
                     break
+
                 if resp.mimetype == "video/mp2t":
                     if len(resp.plaintext) % 188 != 0:
                         print(
@@ -145,13 +146,25 @@ class Streamer:
                         )
                         continue
 
-                    # Write video directly to FFmpeg stdin
-                    self.hlsProcess.stdin.write(resp.plaintext)
-                    await self.hlsProcess.stdin.drain()
-
-                    # Write audio to the pipe
+                    # Write audio to the pipe, ensuring it doesn't block
                     if resp.audioPayload:
-                        os.write(self.audio_w, resp.audioPayload)  # Write to pipe
+                        try:
+                            os.write(self.audio_w, resp.audioPayload)
+                        except OSError as e:
+                            print(f"Error writing audio to pipe: {e}")
+                            break  # Exit if the pipe is full or broken
+                    else:
+                        self.hlsProcess.stdin.write(resp.plaintext)
+                        # await self.hlsProcess.stdin.drain()
+
+    async def _audio_writer(self):
+        """Writes audio data to the pipe asynchronously."""
+        while self.running:
+            audio_payload = await self.audio_queue.get()
+            try:
+                os.write(self.audio_w, audio_payload)
+            except OSError as e:
+                print(f"Error writing to audio pipe: {e}")
 
     async def stop_hls(self):
         """Stops the HLS streaming process."""
