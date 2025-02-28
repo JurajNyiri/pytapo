@@ -23,6 +23,7 @@ class Streamer:
         logLevel="debug",
         probeSize=32,
         analyzeDuration=0,
+        includeAudio=False,
     ):
         self.currentAction = "Idle"
         self.callbackFunction = callbackFunction
@@ -36,6 +37,7 @@ class Streamer:
         self.logLevel = logLevel
         self.probeSize = probeSize
         self.analyzeDuration = analyzeDuration
+        self.includeAudio = includeAudio
 
     async def start_hls(self):
         """Starts HLS stream using ffmpeg without writing intermediate files."""
@@ -48,44 +50,72 @@ class Streamer:
 
         self.audio_r, self.audio_w = os.pipe()
 
-        hls_cmd = [
-            "ffmpeg",
-            "-loglevel",
-            f"{self.logLevel}",
-            "-probesize",
-            f"{self.probeSize}",
-            "-analyzeduration",
-            f"{self.analyzeDuration}",
-            "-f",
-            "mpegts",
-            "-i",
-            "pipe:0",  # Video input from pipe
-            "-f",
-            "alaw",
-            "-ar",
-            "8000",
-            "-i",
-            f"/dev/fd/{self.audio_r}",
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",  # Convert A-law audio to AAC
-            "-b:a",
-            "128k",  # Set audio bitrate
-            "-f",
-            "hls",  # Output format as HLS
-            "-hls_time",
-            f"{HLS_TIME}",
-            "-hls_list_size",
-            f"{HLS_LIST_SIZE}",
-            "-hls_flags",
-            HLS_FLAGS,
-            os.path.join(self.outputDirectory, self.fileName),
-        ]
+        if self.includeAudio:
+            hls_cmd = [
+                "ffmpeg",
+                "-loglevel",
+                f"{self.logLevel}",
+                "-probesize",
+                f"{self.probeSize}",
+                "-analyzeduration",
+                f"{self.analyzeDuration}",
+                "-f",
+                "mpegts",
+                "-i",
+                "pipe:0",  # Video input from pipe
+                "-f",
+                "alaw",
+                "-ar",
+                "8000",
+                "-i",
+                f"/dev/fd/{self.audio_r}",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",  # Convert A-law audio to AAC
+                "-b:a",
+                "128k",  # Set audio bitrate
+                "-f",
+                "hls",  # Output format as HLS
+                "-hls_time",
+                f"{HLS_TIME}",
+                "-hls_list_size",
+                f"{HLS_LIST_SIZE}",
+                "-hls_flags",
+                HLS_FLAGS,
+                os.path.join(self.outputDirectory, self.fileName),
+            ]
+        else:
+            hls_cmd = [
+                "ffmpeg",
+                "-loglevel",
+                f"{self.logLevel}",
+                "-probesize",
+                f"{self.probeSize}",
+                "-analyzeduration",
+                f"{self.analyzeDuration}",
+                "-f",
+                "mpegts",
+                "-i",
+                "pipe:0",
+                "-map",
+                "0:v:0",
+                "-c:v",
+                "copy",
+                "-f",
+                "hls",  # Output format as HLS
+                "-hls_time",
+                f"{HLS_TIME}",
+                "-hls_list_size",
+                f"{HLS_LIST_SIZE}",
+                "-hls_flags",
+                HLS_FLAGS,
+                os.path.join(self.outputDirectory, self.fileName),
+            ]
 
         self.hlsProcess = await asyncio.create_subprocess_exec(
             *hls_cmd,

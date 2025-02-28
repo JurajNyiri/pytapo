@@ -51,7 +51,10 @@ class Tapo:
         self.passwordEncryptionMethod = None
         self.seq = None
         self.host = host
-        self.controlPort = controlPort
+        if controlPort is None:
+            self.controlPort = 443
+        else:
+            self.controlPort = controlPort
         self.lsk = None
         self.cnonce = None
         self.ivb = None
@@ -65,7 +68,10 @@ class Tapo:
         self.timeCorrection = False
         self.reuseSession = reuseSession
         self.isSecureConnectionCached = None
-        self.streamPort = streamPort
+        if streamPort is None:
+            self.streamPort = 8800
+        else:
+            self.streamPort = streamPort
         self.headers = {
             "Host": self.getControlHost(),
             "Referer": "https://{host}".format(host=self.getControlHost()),
