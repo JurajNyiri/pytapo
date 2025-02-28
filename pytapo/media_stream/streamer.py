@@ -1,16 +1,13 @@
-from .convert import Convert
-
 import json
 import os
-import aiofiles
 import asyncio
 import subprocess
-import os
 
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
 HLS_FLAGS = "delete_segments+append_list"
 ANALYZE_DURATION = 0
+PROBE_SIZE = 32
 FFMPEG_LOG_LEVEL = "debug"
 
 
@@ -29,13 +26,10 @@ class Streamer:
         self.currentAction = "Idle"
         self.callbackFunction = callbackFunction
         self.tapo = tapo
-        self.fileName = fileName or "stream_output.ts"
+        self.fileName = fileName or "stream_output.m3u8"
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 200
-        self.buffer = bytearray()  # Local buffer for storing retrieved data
-        self.audioProcess = None
-        self.videoProcess = None
-        self.mergedProcess = None
+        self.buffer = bytearray()
         self.hls_task = None
         self.running = False
 
@@ -44,19 +38,16 @@ class Streamer:
         self.currentAction = "FFMpeg Starting"
         os.makedirs(self.outputDirectory, exist_ok=True)
 
-        output_path = os.path.join(self.outputDirectory, "stream.m3u8")
-
-        # Create an OS pipe for audio
         self.audio_r, self.audio_w = os.pipe()
 
         hls_cmd = [
             "ffmpeg",
             "-loglevel",
-            "debug",  # Enable detailed logs
+            f"{FFMPEG_LOG_LEVEL}",
             "-probesize",
-            "32",  # Increase probe size
+            f"{PROBE_SIZE}",
             "-analyzeduration",
-            f"{ANALYZE_DURATION}",  # Increase analysis duration
+            f"{ANALYZE_DURATION}",
             "-f",
             "mpegts",
             "-i",
@@ -66,13 +57,13 @@ class Streamer:
             "-ar",
             "8000",
             "-i",
-            "/dev/fd/7",  # Audio input in A-law format
+            f"/dev/fd/{self.audio_r}",
             "-map",
-            "0:v:0",  # Select video stream
+            "0:v:0",
             "-map",
-            "1:a:0",  # Select audio stream
+            "1:a:0",
             "-c:v",
-            "copy",  # Copy video without re-encoding
+            "copy",
             "-c:a",
             "aac",  # Convert A-law audio to AAC
             "-b:a",
@@ -85,7 +76,7 @@ class Streamer:
             f"{HLS_LIST_SIZE}",
             "-hls_flags",
             HLS_FLAGS,
-            os.path.join(self.outputDirectory, "video.m3u8"),
+            os.path.join(self.outputDirectory, self.fileName),
         ]
 
         self.hlsProcess = await asyncio.create_subprocess_exec(
@@ -96,7 +87,6 @@ class Streamer:
             pass_fds=(self.audio_r,),  # Pass the read end of the pipe
         )
 
-        # Start a separate task to read and print FFmpeg logs
         asyncio.create_task(self._print_ffmpeg_logs(self.hlsProcess.stderr))
 
         print("FFmpeg process started")
@@ -146,25 +136,14 @@ class Streamer:
                         )
                         continue
 
-                    # Write audio to the pipe, ensuring it doesn't block
                     if resp.audioPayload:
                         try:
                             os.write(self.audio_w, resp.audioPayload)
                         except OSError as e:
                             print(f"Error writing audio to pipe: {e}")
-                            break  # Exit if the pipe is full or broken
+                            break
                     else:
                         self.hlsProcess.stdin.write(resp.plaintext)
-                        # await self.hlsProcess.stdin.drain()
-
-    async def _audio_writer(self):
-        """Writes audio data to the pipe asynchronously."""
-        while self.running:
-            audio_payload = await self.audio_queue.get()
-            try:
-                os.write(self.audio_w, audio_payload)
-            except OSError as e:
-                print(f"Error writing to audio pipe: {e}")
 
     async def stop_hls(self):
         """Stops the HLS streaming process."""
@@ -176,36 +155,3 @@ class Streamer:
                 await self.hls_task
             except asyncio.CancelledError:
                 pass
-        if self.audioProcess:
-            self.currentAction = "Stopping ffmpeg..."
-            self.audioProcess.terminate()
-            self.audioProcess.stdin.close()
-            await self.audioProcess.wait()
-            self.currentAction = "Idle"
-            self.callbackFunction(
-                {
-                    "currentAction": self.currentAction,
-                }
-            )
-        if self.videoProcess:
-            self.currentAction = "Stopping ffmpeg..."
-            self.videoProcess.terminate()
-            self.videoProcess.stdin.close()
-            await self.videoProcess.wait()
-            self.currentAction = "Idle"
-            self.callbackFunction(
-                {
-                    "currentAction": self.currentAction,
-                }
-            )
-        if self.mergedProcess:
-            self.currentAction = "Stopping ffmpeg..."
-            self.mergedProcess.terminate()
-            self.mergedProcess.stdin.close()
-            await self.mergedProcess.wait()
-            self.currentAction = "Idle"
-            self.callbackFunction(
-                {
-                    "currentAction": self.currentAction,
-                }
-            )
