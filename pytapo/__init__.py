@@ -1424,6 +1424,16 @@ class Tapo:
             "reverseWhitelampStatus", {"image": {"reverse_wtl_status": ["null"]}}
         )
 
+    def playAlarm(self, alarmDuration, alarmType, alarmVolume):
+        return self.executeFunction(
+            "play_alarm",
+            {
+                "alarm_duration": int(alarmDuration),
+                "alarm_type": str(alarmType),
+                "alarm_volume": str(alarmVolume),
+            },
+        )
+
     def getBasicInfo(self):
         if self.isKLAP:
             return self.executeFunction("get_device_info", None)
