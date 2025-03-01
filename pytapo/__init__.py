@@ -7,6 +7,8 @@ import requests
 import base64
 import copy
 import asyncio
+import logging
+import concurrent
 
 from kasa.transports import KlapTransportV2, KlapTransport
 from kasa.exceptions import AuthenticationError
@@ -24,6 +26,8 @@ from .TlsAdapter import TlsAdapter
 from .media_stream._utils import (
     generate_nonce,
 )
+
+LOGGER = logging.getLogger("pytapo")
 
 
 class Tapo:
@@ -52,6 +56,7 @@ class Tapo:
         streamPort=8880,
         isKLAP=None,
         KLAPVersion=None,
+        hass=None,
     ):
         self.retryStok = retryStok
         self.redactConfidentialInformation = redactConfidentialInformation
@@ -59,6 +64,10 @@ class Tapo:
         self.passwordEncryptionMethod = None
         self.seq = None
         self.host = host
+        if hass is not None:
+            self.hass = hass
+        else:
+            self.hass = None
         if controlPort is None:
             self.controlPort = 443
         else:
@@ -151,19 +160,19 @@ class Tapo:
 
     async def initiateKlapTransport(self, version=1):
         try:
-            if self.klapTransport is not None:
-                await self.klapTransport.close()
-            creds = Credentials(self.user, self.password)
-            config = DeviceConfig(
-                self.host, port_override=self.controlPort, credentials=creds
-            )
-            if version == 1:
-                transport = KlapTransport(config=config)
-            elif version == 2:
-                transport = KlapTransportV2(config=config)
-            await transport.perform_handshake()
-            self.klapTransport = transport
-            return self.klapTransport
+            if self.klapTransport is None:
+                LOGGER.warning("initiateKlapTransport")
+                creds = Credentials(self.user, self.password)
+                config = DeviceConfig(
+                    self.host, port_override=self.controlPort, credentials=creds
+                )
+                if version == 1:
+                    transport = KlapTransport(config=config)
+                elif version == 2:
+                    transport = KlapTransportV2(config=config)
+                await transport.perform_handshake()
+                self.klapTransport = transport
+                return self.klapTransport
         finally:
             await transport.close()
 
@@ -174,9 +183,11 @@ class Tapo:
             response = await self.klapTransport.send(json.dumps(request))
             return response
         except Exception as err:
+            LOGGER.warning(err)
             if self.klapTransport is not None:
                 await self.klapTransport.close()
                 self.klapTransport = None
+
             await self.ensureAuthenticated()
             if retry < 5:
                 return await self.sendKlapRequest(request, retry + 1)
@@ -662,8 +673,14 @@ class Tapo:
         pt = cipher.decrypt(response)
         return unpad(pt, AES.block_size)
 
+    def executeAsyncExecutorJob(self, job, *args):
+        if self.hass is None:
+            return asyncio.run(job(*args))
+        else:
+            return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
+
     def performRequest(self, requestData, loginRetryCount=0):
-        asyncio.run(self.ensureAuthenticated())
+        self.executeAsyncExecutorJob(self.ensureAuthenticated)
         authValid = True
         url = self.getHostURL()
         if self.childID:
@@ -687,7 +704,13 @@ class Tapo:
             fullRequest = requestData
 
         if self.isKLAP:
-            responseJSON = asyncio.run(self.sendKlapRequest(fullRequest))
+
+            LOGGER.warning("requesting")
+            responseJSON = self.executeAsyncExecutorJob(
+                self.sendKlapRequest, fullRequest
+            )
+
+            LOGGER.warning("finished")
             res = None
         else:
             if self.seq is not None and self.isSecureConnection():
