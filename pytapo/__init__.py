@@ -900,6 +900,28 @@ class Tapo:
             {"battery": {"power_save": params}},
         )
 
+    def setClipsConfig(self, clipsLength=None, recordBuffer=None, retriggerTime=None):
+        params = {}
+        if clipsLength is not None:
+            params["clips_length"] = int(clipsLength)
+        if recordBuffer is not None:
+            params["record_buffer"] = int(recordBuffer)
+        if retriggerTime is not None:
+            params["retrigger_time"] = int(retriggerTime)
+
+        if params["retrigger_time"] > 60 or params["retrigger_time"] < 0:
+            raise Exception("Retrigger time has to be between 0 and 60.")
+
+        if params["clips_length"] < 20 or params["clips_length"] > 120:
+            raise Exception("Clips Length has to be between 20 and 120.")
+
+        if params["record_buffer"] < 3 or params["record_buffer"] > 10:
+            raise Exception("Record buffer has to be between 3 and 10.")
+        return self.executeFunction(
+            "setClipsConfig",
+            {"clips": {"config": params}},
+        )
+
     def setBatteryOperatingMode(self, mode):
         availableOperatingModes = self.getBatteryOperatingModeParam()["battery"][
             "operating_mode_param"
