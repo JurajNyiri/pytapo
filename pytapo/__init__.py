@@ -986,8 +986,11 @@ class Tapo:
 
     def getHubSirenStatus(self):
         return self.executeFunction("getSirenStatus", {"siren": {}})
+
     def getHubStorage(self):
-        return self.executeFunction("getHubStorage", {"hub_manage": {"name":"hub_storage_info"}})
+        return self.executeFunction(
+            "getHubStorage", {"hub_manage": {"name": "hub_storage_info"}}
+        )
 
     def setHubSirenConfig(self, duration=None, siren_type=None, volume=None):
         params = {"siren": {}}
@@ -1993,6 +1996,9 @@ class Tapo:
             "getBatteryCapability", {"battery": {"name": "capability"}}
         )
 
+    def getPirSensitivity(self):
+        return self.executeFunction("getPirSensitivity", {"pir": {"name": "config"}})
+
     @staticmethod
     def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
@@ -2309,6 +2315,10 @@ class Tapo:
                     {
                         "method": "getHubStorage",
                         "params": {"hub_manage": {"name": "hub_storage_info"}},
+                    },
+                    {
+                        "method": "getPirSensitivity",
+                        "params": {"pir": {"name": "config"}},
                     },
                 ]
             },
