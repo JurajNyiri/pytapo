@@ -1682,6 +1682,12 @@ class Tapo:
             {"pet_detection": {"name": ["detection"]}},
         )["pet_detection"]["detection"]
 
+    def getPackageDetection(self):
+        return self.executeFunction(
+            "getPackageDetectionConfig",
+            {"package_detection": {"name": ["detection"]}},
+        )["package_detection"]["detection"]
+
     def setPetDetection(self, enabled, sensitivity=False):
         data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
@@ -1690,6 +1696,17 @@ class Tapo:
             )
 
         return self.executeFunction("setPetDetectionConfig", data)
+
+    def setPackageDetection(self, enabled, sensitivity=False):
+        data = {
+            "package_detection": {"detection": {"enabled": "on" if enabled else "off"}}
+        }
+        if sensitivity:
+            if int(sensitivity) < 1 or int(sensitivity) > 100:
+                raise Exception("Sensitivity has to be between 1 and 100.")
+            data["package_detection"]["detection"]["sensitivity"] = sensitivity
+
+        return self.executeFunction("setPackageDetectionConfig", data)
 
     def testUsrDefAudio(self, id: int, enabled: bool, force: int = 1):
         if enabled:
@@ -2201,6 +2218,10 @@ class Tapo:
                     {
                         "method": "getPetDetectionConfig",
                         "params": {"pet_detection": {"name": ["detection"]}},
+                    },
+                    {
+                        "method": "getPackageDetectionConfig",
+                        "params": {"package_detection": {"name": ["detection"]}},
                     },
                     {
                         "method": "getBarkDetectionConfig",
