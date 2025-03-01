@@ -596,6 +596,8 @@ class Tapo:
             or ("error_code" in data and data["error_code"] == 0)
         ):
             return data["result"]
+        elif "method" in data and "error_code" in data and data["error_code"] == 0:
+            return data
         else:
             if "error_code" in data and data["error_code"] == -64303 and retry is False:
                 self.setCruise(False)
@@ -1596,9 +1598,16 @@ class Tapo:
         )  # pragma: no cover
 
     def setLEDEnabled(self, enabled):
-        return self.executeFunction(
-            "setLedStatus", {"led": {"config": {"enabled": "on" if enabled else "off"}}}
-        )
+        if self.isKLAP:
+            return self.executeFunction(
+                "set_led_off",
+                {"led_off": 0 if enabled else 1},
+            )
+        else:
+            return self.executeFunction(
+                "setLedStatus",
+                {"led": {"config": {"enabled": "on" if enabled else "off"}}},
+            )
 
     def getUserID(self, forceReload=False):
         if not self.userID or forceReload is True:
