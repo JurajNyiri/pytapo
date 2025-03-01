@@ -906,6 +906,12 @@ class Tapo:
             {"battery": {"config": params}},
         )
 
+    def setWakeUpConfig(self, wakeUpType):
+        if wakeUpType == "doorbell" or wakeUpType == "detection":
+            return self.executeFunction(
+                "setWakeUpConfig", {"wake_up": {"config": {"wake_up_type": wakeUpType}}}
+            )
+
     def setChimeRingPlan(self, enabled=None, ringPlan=None):
         params = {}
         if enabled is None or ringPlan is None:
@@ -949,6 +955,9 @@ class Tapo:
 
     def getRingStatus(self):
         return self.executeFunction("getRingStatus", {"ring": {"name": "status"}})
+
+    def getWakeUpConfig(self):
+        return self.executeFunction("getWakeUpConfig", {"wake_up": {"name": "config"}})
 
     def getChimeCtrlList(self):
         return self.executeFunction(
@@ -1977,6 +1986,11 @@ class Tapo:
     def getBatteryConfig(self):
         return self.executeFunction("getBatteryConfig", {"battery": {"name": "config"}})
 
+    def getBatteryCapability(self):
+        return self.executeFunction(
+            "getBatteryCapability", {"battery": {"name": "capability"}}
+        )
+
     @staticmethod
     def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
@@ -2281,6 +2295,14 @@ class Tapo:
                     {
                         "method": "getBatteryConfig",
                         "params": {"battery": {"name": "config"}},
+                    },
+                    {
+                        "method": "getWakeUpConfig",
+                        "params": {"wake_up": {"name": "config"}},
+                    },
+                    {
+                        "method": "getBatteryCapability",
+                        "params": {"battery": {"name": "capability"}},
                     },
                 ]
             },
