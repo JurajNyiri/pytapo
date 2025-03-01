@@ -892,6 +892,14 @@ class Tapo:
             {"ring": {"status": params}},
         )
 
+    def setBatteryPowerSave(self, enabled):
+        params = {"enabled": "auto" if enabled else "off"}
+
+        return self.executeFunction(
+            "setBatteryPowerSave",
+            {"battery": {"power_save": params}},
+        )
+
     def setBatteryConfig(self, showOnLiveView=None, showPercentage=None):
         params = {}
 
