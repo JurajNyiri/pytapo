@@ -703,11 +703,22 @@ class Tapo:
             fullRequest = requestData
 
         if self.isKLAP:
-
             responseJSON = self.executeAsyncExecutorJob(
                 self.sendKlapRequest, fullRequest
             )
             res = None
+            if (
+                "result" in responseJSON
+                and "responses" in responseJSON["result"]
+                and len(responseJSON["result"]["responses"]) == 1
+            ):
+                if not self.responseIsOK(res, responseJSON["result"]["responses"][0]):
+                    raise Exception(
+                        "Error: {}, Response: {}".format(
+                            self.getErrorMessage(responseJSON["error_code"]),
+                            json.dumps(responseJSON),
+                        )
+                    )
         else:
             if self.seq is not None and self.isSecureConnection():
                 fullRequest = {
@@ -795,8 +806,19 @@ class Tapo:
                     responses.append(response["result"])  # not sure if needed
             responseJSON["result"]["responses"] = responses
             return responseJSON["result"]["responses"][0]
-        elif self.responseIsOK(res):
-            return responseJSON
+        else:
+            if self.isKLAP:
+                if self.responseIsOK(res, responseJSON):
+                    return responseJSON
+                else:
+                    raise Exception(
+                        "Error: {}, Response: {}".format(
+                            self.getErrorMessage(responseJSON["error_code"]),
+                            json.dumps(responseJSON),
+                        )
+                    )
+            elif self.responseIsOK(res):
+                return responseJSON
 
     def getMediaSession(self):
         return HttpMediaSession(
