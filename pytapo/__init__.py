@@ -1937,6 +1937,24 @@ class Tapo:
     def getBatteryStatus(self):
         return self.executeFunction("getBatteryStatus", {"battery": {"name": "status"}})
 
+    def getBatteryPowerSave(self):
+        return self.executeFunction(
+            "getBatteryPowerSave", {"battery": {"name": "power_save"}}
+        )
+
+    def getBatteryOperatingMode(self):
+        return self.executeFunction(
+            "getBatteryOperatingMode", {"battery": {"name": "operating"}}
+        )
+
+    def getChargingMode(self):
+        return self.executeFunction(
+            "getChargingMode", {"battery": {"name": "charging_mode"}}
+        )
+
+    def getPowerMode(self):
+        return self.executeFunction("getPowerMode", {"battery": {"name": "power"}})
+
     @staticmethod
     def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
@@ -2217,6 +2235,22 @@ class Tapo:
                     {
                         "method": "getChimeCtrlList",
                         "params": {"chime_ctrl": {"get_paired_device_list": {}}},
+                    },
+                    {
+                        "method": "getBatteryPowerSave",
+                        "params": {"battery": {"name": "power_save"}},
+                    },
+                    {
+                        "method": "getBatteryOperatingMode",
+                        "params": {"battery": {"name": "operating"}},
+                    },
+                    {
+                        "method": "getPowerMode",
+                        "params": {"battery": {"name": "power"}},
+                    },
+                    {
+                        "method": "getChargingMode",
+                        "params": {"battery": {"name": "charging_mode"}},
                     },
                 ]
             },
