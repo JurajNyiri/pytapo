@@ -1987,6 +1987,12 @@ class Tapo:
             "getBatteryOperatingMode", {"battery": {"name": "operating"}}
         )
 
+    def getBatteryOperatingModeParam(self):
+        return self.executeFunction(
+            "getBatteryOperatingModeParam",
+            {"battery": {"name": "operating_mode_param"}},
+        )
+
     def getChargingMode(self):
         return self.executeFunction(
             "getChargingMode", {"battery": {"name": "charging_mode"}}
@@ -2299,6 +2305,10 @@ class Tapo:
                     {
                         "method": "getBatteryOperatingMode",
                         "params": {"battery": {"name": "operating"}},
+                    },
+                    {
+                        "method": "getBatteryOperatingModeParam",
+                        "params": {"battery": {"name": "operating_mode_param"}},
                     },
                     {
                         "method": "getPowerMode",
