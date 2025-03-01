@@ -922,6 +922,9 @@ class Tapo:
 
     def getRingStatus(self):
         return self.executeFunction("getRingStatus", {"ring": {"name": "status"}})
+    
+    def getChimeCtrlList(self):
+        return self.executeFunction("getChimeCtrlList", {"chime_ctrl": {"get_paired_device_list":{}}})
 
     def setHubSirenStatus(self, status):
         return self.executeFunction(
@@ -2192,6 +2195,7 @@ class Tapo:
                         "params": {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}},
                     },
                     {"method": "getRingStatus", "params": {"ring": {"name": "status"}}},
+                    {"method": "getChimeCtrlList", "params": {"chime_ctrl": {"get_paired_device_list": {}}}},
                 ]
             },
         }
