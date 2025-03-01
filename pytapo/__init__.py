@@ -906,6 +906,18 @@ class Tapo:
             {"battery": {"config": params}},
         )
 
+    def setPirSensitivity(self, sensitivity: int):
+        params = {"sensitivity": str(sensitivity)}
+
+        if sensitivity >= 10 and sensitivity <= 100:
+            return self.executeFunction(
+                "setPirSensitivity",
+                {"pir": {"config": params}},
+            )
+
+        else:
+            raise Exception("PIR sensitivity has to be between 10 and 100")
+
     def setWakeUpConfig(self, wakeUpType):
         if wakeUpType == "doorbell" or wakeUpType == "detection":
             return self.executeFunction(
