@@ -892,6 +892,20 @@ class Tapo:
             {"ring": {"status": params}},
         )
 
+    def setBatteryConfig(self, showOnLiveView=None, showPercentage=None):
+        params = {}
+
+        if showOnLiveView is not None:
+            params["show_on_liveview"] = "on" if showOnLiveView else "off"
+
+        if showPercentage is not None:
+            params["show_percentage"] = "on" if showPercentage else "off"
+
+        return self.executeFunction(
+            "setBatteryConfig",
+            {"battery": {"config": params}},
+        )
+
     def setChimeRingPlan(self, enabled=None, ringPlan=None):
         params = {}
         if enabled is None or ringPlan is None:
@@ -1959,12 +1973,10 @@ class Tapo:
         return self.executeFunction(
             "getBatteryStatistic", {"battery": {"statistic": {"days": 30}}}
         )
-    
+
     def getBatteryConfig(self):
-        return self.executeFunction(
-            "getBatteryConfig", {"battery": {"name": "config"}}
-        )
-    
+        return self.executeFunction("getBatteryConfig", {"battery": {"name": "config"}})
+
     @staticmethod
     def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
