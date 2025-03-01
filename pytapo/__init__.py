@@ -2131,6 +2131,9 @@ class Tapo:
     def getChimeAlarmConfigure(self, macAddress):
         return self.executeFunction("get_chime_alarm_configure", {"mac": macAddress})
 
+    def getSupportAlarmTypeList(self):
+        return self.executeFunction("get_support_alarm_type_list", None)
+
     def setChimeAlarmConfigure(
         self, macAddress, enabled=None, type=None, volume=None, duration=None
     ):
@@ -2255,6 +2258,7 @@ class Tapo:
                             "method": "get_device_info",
                         },
                         {"method": "get_pair_list"},
+                        {"method": "get_support_alarm_type_list"},
                     ]
                 },
             }
