@@ -183,7 +183,7 @@ class Tapo:
             response = await self.klapTransport.send(json.dumps(request))
             return response
         except Exception as err:
-            LOGGER.warning(err)
+            LOGGER.warning("Retrying request... Error: " + err)
             if self.klapTransport is not None:
                 await self.klapTransport.close()
                 self.klapTransport = None
@@ -705,12 +705,9 @@ class Tapo:
 
         if self.isKLAP:
 
-            LOGGER.warning("requesting")
             responseJSON = self.executeAsyncExecutorJob(
                 self.sendKlapRequest, fullRequest
             )
-
-            LOGGER.warning("finished")
             res = None
         else:
             if self.seq is not None and self.isSecureConnection():
