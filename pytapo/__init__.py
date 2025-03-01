@@ -110,6 +110,9 @@ class Tapo:
             self.deviceType = self.basicInfo["device_info"]["basic_info"]["device_type"]
         else:
             raise Exception("Failed to detect device type.")
+        if self.deviceType == "SMART.TAPOCHIME":
+            self.pairList = self.getPairList()
+
         self.presets = self.isSupportingPresets()
         if not self.presets:
             self.presets = {}
@@ -2125,6 +2128,27 @@ class Tapo:
             "getChimeRingPlan", {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}}
         )
 
+    def getChimeAlarmConfigure(self, macAddress):
+        return self.executeFunction("get_chime_alarm_configure", {"mac": macAddress})
+
+    def setChimeAlarmConfigure(
+        self, macAddress, enabled=None, type=None, volume=None, duration=None
+    ):
+        if duration is not None and (duration < 5 or duration > 30):
+            raise Exception("Duration has to be between 5 and 30.")
+        if volume is not None and (volume < 1 or volume > 15):
+            raise Exception("Volume has to be between 1 and 15.")
+        params = {"mac": macAddress}
+        if enabled is not None:
+            params["on_off"] = 1 if enabled else 0
+        if type is not None:
+            params["type"] = str(type)
+        if volume is not None:
+            params["volume"] = str(volume)
+        if duration is not None:
+            params["duration"] = int(duration)
+        return self.executeFunction("set_chime_alarm_configure", params)
+
     def getBatteryStatus(self):
         return self.executeFunction("getBatteryStatus", {"battery": {"name": "status"}})
 
@@ -2589,5 +2613,13 @@ class Tapo:
                 )
         elif self.deviceType != "SMART.TAPOCHIME":
             raise Exception("Unexpected number of getPresetConfig responses")
+
+        if "get_device_info" in returnData:
+            self.basicInfo = returnData["get_device_info"]
+        elif "getDeviceInfo" in returnData:
+            self.basicInfo = returnData["getDeviceInfo"]
+
+        if "get_pair_list" in returnData:
+            self.pairList = returnData["get_pair_list"]
 
         return returnData
