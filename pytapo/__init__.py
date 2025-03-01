@@ -6,6 +6,12 @@ import json
 import requests
 import base64
 import copy
+import asyncio
+
+from kasa.transports import KlapTransportV2, KlapTransport
+from kasa.exceptions import AuthenticationError
+from kasa import DeviceConfig
+from kasa import Credentials
 
 from datetime import datetime
 from warnings import warn
@@ -58,6 +64,8 @@ class Tapo:
         self.lsk = None
         self.cnonce = None
         self.ivb = None
+        self.isKLAP = self._isKLAP()
+        self.klapTransport = None
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
@@ -111,8 +119,54 @@ class Tapo:
     def getStreamURL(self):
         return "{host}:{streamPort}".format(host=self.host, streamPort=self.streamPort)
 
+    def _isKLAP(self, timeout=2):
+        try:
+            url = f"http://{self.host}:{self.controlPort}"
+            response = requests.get(url, timeout=timeout)
+            return "200 OK" in response.text
+        except requests.RequestException:
+            return False
+
+    async def initiateKlapTransport(self, version=1):
+        try:
+            creds = Credentials(self.user, self.password)
+            config = DeviceConfig(
+                self.host, port_override=self.controlPort, credentials=creds
+            )
+            if version == 1:
+                transport = KlapTransport(config=config)
+            elif version == 2:
+                transport = KlapTransportV2(config=config)
+            await transport.perform_handshake()
+            self.klapTransport = transport
+            return self.klapTransport
+        finally:
+            await transport.close()
+
+    async def sendKlapRequest(self, request):
+        try:
+            if self.klapTransport is None:
+                await self.ensureAuthenticated()
+            response = await self.klapTransport.send(json.dumps(request))
+            return response
+        finally:
+            await self.klapTransport.close()
+
     def ensureAuthenticated(self):
-        if not self.stok:
+        if self.isKLAP:
+            if self.klapTransport is None:
+                try:
+                    asyncio.run(self.initiateKlapTransport(1))
+                except AuthenticationError:
+                    try:
+                        asyncio.run(self.initiateKlapTransport(2))
+                    except AuthenticationError:
+                        raise Exception("Invalid authentication data")
+                    except Exception as err:
+                        raise err
+                except Exception as err:
+                    raise err
+        elif not self.stok:
             return self.refreshStok()
         return True
 
@@ -472,10 +526,15 @@ class Tapo:
             raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res, data=None):
-        if (res.status_code != 200 and not self.isSecureConnection()) or (
-            res.status_code != 200
-            and res.status_code != 500
-            and self.isSecureConnection()  # pass responseIsOK for secure connections 500 which are communicating expiring session
+        if res is None and self.isKLAP is True and data is None:
+            return True
+        if res is not None and (
+            (res.status_code != 200 and not self.isSecureConnection())
+            or (
+                res.status_code != 200
+                and res.status_code != 500
+                and self.isSecureConnection()  # pass responseIsOK for secure connections 500 which are communicating expiring session
+            )
         ):
             raise Exception(
                 "Error communicating with Tapo Camera. Status code: "
@@ -573,56 +632,60 @@ class Tapo:
         else:
             fullRequest = requestData
 
-        if self.seq is not None and self.isSecureConnection():
-            fullRequest = {
-                "method": "securePassthrough",
-                "params": {
-                    "request": base64.b64encode(
-                        self.encryptRequest(json.dumps(fullRequest).encode("utf-8"))
-                    ).decode("utf8")
-                },
-            }
-            self.headers["Seq"] = str(self.seq)
-            try:
-                self.headers["Tapo_tag"] = self.getTag(fullRequest)
-            except Exception as err:
-                if str(err) == "Failure detecting hashing algorithm.":
-                    authValid = False
-                    self.debugLog(
-                        "Failure detecting hashing algorithm on getTag, reauthenticating."
-                    )
-                else:
-                    raise err
-            self.seq += 1
-
-        res = self.request(
-            "POST",
-            url,
-            data=json.dumps(fullRequest),
-            headers=self.headers,
-            verify=False,
-        )
-        responseData = res.json()
-        if (
-            self.isSecureConnection()
-            and "result" in responseData
-            and "response" in responseData["result"]
-        ):
-            encryptedResponse = responseData["result"]["response"]
-            encryptedResponse = base64.b64decode(responseData["result"]["response"])
-            try:
-                responseJSON = json.loads(self.decryptResponse(encryptedResponse))
-            except Exception as err:
-                if (
-                    str(err) == "Padding is incorrect."
-                    or str(err) == "PKCS#7 padding is incorrect."
-                ):
-                    self.debugLog(f"{str(err)} Reauthenticating.")
-                    authValid = False
-                else:
-                    raise err
+        if self.isKLAP:
+            responseJSON = asyncio.run(self.sendKlapRequest(fullRequest))
+            res = None
         else:
-            responseJSON = res.json()
+            if self.seq is not None and self.isSecureConnection():
+                fullRequest = {
+                    "method": "securePassthrough",
+                    "params": {
+                        "request": base64.b64encode(
+                            self.encryptRequest(json.dumps(fullRequest).encode("utf-8"))
+                        ).decode("utf8")
+                    },
+                }
+                self.headers["Seq"] = str(self.seq)
+                try:
+                    self.headers["Tapo_tag"] = self.getTag(fullRequest)
+                except Exception as err:
+                    if str(err) == "Failure detecting hashing algorithm.":
+                        authValid = False
+                        self.debugLog(
+                            "Failure detecting hashing algorithm on getTag, reauthenticating."
+                        )
+                    else:
+                        raise err
+                self.seq += 1
+
+            res = self.request(
+                "POST",
+                url,
+                data=json.dumps(fullRequest),
+                headers=self.headers,
+                verify=False,
+            )
+            responseData = res.json()
+            if (
+                self.isSecureConnection()
+                and "result" in responseData
+                and "response" in responseData["result"]
+            ):
+                encryptedResponse = responseData["result"]["response"]
+                encryptedResponse = base64.b64decode(responseData["result"]["response"])
+                try:
+                    responseJSON = json.loads(self.decryptResponse(encryptedResponse))
+                except Exception as err:
+                    if (
+                        str(err) == "Padding is incorrect."
+                        or str(err) == "PKCS#7 padding is incorrect."
+                    ):
+                        self.debugLog(f"{str(err)} Reauthenticating.")
+                        authValid = False
+                    else:
+                        raise err
+            else:
+                responseJSON = res.json()
         if not authValid or not self.responseIsOK(res, responseJSON):
             #  -40401: Invalid Stok
             if (
@@ -1348,9 +1411,12 @@ class Tapo:
         )
 
     def getBasicInfo(self):
-        return self.executeFunction(
-            "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
-        )
+        if self.isKLAP:
+            return self.executeFunction("get_device_info", None)
+        else:
+            return self.executeFunction(
+                "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
+            )
 
     def getTime(self):
         return self.executeFunction(
