@@ -50,6 +50,7 @@ class Tapo:
         retryStok=True,
         redactConfidentialInformation=True,
         streamPort=8880,
+        isKLAP=None,
     ):
         self.retryStok = retryStok
         self.redactConfidentialInformation = redactConfidentialInformation
@@ -64,7 +65,10 @@ class Tapo:
         self.lsk = None
         self.cnonce = None
         self.ivb = None
-        self.isKLAP = self._isKLAP()
+        if isKLAP is not None:
+            self.isKLAP = isKLAP
+        else:
+            self.isKLAP = self._isKLAP()
         self.klapTransport = None
         self.user = user
         self.password = password
