@@ -2361,6 +2361,14 @@ class Tapo:
                     ]
                 },
             }
+
+            for macAddress in self.pairList["mac_list"]:
+                requestData["params"]["requests"].append(
+                    {
+                        "method": "get_chime_alarm_configure",
+                        "params": {"mac": macAddress},
+                    }
+                )
         else:
             requestData = {
                 "method": "multipleRequest",
@@ -2723,6 +2731,6 @@ class Tapo:
             self.basicInfo = returnData["getDeviceInfo"]
 
         if "get_pair_list" in returnData:
-            self.pairList = returnData["get_pair_list"]
+            self.pairList = returnData["get_pair_list"][0]
 
         return returnData
