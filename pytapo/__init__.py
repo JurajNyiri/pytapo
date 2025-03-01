@@ -51,6 +51,7 @@ class Tapo:
         redactConfidentialInformation=True,
         streamPort=8880,
         isKLAP=None,
+        KLAPVersion=None,
     ):
         self.retryStok = retryStok
         self.redactConfidentialInformation = redactConfidentialInformation
@@ -69,6 +70,10 @@ class Tapo:
             self.isKLAP = isKLAP
         else:
             self.isKLAP = self._isKLAP()
+        if KLAPVersion is not None:
+            self.KLAPVersion = KLAPVersion
+        else:
+            self.KLAPVersion = None
         self.klapTransport = None
         self.user = user
         self.password = password
@@ -146,6 +151,8 @@ class Tapo:
 
     async def initiateKlapTransport(self, version=1):
         try:
+            if self.klapTransport is not None:
+                await self.klapTransport.close()
             creds = Credentials(self.user, self.password)
             config = DeviceConfig(
                 self.host, port_override=self.controlPort, credentials=creds
@@ -160,29 +167,57 @@ class Tapo:
         finally:
             await transport.close()
 
-    async def sendKlapRequest(self, request):
+    async def sendKlapRequest(self, request, retry=0):
         try:
             if self.klapTransport is None:
                 await self.ensureAuthenticated()
             response = await self.klapTransport.send(json.dumps(request))
             return response
+        except Exception as err:
+            if self.klapTransport is not None:
+                await self.klapTransport.close()
+                self.klapTransport = None
+            self.ensureAuthenticated()
+            if retry < 5:
+                return await self.sendKlapRequest(request, retry + 1)
+            else:
+                raise Exception("PyTapo KLAP Error #1: " + str(err))
         finally:
-            await self.klapTransport.close()
+            if self.klapTransport is not None:
+                await self.klapTransport.close()
 
     def ensureAuthenticated(self):
         if self.isKLAP:
             if self.klapTransport is None:
-                try:
-                    asyncio.run(self.initiateKlapTransport(1))
-                except AuthenticationError:
+                if self.KLAPVersion is None:
                     try:
-                        asyncio.run(self.initiateKlapTransport(2))
+                        asyncio.run(self.initiateKlapTransport(1))
+                        self.KLAPVersion = 1
                     except AuthenticationError:
-                        raise Exception("Invalid authentication data")
+                        try:
+                            asyncio.run(self.initiateKlapTransport(2))
+                            self.KLAPVersion = 2
+                        except AuthenticationError:
+                            raise Exception("Invalid authentication data")
+                        except Exception as err:
+                            raise Exception("PyTapo KLAP Error #2: " + str(err))
                     except Exception as err:
-                        raise err
-                except Exception as err:
-                    raise err
+                        raise Exception("PyTapo KLAP Error #3: " + str(err))
+                else:
+                    if self.KLAPVersion == 1:
+                        try:
+                            asyncio.run(self.initiateKlapTransport(1))
+                        except AuthenticationError:
+                            raise Exception("Invalid authentication data")
+                        except Exception as err:
+                            raise Exception("PyTapo KLAP Error #4: " + str(err))
+                    elif self.KLAPVersion == 2:
+                        try:
+                            asyncio.run(self.initiateKlapTransport(2))
+                        except AuthenticationError:
+                            raise Exception("Invalid authentication data")
+                        except Exception as err:
+                            raise Exception("PyTapo KLAP Error #5: " + str(err))
         elif not self.stok:
             return self.refreshStok()
         return True
