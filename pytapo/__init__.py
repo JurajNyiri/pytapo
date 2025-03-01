@@ -892,6 +892,13 @@ class Tapo:
             {"ring": {"status": params}},
         )
 
+    def setChargingMode(self, chargingPrivacyMode):
+        params = {"charging_privacy_mode": "on" if chargingPrivacyMode else "off"}
+
+        return self.executeFunction(
+            "setChargingMode", {"battery": {"charging_mode": params}}
+        )
+
     def setBatteryPowerSave(self, enabled):
         params = {"enabled": "auto" if enabled else "off"}
 
