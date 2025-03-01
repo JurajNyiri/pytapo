@@ -100,6 +100,16 @@ class Tapo:
         self.session = False
 
         self.basicInfo = self.getBasicInfo()
+        if "type" in self.basicInfo:
+            self.deviceType = self.basicInfo["type"]
+        elif (
+            "device_info" in self.basicInfo
+            and "basic_info" in self.basicInfo["device_info"]
+            and "device_type" in self.basicInfo["device_info"]["basic_info"]
+        ):
+            self.deviceType = self.basicInfo["device_info"]["basic_info"]["device_type"]
+        else:
+            raise Exception("Failed to detect device type.")
         self.presets = self.isSupportingPresets()
         if not self.presets:
             self.presets = {}
@@ -1098,7 +1108,6 @@ class Tapo:
             "getChimeCtrlList", {"chime_ctrl": {"get_paired_device_list": {}}}
         )
 
-    ### TODO: Test for chime
     def getPairList(self):
         return self.executeFunction("get_pair_list", None)
 
@@ -2213,288 +2222,308 @@ class Tapo:
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
     def getMost(self, omit_methods=[]):
-        requestData = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [
-                    {
-                        "method": "getFloodlightStatus",
-                        "params": {"floodlight": {"get_floodlight_status": ""}},
-                    },
-                    {
-                        "method": "getFloodlightConfig",
-                        "params": {"floodlight": {"name": "config"}},
-                    },
-                    {
-                        "method": "getFloodlightCapability",
-                        "params": {"floodlight": {"name": "capability"}},
-                    },
-                    {
-                        "method": "getPirDetCapability",
-                        "params": {"pir_detection": {"name": "pir_capability"}},
-                    },
-                    {
-                        "method": "getPirDetConfig",
-                        "params": {"pir_detection": {"name": "pir_det"}},
-                    },
-                    {
-                        "method": "getAlertEventType",
-                        "params": {"msg_alarm": {"table": "msg_alarm_type"}},
-                    },
-                    {
-                        "method": "getDstRule",
-                        "params": {"system": {"name": "dst"}},
-                    },
-                    {
-                        "method": "getClockStatus",
-                        "params": {"system": {"name": "clock_status"}},
-                    },
-                    {
-                        "method": "getTimezone",
-                        "params": {"system": {"name": ["basic"]}},
-                    },
-                    {
-                        "method": "getAlertTypeList",
-                        "params": {"msg_alarm": {"name": "alert_type"}},
-                    },
-                    {
-                        "method": "getNightVisionCapability",
-                        "params": {"image_capability": {"name": ["supplement_lamp"]}},
-                    },
-                    {
-                        "method": "getDeviceInfo",
-                        "params": {"device_info": {"name": ["basic_info"]}},
-                    },
-                    {
-                        "method": "getDetectionConfig",
-                        "params": {"motion_detection": {"name": ["motion_det"]}},
-                    },
-                    {
-                        "method": "getPersonDetectionConfig",
-                        "params": {"people_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getVehicleDetectionConfig",
-                        "params": {"vehicle_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getBCDConfig",
-                        "params": {"sound_detection": {"name": ["bcd"]}},
-                    },
-                    {
-                        "method": "getPetDetectionConfig",
-                        "params": {"pet_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getPackageDetectionConfig",
-                        "params": {"package_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getBarkDetectionConfig",
-                        "params": {"bark_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getMeowDetectionConfig",
-                        "params": {"meow_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getGlassDetectionConfig",
-                        "params": {"glass_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getTamperDetectionConfig",
-                        "params": {"tamper_detection": {"name": "tamper_det"}},
-                    },
-                    {
-                        "method": "getLensMaskConfig",
-                        "params": {"lens_mask": {"name": ["lens_mask_info"]}},
-                    },
-                    {
-                        "method": "getLdc",
-                        "params": {"image": {"name": ["switch", "common"]}},
-                    },
-                    {
-                        "method": "getLastAlarmInfo",
-                        "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
-                    },
-                    {
-                        "method": "getLedStatus",
-                        "params": {"led": {"name": ["config"]}},
-                    },
-                    {
-                        "method": "getTargetTrackConfig",
-                        "params": {"target_track": {"name": ["target_track_info"]}},
-                    },
-                    {
-                        "method": "getPresetConfig",
-                        "params": {"preset": {"name": ["preset"]}},
-                    },
-                    {
-                        "method": "getFirmwareUpdateStatus",
-                        "params": {"cloud_config": {"name": "upgrade_status"}},
-                    },
-                    {
-                        "method": "getMediaEncrypt",
-                        "params": {"cet": {"name": ["media_encrypt"]}},
-                    },
-                    {
-                        "method": "getConnectionType",
-                        "params": {"network": {"get_connection_type": []}},
-                    },
-                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
-                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
-                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
-                    {"method": "getSirenTypeList", "params": {"siren": {}}},
-                    {"method": "getSirenConfig", "params": {"siren": {}}},
-                    {
-                        "method": "getAlertConfig",
-                        "params": {
-                            "msg_alarm": {
-                                "name": ["chn1_msg_alarm_info", "capability"],
-                                "table": ["usr_def_audio"],
-                            }
+        if self.deviceType == "SMART.TAPOCHIME":
+            requestData = {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "get_device_info",
                         },
-                    },
-                    {
-                        "method": "getAlertConfig",
-                        "params": {
-                            "msg_alarm": {
-                                "name": ["chn1_msg_alarm_info"],
-                                "table": ["usr_def_audio"],
-                            }
+                        {"method": "get_pair_list"},
+                    ]
+                },
+            }
+        else:
+            requestData = {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "getFloodlightStatus",
+                            "params": {"floodlight": {"get_floodlight_status": ""}},
                         },
-                    },
-                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
-                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
-                    {"method": "getSirenStatus", "params": {"siren": {}}},
-                    {
-                        "method": "getLightFrequencyInfo",
-                        "params": {"image": {"name": "common"}},
-                    },
-                    {
-                        "method": "getLightFrequencyCapability",
-                        "params": {"image": {"name": "common"}},
-                    },
-                    {
-                        "method": "getChildDeviceList",
-                        "params": {"childControl": {"start_index": 0}},
-                    },
-                    {
-                        "method": "getRotationStatus",
-                        "params": {"image": {"name": ["switch"]}},
-                    },
-                    {
-                        "method": "getNightVisionModeConfig",
-                        "params": {"image": {"name": "switch"}},
-                    },
-                    {
-                        "method": "getWhitelampStatus",
-                        "params": {"image": {"get_wtl_status": ["null"]}},
-                    },
-                    {
-                        "method": "getWhitelampConfig",
-                        "params": {"image": {"name": "switch"}},
-                    },
-                    {
-                        "method": "getMsgPushConfig",
-                        "params": {"msg_push": {"name": ["chn1_msg_push_info"]}},
-                    },
-                    {
-                        "method": "getSdCardStatus",
-                        "params": {"harddisk_manage": {"table": ["hd_info"]}},
-                    },
-                    {
-                        "method": "getCircularRecordingConfig",
-                        "params": {"harddisk_manage": {"name": "harddisk"}},
-                    },
-                    {
-                        "method": "getRecordPlan",
-                        "params": {"record_plan": {"name": ["chn1_channel"]}},
-                    },
-                    {
-                        "method": "getAudioConfig",
-                        "params": {
-                            "audio_config": {"name": ["speaker", "microphone"]},
+                        {
+                            "method": "getFloodlightConfig",
+                            "params": {"floodlight": {"name": "config"}},
                         },
-                    },
-                    {
-                        "method": "getFirmwareAutoUpgradeConfig",
-                        "params": {
-                            "auto_upgrade": {"name": ["common"]},
+                        {
+                            "method": "getFloodlightCapability",
+                            "params": {"floodlight": {"name": "capability"}},
                         },
-                    },
-                    {
-                        "method": "getVideoQualities",
-                        "params": {"video": {"name": ["main"]}},
-                    },
-                    {
-                        "method": "getVideoCapability",
-                        "params": {"video_capability": {"name": "main"}},
-                    },
-                    {
-                        "method": "getQuickRespList",
-                        "params": {"quick_response": {}},
-                    },
-                    {
-                        "method": "getChimeRingPlan",
-                        "params": {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}},
-                    },
-                    {"method": "getRingStatus", "params": {"ring": {"name": "status"}}},
-                    {
-                        "method": "getChimeCtrlList",
-                        "params": {"chime_ctrl": {"get_paired_device_list": {}}},
-                    },
-                    {
-                        "method": "getBatteryPowerSave",
-                        "params": {"battery": {"name": "power_save"}},
-                    },
-                    {
-                        "method": "getBatteryOperatingMode",
-                        "params": {"battery": {"name": "operating"}},
-                    },
-                    {
-                        "method": "getBatteryOperatingModeParam",
-                        "params": {"battery": {"name": "operating_mode_param"}},
-                    },
-                    {
-                        "method": "getPowerMode",
-                        "params": {"battery": {"name": "power"}},
-                    },
-                    {
-                        "method": "getChargingMode",
-                        "params": {"battery": {"name": "charging_mode"}},
-                    },
-                    {
-                        "method": "getBatteryStatistic",
-                        "params": {"battery": {"statistic": {"days": 30}}},
-                    },
-                    {
-                        "method": "getBatteryConfig",
-                        "params": {"battery": {"name": "config"}},
-                    },
-                    {
-                        "method": "getWakeUpConfig",
-                        "params": {"wake_up": {"name": "config"}},
-                    },
-                    {
-                        "method": "getBatteryCapability",
-                        "params": {"battery": {"name": "capability"}},
-                    },
-                    {
-                        "method": "getHubStorage",
-                        "params": {"hub_manage": {"name": "hub_storage_info"}},
-                    },
-                    {
-                        "method": "getPirSensitivity",
-                        "params": {"pir": {"name": "config"}},
-                    },
-                    {
-                        "method": "getClipsConfig",
-                        "params": {"clips": {"name": "config"}},
-                    },
-                ]
-            },
-        }
+                        {
+                            "method": "getPirDetCapability",
+                            "params": {"pir_detection": {"name": "pir_capability"}},
+                        },
+                        {
+                            "method": "getPirDetConfig",
+                            "params": {"pir_detection": {"name": "pir_det"}},
+                        },
+                        {
+                            "method": "getAlertEventType",
+                            "params": {"msg_alarm": {"table": "msg_alarm_type"}},
+                        },
+                        {
+                            "method": "getDstRule",
+                            "params": {"system": {"name": "dst"}},
+                        },
+                        {
+                            "method": "getClockStatus",
+                            "params": {"system": {"name": "clock_status"}},
+                        },
+                        {
+                            "method": "getTimezone",
+                            "params": {"system": {"name": ["basic"]}},
+                        },
+                        {
+                            "method": "getAlertTypeList",
+                            "params": {"msg_alarm": {"name": "alert_type"}},
+                        },
+                        {
+                            "method": "getNightVisionCapability",
+                            "params": {
+                                "image_capability": {"name": ["supplement_lamp"]}
+                            },
+                        },
+                        {
+                            "method": "getDeviceInfo",
+                            "params": {"device_info": {"name": ["basic_info"]}},
+                        },
+                        {
+                            "method": "getDetectionConfig",
+                            "params": {"motion_detection": {"name": ["motion_det"]}},
+                        },
+                        {
+                            "method": "getPersonDetectionConfig",
+                            "params": {"people_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getVehicleDetectionConfig",
+                            "params": {"vehicle_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getBCDConfig",
+                            "params": {"sound_detection": {"name": ["bcd"]}},
+                        },
+                        {
+                            "method": "getPetDetectionConfig",
+                            "params": {"pet_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getPackageDetectionConfig",
+                            "params": {"package_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getBarkDetectionConfig",
+                            "params": {"bark_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getMeowDetectionConfig",
+                            "params": {"meow_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getGlassDetectionConfig",
+                            "params": {"glass_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getTamperDetectionConfig",
+                            "params": {"tamper_detection": {"name": "tamper_det"}},
+                        },
+                        {
+                            "method": "getLensMaskConfig",
+                            "params": {"lens_mask": {"name": ["lens_mask_info"]}},
+                        },
+                        {
+                            "method": "getLdc",
+                            "params": {"image": {"name": ["switch", "common"]}},
+                        },
+                        {
+                            "method": "getLastAlarmInfo",
+                            "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                        },
+                        {
+                            "method": "getLedStatus",
+                            "params": {"led": {"name": ["config"]}},
+                        },
+                        {
+                            "method": "getTargetTrackConfig",
+                            "params": {"target_track": {"name": ["target_track_info"]}},
+                        },
+                        {
+                            "method": "getPresetConfig",
+                            "params": {"preset": {"name": ["preset"]}},
+                        },
+                        {
+                            "method": "getFirmwareUpdateStatus",
+                            "params": {"cloud_config": {"name": "upgrade_status"}},
+                        },
+                        {
+                            "method": "getMediaEncrypt",
+                            "params": {"cet": {"name": ["media_encrypt"]}},
+                        },
+                        {
+                            "method": "getConnectionType",
+                            "params": {"network": {"get_connection_type": []}},
+                        },
+                        {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
+                        {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
+                        {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                        {"method": "getSirenTypeList", "params": {"siren": {}}},
+                        {"method": "getSirenConfig", "params": {"siren": {}}},
+                        {
+                            "method": "getAlertConfig",
+                            "params": {
+                                "msg_alarm": {
+                                    "name": ["chn1_msg_alarm_info", "capability"],
+                                    "table": ["usr_def_audio"],
+                                }
+                            },
+                        },
+                        {
+                            "method": "getAlertConfig",
+                            "params": {
+                                "msg_alarm": {
+                                    "name": ["chn1_msg_alarm_info"],
+                                    "table": ["usr_def_audio"],
+                                }
+                            },
+                        },
+                        {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
+                        {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                        {"method": "getSirenStatus", "params": {"siren": {}}},
+                        {
+                            "method": "getLightFrequencyInfo",
+                            "params": {"image": {"name": "common"}},
+                        },
+                        {
+                            "method": "getLightFrequencyCapability",
+                            "params": {"image": {"name": "common"}},
+                        },
+                        {
+                            "method": "getChildDeviceList",
+                            "params": {"childControl": {"start_index": 0}},
+                        },
+                        {
+                            "method": "getRotationStatus",
+                            "params": {"image": {"name": ["switch"]}},
+                        },
+                        {
+                            "method": "getNightVisionModeConfig",
+                            "params": {"image": {"name": "switch"}},
+                        },
+                        {
+                            "method": "getWhitelampStatus",
+                            "params": {"image": {"get_wtl_status": ["null"]}},
+                        },
+                        {
+                            "method": "getWhitelampConfig",
+                            "params": {"image": {"name": "switch"}},
+                        },
+                        {
+                            "method": "getMsgPushConfig",
+                            "params": {"msg_push": {"name": ["chn1_msg_push_info"]}},
+                        },
+                        {
+                            "method": "getSdCardStatus",
+                            "params": {"harddisk_manage": {"table": ["hd_info"]}},
+                        },
+                        {
+                            "method": "getCircularRecordingConfig",
+                            "params": {"harddisk_manage": {"name": "harddisk"}},
+                        },
+                        {
+                            "method": "getRecordPlan",
+                            "params": {"record_plan": {"name": ["chn1_channel"]}},
+                        },
+                        {
+                            "method": "getAudioConfig",
+                            "params": {
+                                "audio_config": {"name": ["speaker", "microphone"]},
+                            },
+                        },
+                        {
+                            "method": "getFirmwareAutoUpgradeConfig",
+                            "params": {
+                                "auto_upgrade": {"name": ["common"]},
+                            },
+                        },
+                        {
+                            "method": "getVideoQualities",
+                            "params": {"video": {"name": ["main"]}},
+                        },
+                        {
+                            "method": "getVideoCapability",
+                            "params": {"video_capability": {"name": "main"}},
+                        },
+                        {
+                            "method": "getQuickRespList",
+                            "params": {"quick_response": {}},
+                        },
+                        {
+                            "method": "getChimeRingPlan",
+                            "params": {
+                                "chime_ring_plan": {"name": "chn1_chime_ring_plan"}
+                            },
+                        },
+                        {
+                            "method": "getRingStatus",
+                            "params": {"ring": {"name": "status"}},
+                        },
+                        {
+                            "method": "getChimeCtrlList",
+                            "params": {"chime_ctrl": {"get_paired_device_list": {}}},
+                        },
+                        {
+                            "method": "getBatteryPowerSave",
+                            "params": {"battery": {"name": "power_save"}},
+                        },
+                        {
+                            "method": "getBatteryOperatingMode",
+                            "params": {"battery": {"name": "operating"}},
+                        },
+                        {
+                            "method": "getBatteryOperatingModeParam",
+                            "params": {"battery": {"name": "operating_mode_param"}},
+                        },
+                        {
+                            "method": "getPowerMode",
+                            "params": {"battery": {"name": "power"}},
+                        },
+                        {
+                            "method": "getChargingMode",
+                            "params": {"battery": {"name": "charging_mode"}},
+                        },
+                        {
+                            "method": "getBatteryStatistic",
+                            "params": {"battery": {"statistic": {"days": 30}}},
+                        },
+                        {
+                            "method": "getBatteryConfig",
+                            "params": {"battery": {"name": "config"}},
+                        },
+                        {
+                            "method": "getWakeUpConfig",
+                            "params": {"wake_up": {"name": "config"}},
+                        },
+                        {
+                            "method": "getBatteryCapability",
+                            "params": {"battery": {"name": "capability"}},
+                        },
+                        {
+                            "method": "getHubStorage",
+                            "params": {"hub_manage": {"name": "hub_storage_info"}},
+                        },
+                        {
+                            "method": "getPirSensitivity",
+                            "params": {"pir": {"name": "config"}},
+                        },
+                        {
+                            "method": "getClipsConfig",
+                            "params": {"clips": {"name": "config"}},
+                        },
+                    ]
+                },
+            }
         if len(omit_methods) != 0:
             filtered_requests = [
                 request
@@ -2553,11 +2582,12 @@ class Tapo:
                         f"Method {result['method']} has been returned more times than expected. Response: {results}"
                     )
 
-        if len(returnData["getPresetConfig"]) == 1:
+        if "getPresetConfig" in returnData and len(returnData["getPresetConfig"]) == 1:
             if returnData["getPresetConfig"][0]:
                 self.presets = self.processPresetsResponse(
                     returnData["getPresetConfig"][0]
                 )
-        else:
+        elif self.deviceType != "SMART.TAPOCHIME":
             raise Exception("Unexpected number of getPresetConfig responses")
+
         return returnData
