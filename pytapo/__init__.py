@@ -871,6 +871,14 @@ class Tapo:
             },
         )
 
+    def setRingStatus(self, enabled):
+        params = {"enabled": "on" if enabled else "off"}
+
+        return self.executeFunction(
+            "setRingStatus",
+            {"ring": {"status": params}},
+        )
+
     def setChimeRingPlan(self, enabled=None, ringPlan=None):
         params = {}
         if enabled is None or ringPlan is None:
@@ -911,6 +919,9 @@ class Tapo:
 
     def getTimezone(self):
         return self.executeFunction("getTimezone", {"system": {"name": ["basic"]}})
+
+    def getRingStatus(self):
+        return self.executeFunction("getRingStatus", {"ring": {"name": "status"}})
 
     def setHubSirenStatus(self, status):
         return self.executeFunction(
@@ -2180,6 +2191,7 @@ class Tapo:
                         "method": "getChimeRingPlan",
                         "params": {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}},
                     },
+                    {"method": "getRingStatus", "params": {"ring": {"name": "status"}}},
                 ]
             },
         }
