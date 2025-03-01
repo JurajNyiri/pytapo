@@ -3,12 +3,12 @@
 #
 import hashlib
 import json
+from aiohttp import ServerDisconnectedError
 import requests
 import base64
 import copy
 import asyncio
 import logging
-import concurrent
 
 from kasa.transports import KlapTransportV2, KlapTransport
 from kasa.exceptions import AuthenticationError
@@ -28,6 +28,16 @@ from .media_stream._utils import (
 )
 
 LOGGER = logging.getLogger("pytapo")
+
+
+# Supress Error messages, we handle them internally and log if necessary
+class SuppressPythonKasaLogs(logging.Filter):
+    def filter(self, record):
+        return (
+            "Response status is 403" not in record.getMessage()
+            and "Server disconnected" not in record.getMessage()
+            and "Response status is 400, Request was" not in record.getMessage()
+        )
 
 
 class Tapo:
@@ -58,6 +68,9 @@ class Tapo:
         KLAPVersion=None,
         hass=None,
     ):
+        logger = logging.getLogger("kasa.transports.klaptransport")
+        logger.addFilter(SuppressPythonKasaLogs())
+
         self.retryStok = retryStok
         self.redactConfidentialInformation = redactConfidentialInformation
         self.printDebugInformation = printDebugInformation
@@ -182,13 +195,16 @@ class Tapo:
             response = await self.klapTransport.send(json.dumps(request))
             return response
         except Exception as err:
-            LOGGER.warning("Retrying request... Error: " + err)
-            if self.klapTransport is not None:
-                await self.klapTransport.close()
-                self.klapTransport = None
+            if (
+                "Response status is 403, Request was" in str(err)
+                or "Response status is 400, Request was" in str(err)
+                or "Server disconnected" in str(err)
+            ):
+                raise Exception("PyTapo KLAP Error #6: " + str(err))
 
-            await self.ensureAuthenticated()
+            self.debugLog("Retrying request... Error: " + str(err))
             if retry < 5:
+                await self.ensureAuthenticated()
                 return await self.sendKlapRequest(request, retry + 1)
             else:
                 raise Exception("PyTapo KLAP Error #1: " + str(err))
