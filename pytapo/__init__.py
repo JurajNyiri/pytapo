@@ -177,7 +177,7 @@ class Tapo:
             if self.klapTransport is not None:
                 await self.klapTransport.close()
                 self.klapTransport = None
-            self.ensureAuthenticated()
+            await self.ensureAuthenticated()
             if retry < 5:
                 return await self.sendKlapRequest(request, retry + 1)
             else:
@@ -186,16 +186,16 @@ class Tapo:
             if self.klapTransport is not None:
                 await self.klapTransport.close()
 
-    def ensureAuthenticated(self):
+    async def ensureAuthenticated(self):
         if self.isKLAP:
             if self.klapTransport is None:
                 if self.KLAPVersion is None:
                     try:
-                        asyncio.run(self.initiateKlapTransport(1))
+                        await self.initiateKlapTransport(1)
                         self.KLAPVersion = 1
                     except AuthenticationError:
                         try:
-                            asyncio.run(self.initiateKlapTransport(2))
+                            await self.initiateKlapTransport(2)
                             self.KLAPVersion = 2
                         except AuthenticationError:
                             raise Exception("Invalid authentication data")
@@ -206,14 +206,14 @@ class Tapo:
                 else:
                     if self.KLAPVersion == 1:
                         try:
-                            asyncio.run(self.initiateKlapTransport(1))
+                            await self.initiateKlapTransport(1)
                         except AuthenticationError:
                             raise Exception("Invalid authentication data")
                         except Exception as err:
                             raise Exception("PyTapo KLAP Error #4: " + str(err))
                     elif self.KLAPVersion == 2:
                         try:
-                            asyncio.run(self.initiateKlapTransport(2))
+                            await self.initiateKlapTransport(2)
                         except AuthenticationError:
                             raise Exception("Invalid authentication data")
                         except Exception as err:
@@ -663,7 +663,7 @@ class Tapo:
         return unpad(pt, AES.block_size)
 
     def performRequest(self, requestData, loginRetryCount=0):
-        self.ensureAuthenticated()
+        asyncio.run(self.ensureAuthenticated())
         authValid = True
         url = self.getHostURL()
         if self.childID:
