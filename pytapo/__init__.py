@@ -161,7 +161,6 @@ class Tapo:
     async def initiateKlapTransport(self, version=1):
         try:
             if self.klapTransport is None:
-                LOGGER.warning("initiateKlapTransport")
                 creds = Credentials(self.user, self.password)
                 config = DeviceConfig(
                     self.host, port_override=self.controlPort, credentials=creds
