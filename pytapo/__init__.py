@@ -492,16 +492,29 @@ class Tapo:
 
     def executeFunction(self, method, params, retry=False):
         if method == "multipleRequest":
-            data = self.performRequest({"method": "multipleRequest", "params": params})[
-                "result"
-            ]["responses"]
+            if params is not None:
+                data = self.performRequest(
+                    {"method": "multipleRequest", "params": params}
+                )["result"]["responses"]
+            else:
+                data = self.performRequest({"method": "multipleRequest"})["result"][
+                    "responses"
+                ]
         else:
-            data = self.performRequest(
-                {
-                    "method": "multipleRequest",
-                    "params": {"requests": [{"method": method, "params": params}]},
-                }
-            )["result"]["responses"][0]
+            if params is not None:
+                data = self.performRequest(
+                    {
+                        "method": "multipleRequest",
+                        "params": {"requests": [{"method": method, "params": params}]},
+                    }
+                )["result"]["responses"][0]
+            else:
+                data = self.performRequest(
+                    {
+                        "method": "multipleRequest",
+                        "params": {"requests": [{"method": method}]},
+                    }
+                )["result"]["responses"][0]
 
         if type(data) == list:
             return data
@@ -922,9 +935,15 @@ class Tapo:
 
     def getRingStatus(self):
         return self.executeFunction("getRingStatus", {"ring": {"name": "status"}})
-    
+
     def getChimeCtrlList(self):
-        return self.executeFunction("getChimeCtrlList", {"chime_ctrl": {"get_paired_device_list":{}}})
+        return self.executeFunction(
+            "getChimeCtrlList", {"chime_ctrl": {"get_paired_device_list": {}}}
+        )
+
+    ### TODO: Test for chime
+    def getPairList(self):
+        return self.executeFunction("get_pair_list", None)
 
     def setHubSirenStatus(self, status):
         return self.executeFunction(
@@ -2195,7 +2214,10 @@ class Tapo:
                         "params": {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}},
                     },
                     {"method": "getRingStatus", "params": {"ring": {"name": "status"}}},
-                    {"method": "getChimeCtrlList", "params": {"chime_ctrl": {"get_paired_device_list": {}}}},
+                    {
+                        "method": "getChimeCtrlList",
+                        "params": {"chime_ctrl": {"get_paired_device_list": {}}},
+                    },
                 ]
             },
         }
