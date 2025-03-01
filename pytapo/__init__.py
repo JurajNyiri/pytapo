@@ -1955,6 +1955,16 @@ class Tapo:
     def getPowerMode(self):
         return self.executeFunction("getPowerMode", {"battery": {"name": "power"}})
 
+    def getBatteryStatistic(self):
+        return self.executeFunction(
+            "getBatteryStatistic", {"battery": {"statistic": {"days": 30}}}
+        )
+    
+    def getBatteryConfig(self):
+        return self.executeFunction(
+            "getBatteryConfig", {"battery": {"name": "config"}}
+        )
+    
     @staticmethod
     def getErrorMessage(errorCode):
         if str(errorCode) in ERROR_CODES:
@@ -2251,6 +2261,14 @@ class Tapo:
                     {
                         "method": "getChargingMode",
                         "params": {"battery": {"name": "charging_mode"}},
+                    },
+                    {
+                        "method": "getBatteryStatistic",
+                        "params": {"battery": {"statistic": {"days": 30}}},
+                    },
+                    {
+                        "method": "getBatteryConfig",
+                        "params": {"battery": {"name": "config"}},
                     },
                 ]
             },
