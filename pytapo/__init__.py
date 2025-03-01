@@ -900,6 +900,25 @@ class Tapo:
             {"battery": {"power_save": params}},
         )
 
+    def setBatteryOperatingMode(self, mode):
+        availableOperatingModes = self.getBatteryOperatingModeParam()["battery"][
+            "operating_mode_param"
+        ]["config_array"]
+        modeIsValid = False
+        for availableMode in availableOperatingModes:
+            if availableMode["mode"] == mode:
+                modeIsValid = True
+
+        if modeIsValid:
+            params = {"follow_config": False, "mode": mode}
+
+            return self.executeFunction(
+                "setBatteryOperatingMode",
+                {"battery": {"operating": params}},
+            )
+        else:
+            raise Exception(f"Mode {mode} is invalid.")
+
     def setBatteryConfig(self, showOnLiveView=None, showPercentage=None):
         params = {}
 
@@ -972,6 +991,9 @@ class Tapo:
 
     def getTimezone(self):
         return self.executeFunction("getTimezone", {"system": {"name": ["basic"]}})
+
+    def getClipsConfig(self):
+        return self.executeFunction("getClipsConfig", {"clips": {"name": "config"}})
 
     def getRingStatus(self):
         return self.executeFunction("getRingStatus", {"ring": {"name": "status"}})
@@ -2349,6 +2371,10 @@ class Tapo:
                     {
                         "method": "getPirSensitivity",
                         "params": {"pir": {"name": "config"}},
+                    },
+                    {
+                        "method": "getClipsConfig",
+                        "params": {"clips": {"name": "config"}},
                     },
                 ]
             },
