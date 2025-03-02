@@ -1539,9 +1539,12 @@ class Tapo:
             )
 
     def getTime(self):
-        return self.executeFunction(
-            "getClockStatus", {"system": {"name": "clock_status"}}
-        )
+        if self.isKLAP:
+            return self.executeFunction("get_device_time", None)
+        else:
+            return self.executeFunction(
+                "getClockStatus", {"system": {"name": "clock_status"}}
+            )
 
     def getDSTRule(self):
         return self.executeFunction("getDstRule", {"system": {"name": "dst"}})
@@ -2379,6 +2382,7 @@ class Tapo:
                         },
                         {"method": "get_pair_list"},
                         {"method": "get_support_alarm_type_list"},
+                        {"method": "get_device_time"},
                     ]
                 },
             }
