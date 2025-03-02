@@ -863,11 +863,15 @@ class Tapo:
                 and "clock_status" in currentTime["system"]
                 and "seconds_from_1970" in currentTime["system"]["clock_status"]
             )
+            nowTS = int(datetime.timestamp(datetime.now()))
             if timeReturned:
-                nowTS = int(datetime.timestamp(datetime.now()))
                 self.timeCorrection = (
                     nowTS - currentTime["system"]["clock_status"]["seconds_from_1970"]
                 )
+            else:
+                timeReturned = "timestamp" in currentTime
+                if timeReturned:
+                    self.timeCorrection = nowTS - currentTime["timestamp"]
         return self.timeCorrection
 
     def getEvents(self, startTime=False, endTime=False):
