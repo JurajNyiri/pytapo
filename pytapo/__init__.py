@@ -2056,8 +2056,13 @@ class Tapo:
                 {"motor": {"cruise_stop": {}}},
             )
 
-    def reboot(self):
-        return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
+    def reboot(self, delay=None):
+        if self.isKLAP:
+            if delay is None:
+                delay = 10
+            return self.executeFunction("device_reboot", {"delay": delay})
+        else:
+            return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
 
     def processPresetsResponse(self, response):
         return {
@@ -2252,8 +2257,8 @@ class Tapo:
     def setChimeAlarmConfigure(
         self, macAddress, enabled=None, type=None, volume=None, duration=None
     ):
-        if duration is not None and (duration < 5 or duration > 30):
-            raise Exception("Duration has to be between 5 and 30.")
+        if duration is not None and (duration < 5 or duration > 30) and duration != 0:
+            raise Exception("Duration has to be between 5 and 30, or 0.")
         if volume is not None and (volume < 1 or volume > 15):
             raise Exception("Volume has to be between 1 and 15.")
         params = {"mac": macAddress}
