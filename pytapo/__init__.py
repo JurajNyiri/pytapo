@@ -2059,7 +2059,7 @@ class Tapo:
     def reboot(self, delay=None):
         if self.isKLAP:
             if delay is None:
-                delay = 10
+                delay = 1
             return self.executeFunction("device_reboot", {"delay": delay})
         else:
             return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
