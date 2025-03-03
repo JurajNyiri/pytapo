@@ -3,9 +3,17 @@
 #
 import hashlib
 import json
+from aiohttp import ServerDisconnectedError
 import requests
 import base64
 import copy
+import asyncio
+import logging
+
+from kasa.transports import KlapTransportV2, KlapTransport
+from kasa.exceptions import AuthenticationError
+from kasa import DeviceConfig
+from kasa import Credentials
 
 from datetime import datetime
 from warnings import warn
@@ -18,6 +26,18 @@ from .TlsAdapter import TlsAdapter
 from .media_stream._utils import (
     generate_nonce,
 )
+
+LOGGER = logging.getLogger("pytapo")
+
+
+# Supress Error messages, we handle them internally and log if necessary
+class SuppressPythonKasaLogs(logging.Filter):
+    def filter(self, record):
+        return (
+            "Response status is 403" not in record.getMessage()
+            and "Server disconnected" not in record.getMessage()
+            and "Response status is 400, Request was" not in record.getMessage()
+        )
 
 
 class Tapo:
@@ -43,17 +63,40 @@ class Tapo:
         controlPort=443,
         retryStok=True,
         redactConfidentialInformation=True,
+        streamPort=8880,
+        isKLAP=None,
+        KLAPVersion=None,
+        hass=None,
     ):
+        logger = logging.getLogger("kasa.transports.klaptransport")
+        logger.addFilter(SuppressPythonKasaLogs())
+
         self.retryStok = retryStok
         self.redactConfidentialInformation = redactConfidentialInformation
         self.printDebugInformation = printDebugInformation
         self.passwordEncryptionMethod = None
         self.seq = None
         self.host = host
-        self.controlPort = controlPort
+        if hass is not None:
+            self.hass = hass
+        else:
+            self.hass = None
+        if controlPort is None:
+            self.controlPort = 443
+        else:
+            self.controlPort = controlPort
         self.lsk = None
         self.cnonce = None
         self.ivb = None
+        if isKLAP is not None:
+            self.isKLAP = isKLAP
+        else:
+            self.isKLAP = self._isKLAP()
+        if KLAPVersion is not None:
+            self.KLAPVersion = KLAPVersion
+        else:
+            self.KLAPVersion = None
+        self.klapTransport = None
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
@@ -64,6 +107,10 @@ class Tapo:
         self.timeCorrection = False
         self.reuseSession = reuseSession
         self.isSecureConnectionCached = None
+        if streamPort is None:
+            self.streamPort = 8800
+        else:
+            self.streamPort = streamPort
         self.headers = {
             "Host": self.getControlHost(),
             "Referer": "https://{host}".format(host=self.getControlHost()),
@@ -84,6 +131,19 @@ class Tapo:
         self.session = False
 
         self.basicInfo = self.getBasicInfo()
+        if "type" in self.basicInfo:
+            self.deviceType = self.basicInfo["type"]
+        elif (
+            "device_info" in self.basicInfo
+            and "basic_info" in self.basicInfo["device_info"]
+            and "device_type" in self.basicInfo["device_info"]["basic_info"]
+        ):
+            self.deviceType = self.basicInfo["device_info"]["basic_info"]["device_type"]
+        else:
+            raise Exception("Failed to detect device type.")
+        if self.deviceType == "SMART.TAPOCHIME":
+            self.pairList = self.getPairList()
+
         self.presets = self.isSupportingPresets()
         if not self.presets:
             self.presets = {}
@@ -101,10 +161,90 @@ class Tapo:
         )
 
     def getStreamURL(self):
-        return "{host}:8800".format(host=self.host)
+        return "{host}:{streamPort}".format(host=self.host, streamPort=self.streamPort)
 
-    def ensureAuthenticated(self):
-        if not self.stok:
+    def _isKLAP(self, timeout=2):
+        try:
+            url = f"http://{self.host}:{self.controlPort}"
+            response = requests.get(url, timeout=timeout)
+            return "200 OK" in response.text
+        except requests.RequestException:
+            return False
+
+    async def initiateKlapTransport(self, version=1):
+        try:
+            if self.klapTransport is None:
+                creds = Credentials(self.user, self.password)
+                config = DeviceConfig(
+                    self.host, port_override=self.controlPort, credentials=creds
+                )
+                if version == 1:
+                    transport = KlapTransport(config=config)
+                elif version == 2:
+                    transport = KlapTransportV2(config=config)
+                await transport.perform_handshake()
+                self.klapTransport = transport
+                return self.klapTransport
+        finally:
+            await transport.close()
+
+    async def sendKlapRequest(self, request, retry=0):
+        try:
+            if self.klapTransport is None:
+                await self.ensureAuthenticated()
+            response = await self.klapTransport.send(json.dumps(request))
+            return response
+        except Exception as err:
+            if (
+                "Response status is 403, Request was" in str(err)
+                or "Response status is 400, Request was" in str(err)
+                or "Server disconnected" in str(err)
+            ):
+                raise Exception("PyTapo KLAP Error #6: " + str(err))
+
+            self.debugLog("Retrying request... Error: " + str(err))
+            if retry < 5:
+                await self.ensureAuthenticated()
+                return await self.sendKlapRequest(request, retry + 1)
+            else:
+                raise Exception("PyTapo KLAP Error #1: " + str(err))
+        finally:
+            if self.klapTransport is not None:
+                await self.klapTransport.close()
+
+    async def ensureAuthenticated(self):
+        if self.isKLAP:
+            if self.klapTransport is None:
+                if self.KLAPVersion is None:
+                    try:
+                        await self.initiateKlapTransport(1)
+                        self.KLAPVersion = 1
+                    except AuthenticationError:
+                        try:
+                            await self.initiateKlapTransport(2)
+                            self.KLAPVersion = 2
+                        except AuthenticationError:
+                            raise Exception("Invalid authentication data")
+                        except Exception as err:
+                            raise Exception("PyTapo KLAP Error #2: " + str(err))
+                    except Exception as err:
+                        raise Exception("PyTapo KLAP Error #3: " + str(err))
+                else:
+                    if self.KLAPVersion == 1:
+                        try:
+                            await self.initiateKlapTransport(1)
+                        except AuthenticationError:
+                            raise Exception("Invalid authentication data")
+                        except Exception as err:
+                            raise Exception("PyTapo KLAP Error #4: " + str(err))
+                    elif self.KLAPVersion == 2:
+                        try:
+                            await self.initiateKlapTransport(2)
+                        except AuthenticationError:
+                            raise Exception("Invalid authentication data")
+                        except Exception as err:
+                            raise Exception("PyTapo KLAP Error #5: " + str(err))
+        elif not self.stok:
             return self.refreshStok()
         return True
 
@@ -464,10 +604,15 @@ class Tapo:
             raise Exception("Invalid authentication data")
 
     def responseIsOK(self, res, data=None):
-        if (res.status_code != 200 and not self.isSecureConnection()) or (
-            res.status_code != 200
-            and res.status_code != 500
-            and self.isSecureConnection()  # pass responseIsOK for secure connections 500 which are communicating expiring session
+        if res is None and self.isKLAP is True and data is None:
+            return True
+        if res is not None and (
+            (res.status_code != 200 and not self.isSecureConnection())
+            or (
+                res.status_code != 200
+                and res.status_code != 500
+                and self.isSecureConnection()  # pass responseIsOK for secure connections 500 which are communicating expiring session
+            )
         ):
             raise Exception(
                 "Error communicating with Tapo Camera. Status code: "
@@ -484,16 +629,29 @@ class Tapo:
 
     def executeFunction(self, method, params, retry=False):
         if method == "multipleRequest":
-            data = self.performRequest({"method": "multipleRequest", "params": params})[
-                "result"
-            ]["responses"]
+            if params is not None:
+                data = self.performRequest(
+                    {"method": "multipleRequest", "params": params}
+                )["result"]["responses"]
+            else:
+                data = self.performRequest({"method": "multipleRequest"})["result"][
+                    "responses"
+                ]
         else:
-            data = self.performRequest(
-                {
-                    "method": "multipleRequest",
-                    "params": {"requests": [{"method": method, "params": params}]},
-                }
-            )["result"]["responses"][0]
+            if params is not None:
+                data = self.performRequest(
+                    {
+                        "method": "multipleRequest",
+                        "params": {"requests": [{"method": method, "params": params}]},
+                    }
+                )["result"]["responses"][0]
+            else:
+                data = self.performRequest(
+                    {
+                        "method": "multipleRequest",
+                        "params": {"requests": [{"method": method}]},
+                    }
+                )["result"]["responses"][0]
 
         if type(data) == list:
             return data
@@ -503,6 +661,8 @@ class Tapo:
             or ("error_code" in data and data["error_code"] == 0)
         ):
             return data["result"]
+        elif "method" in data and "error_code" in data and data["error_code"] == 0:
+            return data
         else:
             if "error_code" in data and data["error_code"] == -64303 and retry is False:
                 self.setCruise(False)
@@ -528,8 +688,14 @@ class Tapo:
         pt = cipher.decrypt(response)
         return unpad(pt, AES.block_size)
 
+    def executeAsyncExecutorJob(self, job, *args):
+        if self.hass is None:
+            return asyncio.run(job(*args))
+        else:
+            return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
+
     def performRequest(self, requestData, loginRetryCount=0):
-        self.ensureAuthenticated()
+        self.executeAsyncExecutorJob(self.ensureAuthenticated)
         authValid = True
         url = self.getHostURL()
         if self.childID:
@@ -552,56 +718,74 @@ class Tapo:
         else:
             fullRequest = requestData
 
-        if self.seq is not None and self.isSecureConnection():
-            fullRequest = {
-                "method": "securePassthrough",
-                "params": {
-                    "request": base64.b64encode(
-                        self.encryptRequest(json.dumps(fullRequest).encode("utf-8"))
-                    ).decode("utf8")
-                },
-            }
-            self.headers["Seq"] = str(self.seq)
-            try:
-                self.headers["Tapo_tag"] = self.getTag(fullRequest)
-            except Exception as err:
-                if str(err) == "Failure detecting hashing algorithm.":
-                    authValid = False
-                    self.debugLog(
-                        "Failure detecting hashing algorithm on getTag, reauthenticating."
+        if self.isKLAP:
+            responseJSON = self.executeAsyncExecutorJob(
+                self.sendKlapRequest, fullRequest
+            )
+            res = None
+            if (
+                "result" in responseJSON
+                and "responses" in responseJSON["result"]
+                and len(responseJSON["result"]["responses"]) == 1
+            ):
+                if not self.responseIsOK(res, responseJSON["result"]["responses"][0]):
+                    raise Exception(
+                        "Error: {}, Response: {}".format(
+                            self.getErrorMessage(responseJSON["error_code"]),
+                            json.dumps(responseJSON),
+                        )
                     )
-                else:
-                    raise err
-            self.seq += 1
-
-        res = self.request(
-            "POST",
-            url,
-            data=json.dumps(fullRequest),
-            headers=self.headers,
-            verify=False,
-        )
-        responseData = res.json()
-        if (
-            self.isSecureConnection()
-            and "result" in responseData
-            and "response" in responseData["result"]
-        ):
-            encryptedResponse = responseData["result"]["response"]
-            encryptedResponse = base64.b64decode(responseData["result"]["response"])
-            try:
-                responseJSON = json.loads(self.decryptResponse(encryptedResponse))
-            except Exception as err:
-                if (
-                    str(err) == "Padding is incorrect."
-                    or str(err) == "PKCS#7 padding is incorrect."
-                ):
-                    self.debugLog(f"{str(err)} Reauthenticating.")
-                    authValid = False
-                else:
-                    raise err
         else:
-            responseJSON = res.json()
+            if self.seq is not None and self.isSecureConnection():
+                fullRequest = {
+                    "method": "securePassthrough",
+                    "params": {
+                        "request": base64.b64encode(
+                            self.encryptRequest(json.dumps(fullRequest).encode("utf-8"))
+                        ).decode("utf8")
+                    },
+                }
+                self.headers["Seq"] = str(self.seq)
+                try:
+                    self.headers["Tapo_tag"] = self.getTag(fullRequest)
+                except Exception as err:
+                    if str(err) == "Failure detecting hashing algorithm.":
+                        authValid = False
+                        self.debugLog(
+                            "Failure detecting hashing algorithm on getTag, reauthenticating."
+                        )
+                    else:
+                        raise err
+                self.seq += 1
+
+            res = self.request(
+                "POST",
+                url,
+                data=json.dumps(fullRequest),
+                headers=self.headers,
+                verify=False,
+            )
+            responseData = res.json()
+            if (
+                self.isSecureConnection()
+                and "result" in responseData
+                and "response" in responseData["result"]
+            ):
+                encryptedResponse = responseData["result"]["response"]
+                encryptedResponse = base64.b64decode(responseData["result"]["response"])
+                try:
+                    responseJSON = json.loads(self.decryptResponse(encryptedResponse))
+                except Exception as err:
+                    if (
+                        str(err) == "Padding is incorrect."
+                        or str(err) == "PKCS#7 padding is incorrect."
+                    ):
+                        self.debugLog(f"{str(err)} Reauthenticating.")
+                        authValid = False
+                    else:
+                        raise err
+            else:
+                responseJSON = res.json()
         if not authValid or not self.responseIsOK(res, responseJSON):
             #  -40401: Invalid Stok
             if (
@@ -638,8 +822,19 @@ class Tapo:
                     responses.append(response["result"])  # not sure if needed
             responseJSON["result"]["responses"] = responses
             return responseJSON["result"]["responses"][0]
-        elif self.responseIsOK(res):
-            return responseJSON
+        else:
+            if self.isKLAP:
+                if self.responseIsOK(res, responseJSON):
+                    return responseJSON
+                else:
+                    raise Exception(
+                        "Error: {}, Response: {}".format(
+                            self.getErrorMessage(responseJSON["error_code"]),
+                            json.dumps(responseJSON),
+                        )
+                    )
+            elif self.responseIsOK(res):
+                return responseJSON
 
     def getMediaSession(self):
         return HttpMediaSession(
@@ -647,6 +842,7 @@ class Tapo:
             self.cloudPassword,
             self.superSecretKey,
             self.getEncryptionMethod(),
+            port=self.streamPort,
         )  # pragma: no cover
 
     def getChildDevices(self):
@@ -667,11 +863,15 @@ class Tapo:
                 and "clock_status" in currentTime["system"]
                 and "seconds_from_1970" in currentTime["system"]["clock_status"]
             )
+            nowTS = int(datetime.timestamp(datetime.now()))
             if timeReturned:
-                nowTS = int(datetime.timestamp(datetime.now()))
                 self.timeCorrection = (
                     nowTS - currentTime["system"]["clock_status"]["seconds_from_1970"]
                 )
+            else:
+                timeReturned = "timestamp" in currentTime
+                if timeReturned:
+                    self.timeCorrection = nowTS - currentTime["timestamp"]
         return self.timeCorrection
 
     def getEvents(self, startTime=False, endTime=False):
@@ -862,6 +1062,126 @@ class Tapo:
             },
         )
 
+    def setRingStatus(self, enabled):
+        params = {"enabled": "on" if enabled else "off"}
+
+        return self.executeFunction(
+            "setRingStatus",
+            {"ring": {"status": params}},
+        )
+
+    def setChargingMode(self, chargingPrivacyMode):
+        params = {"charging_privacy_mode": "on" if chargingPrivacyMode else "off"}
+
+        return self.executeFunction(
+            "setChargingMode", {"battery": {"charging_mode": params}}
+        )
+
+    def setBatteryPowerSave(self, enabled):
+        params = {"enabled": "auto" if enabled else "off"}
+
+        return self.executeFunction(
+            "setBatteryPowerSave",
+            {"battery": {"power_save": params}},
+        )
+
+    def setClipsConfig(self, clipsLength=None, recordBuffer=None, retriggerTime=None):
+        params = {}
+        if clipsLength is not None:
+            params["clips_length"] = int(clipsLength)
+        if recordBuffer is not None:
+            params["record_buffer"] = int(recordBuffer)
+        if retriggerTime is not None:
+            params["retrigger_time"] = int(retriggerTime)
+
+        if params["retrigger_time"] > 60 or params["retrigger_time"] < 0:
+            raise Exception("Retrigger time has to be between 0 and 60.")
+
+        if params["clips_length"] < 20 or params["clips_length"] > 120:
+            raise Exception("Clips Length has to be between 20 and 120.")
+
+        if params["record_buffer"] < 3 or params["record_buffer"] > 10:
+            raise Exception("Record buffer has to be between 3 and 10.")
+        return self.executeFunction(
+            "setClipsConfig",
+            {"clips": {"config": params}},
+        )
+
+    def setBatteryOperatingMode(self, mode):
+        availableOperatingModes = self.getBatteryOperatingModeParam()["battery"][
+            "operating_mode_param"
+        ]["config_array"]
+        modeIsValid = False
+        for availableMode in availableOperatingModes:
+            if availableMode["mode"] == mode:
+                modeIsValid = True
+
+        if modeIsValid:
+            params = {"follow_config": False, "mode": mode}
+
+            return self.executeFunction(
+                "setBatteryOperatingMode",
+                {"battery": {"operating": params}},
+            )
+        else:
+            raise Exception(f"Mode {mode} is invalid.")
+
+    def setBatteryConfig(self, showOnLiveView=None, showPercentage=None):
+        params = {}
+
+        if showOnLiveView is not None:
+            params["show_on_liveview"] = "on" if showOnLiveView else "off"
+
+        if showPercentage is not None:
+            params["show_percentage"] = "on" if showPercentage else "off"
+
+        return self.executeFunction(
+            "setBatteryConfig",
+            {"battery": {"config": params}},
+        )
+
+    def setPirSensitivity(self, sensitivity: int):
+        params = {"sensitivity": str(sensitivity)}
+
+        if sensitivity >= 10 and sensitivity <= 100:
+            return self.executeFunction(
+                "setPirSensitivity",
+                {"pir": {"config": params}},
+            )
+
+        else:
+            raise Exception("PIR sensitivity has to be between 10 and 100")
+
+    def setWakeUpConfig(self, wakeUpType):
+        if wakeUpType == "doorbell" or wakeUpType == "detection":
+            return self.executeFunction(
+                "setWakeUpConfig", {"wake_up": {"config": {"wake_up_type": wakeUpType}}}
+            )
+
+    def setChimeRingPlan(self, enabled=None, ringPlan=None):
+        params = {}
+        if enabled is None or ringPlan is None:
+            chimeRingPlan = self.getChimeRingPlan()
+
+        if enabled is not None:
+            params["enabled"] = "on" if enabled else "off"
+        else:
+            params["enabled"] = chimeRingPlan["chime_ring_plan"][
+                "chn1_chime_ring_plan"
+            ]["enabled"]
+
+        if ringPlan is not None:
+            params["ring_plan_1"] = ringPlan
+        else:
+            params["ring_plan_1"] = chimeRingPlan["chime_ring_plan"][
+                "chn1_chime_ring_plan"
+            ]["ring_plan_1"]
+
+        return self.executeFunction(
+            "setChimeRingPlan",
+            {"chime_ring_plan": {"chn1_chime_ring_plan": params}},
+        )
+
     def setTimezone(self, timezone, zoneID, timingMode="ntp"):
         return self.executeFunction(
             "setTimezone",
@@ -878,6 +1198,23 @@ class Tapo:
 
     def getTimezone(self):
         return self.executeFunction("getTimezone", {"system": {"name": ["basic"]}})
+
+    def getClipsConfig(self):
+        return self.executeFunction("getClipsConfig", {"clips": {"name": "config"}})
+
+    def getRingStatus(self):
+        return self.executeFunction("getRingStatus", {"ring": {"name": "status"}})
+
+    def getWakeUpConfig(self):
+        return self.executeFunction("getWakeUpConfig", {"wake_up": {"name": "config"}})
+
+    def getChimeCtrlList(self):
+        return self.executeFunction(
+            "getChimeCtrlList", {"chime_ctrl": {"get_paired_device_list": {}}}
+        )
+
+    def getPairList(self):
+        return self.executeFunction("get_pair_list", None)
 
     def setHubSirenStatus(self, status):
         return self.executeFunction(
@@ -897,6 +1234,11 @@ class Tapo:
 
     def getHubSirenStatus(self):
         return self.executeFunction("getSirenStatus", {"siren": {}})
+
+    def getHubStorage(self):
+        return self.executeFunction(
+            "getHubStorage", {"hub_manage": {"name": "hub_storage_info"}}
+        )
 
     def setHubSirenConfig(self, duration=None, siren_type=None, volume=None):
         params = {"siren": {}}
@@ -1182,15 +1524,31 @@ class Tapo:
             "reverseWhitelampStatus", {"image": {"reverse_wtl_status": ["null"]}}
         )
 
-    def getBasicInfo(self):
+    def playAlarm(self, alarmDuration, alarmType, alarmVolume):
         return self.executeFunction(
-            "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
+            "play_alarm",
+            {
+                "alarm_duration": int(alarmDuration),
+                "alarm_type": str(alarmType),
+                "alarm_volume": str(alarmVolume),
+            },
         )
 
+    def getBasicInfo(self):
+        if self.isKLAP:
+            return self.executeFunction("get_device_info", None)
+        else:
+            return self.executeFunction(
+                "getDeviceInfo", {"device_info": {"name": ["basic_info"]}}
+            )
+
     def getTime(self):
-        return self.executeFunction(
-            "getClockStatus", {"system": {"name": "clock_status"}}
-        )
+        if self.isKLAP:
+            return self.executeFunction("get_device_time", None)
+        else:
+            return self.executeFunction(
+                "getClockStatus", {"system": {"name": "clock_status"}}
+            )
 
     def getDSTRule(self):
         return self.executeFunction("getDstRule", {"system": {"name": "dst"}})
@@ -1353,9 +1711,16 @@ class Tapo:
         )  # pragma: no cover
 
     def setLEDEnabled(self, enabled):
-        return self.executeFunction(
-            "setLedStatus", {"led": {"config": {"enabled": "on" if enabled else "off"}}}
-        )
+        if self.isKLAP:
+            return self.executeFunction(
+                "set_led_off",
+                {"led_off": 0 if enabled else 1},
+            )
+        else:
+            return self.executeFunction(
+                "setLedStatus",
+                {"led": {"config": {"enabled": "on" if enabled else "off"}}},
+            )
 
     def getUserID(self, forceReload=False):
         if not self.userID or forceReload is True:
@@ -1517,6 +1882,12 @@ class Tapo:
             {"pet_detection": {"name": ["detection"]}},
         )["pet_detection"]["detection"]
 
+    def getPackageDetection(self):
+        return self.executeFunction(
+            "getPackageDetectionConfig",
+            {"package_detection": {"name": ["detection"]}},
+        )["package_detection"]["detection"]
+
     def setPetDetection(self, enabled, sensitivity=False):
         data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
@@ -1525,6 +1896,17 @@ class Tapo:
             )
 
         return self.executeFunction("setPetDetectionConfig", data)
+
+    def setPackageDetection(self, enabled, sensitivity=False):
+        data = {
+            "package_detection": {"detection": {"enabled": "on" if enabled else "off"}}
+        }
+        if sensitivity:
+            if int(sensitivity) < 1 or int(sensitivity) > 100:
+                raise Exception("Sensitivity has to be between 1 and 100.")
+            data["package_detection"]["detection"]["sensitivity"] = sensitivity
+
+        return self.executeFunction("setPackageDetectionConfig", data)
 
     def testUsrDefAudio(self, id: int, enabled: bool, force: int = 1):
         if enabled:
@@ -1681,8 +2063,13 @@ class Tapo:
                 {"motor": {"cruise_stop": {}}},
             )
 
-    def reboot(self):
-        return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
+    def reboot(self, delay=None):
+        if self.isKLAP:
+            if delay is None:
+                delay = 1
+            return self.executeFunction("device_reboot", {"delay": delay})
+        else:
+            return self.executeFunction("rebootDevice", {"system": {"reboot": "null"}})
 
     def processPresetsResponse(self, response):
         return {
@@ -1863,8 +2250,77 @@ class Tapo:
             }
         )
 
+    def getChimeRingPlan(self):
+        return self.executeFunction(
+            "getChimeRingPlan", {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}}
+        )
+
+    def getChimeAlarmConfigure(self, macAddress):
+        return self.executeFunction("get_chime_alarm_configure", {"mac": macAddress})
+
+    def getSupportAlarmTypeList(self):
+        return self.executeFunction("get_support_alarm_type_list", None)
+
+    def setChimeAlarmConfigure(
+        self, macAddress, enabled=None, type=None, volume=None, duration=None
+    ):
+        if duration is not None and (duration < 5 or duration > 30) and duration != 0:
+            raise Exception("Duration has to be between 5 and 30, or 0.")
+        if volume is not None and (volume < 1 or volume > 15):
+            raise Exception("Volume has to be between 1 and 15.")
+        params = {"mac": macAddress}
+        if enabled is not None:
+            params["on_off"] = 1 if enabled else 0
+        if type is not None:
+            params["type"] = str(type)
+        if volume is not None:
+            params["volume"] = str(volume)
+        if duration is not None:
+            params["duration"] = int(duration)
+        return self.executeFunction("set_chime_alarm_configure", params)
+
     def getBatteryStatus(self):
         return self.executeFunction("getBatteryStatus", {"battery": {"name": "status"}})
+
+    def getBatteryPowerSave(self):
+        return self.executeFunction(
+            "getBatteryPowerSave", {"battery": {"name": "power_save"}}
+        )
+
+    def getBatteryOperatingMode(self):
+        return self.executeFunction(
+            "getBatteryOperatingMode", {"battery": {"name": "operating"}}
+        )
+
+    def getBatteryOperatingModeParam(self):
+        return self.executeFunction(
+            "getBatteryOperatingModeParam",
+            {"battery": {"name": "operating_mode_param"}},
+        )
+
+    def getChargingMode(self):
+        return self.executeFunction(
+            "getChargingMode", {"battery": {"name": "charging_mode"}}
+        )
+
+    def getPowerMode(self):
+        return self.executeFunction("getPowerMode", {"battery": {"name": "power"}})
+
+    def getBatteryStatistic(self):
+        return self.executeFunction(
+            "getBatteryStatistic", {"battery": {"statistic": {"days": 30}}}
+        )
+
+    def getBatteryConfig(self):
+        return self.executeFunction("getBatteryConfig", {"battery": {"name": "config"}})
+
+    def getBatteryCapability(self):
+        return self.executeFunction(
+            "getBatteryCapability", {"battery": {"name": "capability"}}
+        )
+
+    def getPirSensitivity(self):
+        return self.executeFunction("getPirSensitivity", {"pir": {"name": "config"}})
 
     @staticmethod
     def getErrorMessage(errorCode):
@@ -1920,227 +2376,318 @@ class Tapo:
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
     def getMost(self, omit_methods=[]):
-        requestData = {
-            "method": "multipleRequest",
-            "params": {
-                "requests": [
-                    {
-                        "method": "getFloodlightStatus",
-                        "params": {"floodlight": {"get_floodlight_status": ""}},
-                    },
-                    {
-                        "method": "getFloodlightConfig",
-                        "params": {"floodlight": {"name": "config"}},
-                    },
-                    {
-                        "method": "getFloodlightCapability",
-                        "params": {"floodlight": {"name": "capability"}},
-                    },
-                    {
-                        "method": "getPirDetCapability",
-                        "params": {"pir_detection": {"name": "pir_capability"}},
-                    },
-                    {
-                        "method": "getPirDetConfig",
-                        "params": {"pir_detection": {"name": "pir_det"}},
-                    },
-                    {
-                        "method": "getAlertEventType",
-                        "params": {"msg_alarm": {"table": "msg_alarm_type"}},
-                    },
-                    {
-                        "method": "getDstRule",
-                        "params": {"system": {"name": "dst"}},
-                    },
-                    {
-                        "method": "getClockStatus",
-                        "params": {"system": {"name": "clock_status"}},
-                    },
-                    {
-                        "method": "getTimezone",
-                        "params": {"system": {"name": ["basic"]}},
-                    },
-                    {
-                        "method": "getAlertTypeList",
-                        "params": {"msg_alarm": {"name": "alert_type"}},
-                    },
-                    {
-                        "method": "getNightVisionCapability",
-                        "params": {"image_capability": {"name": ["supplement_lamp"]}},
-                    },
-                    {
-                        "method": "getDeviceInfo",
-                        "params": {"device_info": {"name": ["basic_info"]}},
-                    },
-                    {
-                        "method": "getDetectionConfig",
-                        "params": {"motion_detection": {"name": ["motion_det"]}},
-                    },
-                    {
-                        "method": "getPersonDetectionConfig",
-                        "params": {"people_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getVehicleDetectionConfig",
-                        "params": {"vehicle_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getBCDConfig",
-                        "params": {"sound_detection": {"name": ["bcd"]}},
-                    },
-                    {
-                        "method": "getPetDetectionConfig",
-                        "params": {"pet_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getBarkDetectionConfig",
-                        "params": {"bark_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getMeowDetectionConfig",
-                        "params": {"meow_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getGlassDetectionConfig",
-                        "params": {"glass_detection": {"name": ["detection"]}},
-                    },
-                    {
-                        "method": "getTamperDetectionConfig",
-                        "params": {"tamper_detection": {"name": "tamper_det"}},
-                    },
-                    {
-                        "method": "getLensMaskConfig",
-                        "params": {"lens_mask": {"name": ["lens_mask_info"]}},
-                    },
-                    {
-                        "method": "getLdc",
-                        "params": {"image": {"name": ["switch", "common"]}},
-                    },
-                    {
-                        "method": "getLastAlarmInfo",
-                        "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
-                    },
-                    {
-                        "method": "getLedStatus",
-                        "params": {"led": {"name": ["config"]}},
-                    },
-                    {
-                        "method": "getTargetTrackConfig",
-                        "params": {"target_track": {"name": ["target_track_info"]}},
-                    },
-                    {
-                        "method": "getPresetConfig",
-                        "params": {"preset": {"name": ["preset"]}},
-                    },
-                    {
-                        "method": "getFirmwareUpdateStatus",
-                        "params": {"cloud_config": {"name": "upgrade_status"}},
-                    },
-                    {
-                        "method": "getMediaEncrypt",
-                        "params": {"cet": {"name": ["media_encrypt"]}},
-                    },
-                    {
-                        "method": "getConnectionType",
-                        "params": {"network": {"get_connection_type": []}},
-                    },
-                    {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
-                    {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
-                    {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
-                    {"method": "getSirenTypeList", "params": {"siren": {}}},
-                    {"method": "getSirenConfig", "params": {"siren": {}}},
-                    {
-                        "method": "getAlertConfig",
-                        "params": {
-                            "msg_alarm": {
-                                "name": ["chn1_msg_alarm_info", "capability"],
-                                "table": ["usr_def_audio"],
-                            }
+        if self.deviceType == "SMART.TAPOCHIME":
+            requestData = {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "get_device_info",
                         },
-                    },
+                        {"method": "get_pair_list"},
+                        {"method": "get_support_alarm_type_list"},
+                        {"method": "get_device_time"},
+                    ]
+                },
+            }
+
+            for macAddress in self.pairList["mac_list"]:
+                requestData["params"]["requests"].append(
                     {
-                        "method": "getAlertConfig",
-                        "params": {
-                            "msg_alarm": {
-                                "name": ["chn1_msg_alarm_info"],
-                                "table": ["usr_def_audio"],
-                            }
+                        "method": "get_chime_alarm_configure",
+                        "params": {"mac": macAddress},
+                    }
+                )
+        else:
+            requestData = {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "getFloodlightStatus",
+                            "params": {"floodlight": {"get_floodlight_status": ""}},
                         },
-                    },
-                    {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
-                    {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
-                    {"method": "getSirenStatus", "params": {"siren": {}}},
-                    {
-                        "method": "getLightFrequencyInfo",
-                        "params": {"image": {"name": "common"}},
-                    },
-                    {
-                        "method": "getLightFrequencyCapability",
-                        "params": {"image": {"name": "common"}},
-                    },
-                    {
-                        "method": "getChildDeviceList",
-                        "params": {"childControl": {"start_index": 0}},
-                    },
-                    {
-                        "method": "getRotationStatus",
-                        "params": {"image": {"name": ["switch"]}},
-                    },
-                    {
-                        "method": "getNightVisionModeConfig",
-                        "params": {"image": {"name": "switch"}},
-                    },
-                    {
-                        "method": "getWhitelampStatus",
-                        "params": {"image": {"get_wtl_status": ["null"]}},
-                    },
-                    {
-                        "method": "getWhitelampConfig",
-                        "params": {"image": {"name": "switch"}},
-                    },
-                    {
-                        "method": "getMsgPushConfig",
-                        "params": {"msg_push": {"name": ["chn1_msg_push_info"]}},
-                    },
-                    {
-                        "method": "getSdCardStatus",
-                        "params": {"harddisk_manage": {"table": ["hd_info"]}},
-                    },
-                    {
-                        "method": "getCircularRecordingConfig",
-                        "params": {"harddisk_manage": {"name": "harddisk"}},
-                    },
-                    {
-                        "method": "getRecordPlan",
-                        "params": {"record_plan": {"name": ["chn1_channel"]}},
-                    },
-                    {
-                        "method": "getAudioConfig",
-                        "params": {
-                            "audio_config": {"name": ["speaker", "microphone"]},
+                        {
+                            "method": "getFloodlightConfig",
+                            "params": {"floodlight": {"name": "config"}},
                         },
-                    },
-                    {
-                        "method": "getFirmwareAutoUpgradeConfig",
-                        "params": {
-                            "auto_upgrade": {"name": ["common"]},
+                        {
+                            "method": "getFloodlightCapability",
+                            "params": {"floodlight": {"name": "capability"}},
                         },
-                    },
-                    {
-                        "method": "getVideoQualities",
-                        "params": {"video": {"name": ["main"]}},
-                    },
-                    {
-                        "method": "getVideoCapability",
-                        "params": {"video_capability": {"name": "main"}},
-                    },
-                    {
-                        "method": "getQuickRespList",
-                        "params": {"quick_response": {}},
-                    },
-                ]
-            },
-        }
+                        {
+                            "method": "getPirDetCapability",
+                            "params": {"pir_detection": {"name": "pir_capability"}},
+                        },
+                        {
+                            "method": "getPirDetConfig",
+                            "params": {"pir_detection": {"name": "pir_det"}},
+                        },
+                        {
+                            "method": "getAlertEventType",
+                            "params": {"msg_alarm": {"table": "msg_alarm_type"}},
+                        },
+                        {
+                            "method": "getDstRule",
+                            "params": {"system": {"name": "dst"}},
+                        },
+                        {
+                            "method": "getClockStatus",
+                            "params": {"system": {"name": "clock_status"}},
+                        },
+                        {
+                            "method": "getTimezone",
+                            "params": {"system": {"name": ["basic"]}},
+                        },
+                        {
+                            "method": "getAlertTypeList",
+                            "params": {"msg_alarm": {"name": "alert_type"}},
+                        },
+                        {
+                            "method": "getNightVisionCapability",
+                            "params": {
+                                "image_capability": {"name": ["supplement_lamp"]}
+                            },
+                        },
+                        {
+                            "method": "getDeviceInfo",
+                            "params": {"device_info": {"name": ["basic_info"]}},
+                        },
+                        {
+                            "method": "getDetectionConfig",
+                            "params": {"motion_detection": {"name": ["motion_det"]}},
+                        },
+                        {
+                            "method": "getPersonDetectionConfig",
+                            "params": {"people_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getVehicleDetectionConfig",
+                            "params": {"vehicle_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getBCDConfig",
+                            "params": {"sound_detection": {"name": ["bcd"]}},
+                        },
+                        {
+                            "method": "getPetDetectionConfig",
+                            "params": {"pet_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getPackageDetectionConfig",
+                            "params": {"package_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getBarkDetectionConfig",
+                            "params": {"bark_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getMeowDetectionConfig",
+                            "params": {"meow_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getGlassDetectionConfig",
+                            "params": {"glass_detection": {"name": ["detection"]}},
+                        },
+                        {
+                            "method": "getTamperDetectionConfig",
+                            "params": {"tamper_detection": {"name": "tamper_det"}},
+                        },
+                        {
+                            "method": "getLensMaskConfig",
+                            "params": {"lens_mask": {"name": ["lens_mask_info"]}},
+                        },
+                        {
+                            "method": "getLdc",
+                            "params": {"image": {"name": ["switch", "common"]}},
+                        },
+                        {
+                            "method": "getLastAlarmInfo",
+                            "params": {"msg_alarm": {"name": ["chn1_msg_alarm_info"]}},
+                        },
+                        {
+                            "method": "getLedStatus",
+                            "params": {"led": {"name": ["config"]}},
+                        },
+                        {
+                            "method": "getTargetTrackConfig",
+                            "params": {"target_track": {"name": ["target_track_info"]}},
+                        },
+                        {
+                            "method": "getPresetConfig",
+                            "params": {"preset": {"name": ["preset"]}},
+                        },
+                        {
+                            "method": "getFirmwareUpdateStatus",
+                            "params": {"cloud_config": {"name": "upgrade_status"}},
+                        },
+                        {
+                            "method": "getMediaEncrypt",
+                            "params": {"cet": {"name": ["media_encrypt"]}},
+                        },
+                        {
+                            "method": "getConnectionType",
+                            "params": {"network": {"get_connection_type": []}},
+                        },
+                        {"method": "getAlarmConfig", "params": {"msg_alarm": {}}},
+                        {"method": "getAlarmPlan", "params": {"msg_alarm_plan": {}}},
+                        {"method": "getSirenTypeList", "params": {"msg_alarm": {}}},
+                        {"method": "getSirenTypeList", "params": {"siren": {}}},
+                        {"method": "getSirenConfig", "params": {"siren": {}}},
+                        {
+                            "method": "getAlertConfig",
+                            "params": {
+                                "msg_alarm": {
+                                    "name": ["chn1_msg_alarm_info", "capability"],
+                                    "table": ["usr_def_audio"],
+                                }
+                            },
+                        },
+                        {
+                            "method": "getAlertConfig",
+                            "params": {
+                                "msg_alarm": {
+                                    "name": ["chn1_msg_alarm_info"],
+                                    "table": ["usr_def_audio"],
+                                }
+                            },
+                        },
+                        {"method": "getLightTypeList", "params": {"msg_alarm": {}}},
+                        {"method": "getSirenStatus", "params": {"msg_alarm": {}}},
+                        {"method": "getSirenStatus", "params": {"siren": {}}},
+                        {
+                            "method": "getLightFrequencyInfo",
+                            "params": {"image": {"name": "common"}},
+                        },
+                        {
+                            "method": "getLightFrequencyCapability",
+                            "params": {"image": {"name": "common"}},
+                        },
+                        {
+                            "method": "getChildDeviceList",
+                            "params": {"childControl": {"start_index": 0}},
+                        },
+                        {
+                            "method": "getRotationStatus",
+                            "params": {"image": {"name": ["switch"]}},
+                        },
+                        {
+                            "method": "getNightVisionModeConfig",
+                            "params": {"image": {"name": "switch"}},
+                        },
+                        {
+                            "method": "getWhitelampStatus",
+                            "params": {"image": {"get_wtl_status": ["null"]}},
+                        },
+                        {
+                            "method": "getWhitelampConfig",
+                            "params": {"image": {"name": "switch"}},
+                        },
+                        {
+                            "method": "getMsgPushConfig",
+                            "params": {"msg_push": {"name": ["chn1_msg_push_info"]}},
+                        },
+                        {
+                            "method": "getSdCardStatus",
+                            "params": {"harddisk_manage": {"table": ["hd_info"]}},
+                        },
+                        {
+                            "method": "getCircularRecordingConfig",
+                            "params": {"harddisk_manage": {"name": "harddisk"}},
+                        },
+                        {
+                            "method": "getRecordPlan",
+                            "params": {"record_plan": {"name": ["chn1_channel"]}},
+                        },
+                        {
+                            "method": "getAudioConfig",
+                            "params": {
+                                "audio_config": {"name": ["speaker", "microphone"]},
+                            },
+                        },
+                        {
+                            "method": "getFirmwareAutoUpgradeConfig",
+                            "params": {
+                                "auto_upgrade": {"name": ["common"]},
+                            },
+                        },
+                        {
+                            "method": "getVideoQualities",
+                            "params": {"video": {"name": ["main"]}},
+                        },
+                        {
+                            "method": "getVideoCapability",
+                            "params": {"video_capability": {"name": "main"}},
+                        },
+                        {
+                            "method": "getQuickRespList",
+                            "params": {"quick_response": {}},
+                        },
+                        {
+                            "method": "getChimeRingPlan",
+                            "params": {
+                                "chime_ring_plan": {"name": "chn1_chime_ring_plan"}
+                            },
+                        },
+                        {
+                            "method": "getRingStatus",
+                            "params": {"ring": {"name": "status"}},
+                        },
+                        {
+                            "method": "getChimeCtrlList",
+                            "params": {"chime_ctrl": {"get_paired_device_list": {}}},
+                        },
+                        {
+                            "method": "getBatteryPowerSave",
+                            "params": {"battery": {"name": "power_save"}},
+                        },
+                        {
+                            "method": "getBatteryOperatingMode",
+                            "params": {"battery": {"name": "operating"}},
+                        },
+                        {
+                            "method": "getBatteryOperatingModeParam",
+                            "params": {"battery": {"name": "operating_mode_param"}},
+                        },
+                        {
+                            "method": "getPowerMode",
+                            "params": {"battery": {"name": "power"}},
+                        },
+                        {
+                            "method": "getChargingMode",
+                            "params": {"battery": {"name": "charging_mode"}},
+                        },
+                        {
+                            "method": "getBatteryStatistic",
+                            "params": {"battery": {"statistic": {"days": 30}}},
+                        },
+                        {
+                            "method": "getBatteryConfig",
+                            "params": {"battery": {"name": "config"}},
+                        },
+                        {
+                            "method": "getWakeUpConfig",
+                            "params": {"wake_up": {"name": "config"}},
+                        },
+                        {
+                            "method": "getBatteryCapability",
+                            "params": {"battery": {"name": "capability"}},
+                        },
+                        {
+                            "method": "getHubStorage",
+                            "params": {"hub_manage": {"name": "hub_storage_info"}},
+                        },
+                        {
+                            "method": "getPirSensitivity",
+                            "params": {"pir": {"name": "config"}},
+                        },
+                        {
+                            "method": "getClipsConfig",
+                            "params": {"clips": {"name": "config"}},
+                        },
+                    ]
+                },
+            }
         if len(omit_methods) != 0:
             filtered_requests = [
                 request
@@ -2199,11 +2746,20 @@ class Tapo:
                         f"Method {result['method']} has been returned more times than expected. Response: {results}"
                     )
 
-        if len(returnData["getPresetConfig"]) == 1:
+        if "getPresetConfig" in returnData and len(returnData["getPresetConfig"]) == 1:
             if returnData["getPresetConfig"][0]:
                 self.presets = self.processPresetsResponse(
                     returnData["getPresetConfig"][0]
                 )
-        else:
+        elif self.deviceType != "SMART.TAPOCHIME":
             raise Exception("Unexpected number of getPresetConfig responses")
+
+        if "get_device_info" in returnData:
+            self.basicInfo = returnData["get_device_info"]
+        elif "getDeviceInfo" in returnData:
+            self.basicInfo = returnData["getDeviceInfo"]
+
+        if "get_pair_list" in returnData:
+            self.pairList = returnData["get_pair_list"][0]
+
         return returnData

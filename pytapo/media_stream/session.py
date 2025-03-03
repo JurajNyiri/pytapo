@@ -280,14 +280,16 @@ class HttpMediaSession:
                         seq = json_data["seq"]
                     if "params" in json_data and "session_id" in json_data["params"]:
                         session = int(json_data["params"]["session_id"])
-                    elif ("type" in json_data 
+                    elif (
+                        "type" in json_data
                         and json_data["type"] == "notification"
                         and "params" in json_data
                         and "event_type" in json_data["params"]
                         and json_data["params"]["event_type"] == "stream_status"
                         and "status" in json_data["params"]
                         and json_data["params"]["status"] == "finished"
-                        and len(self._sessions) > 0):
+                        and len(self._sessions) > 0
+                    ):
                         # use next queue item to inject this info, since no id session can be inferred
                         queue = next(iter(self._sessions.values()))
                 except JSONDecodeError:
@@ -442,7 +444,7 @@ class HttpMediaSession:
         await self._send_http_request(b"--" + self.client_boundary, headers)
 
         chunk_size = 4096
-        
+
         for i in range(0, len(data), chunk_size):
             self._writer.write(data[i : i + chunk_size])
             await self._writer.drain()
@@ -494,7 +496,7 @@ class HttpMediaSession:
                     session = resp.session
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
                     raise resp.plaintext
-                
+
                 tsReader.setBuffer(list(resp.plaintext))
                 pkt = tsReader.getPacket()
                 if pkt:
