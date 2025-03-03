@@ -245,7 +245,10 @@ class Tapo:
                         except Exception as err:
                             raise Exception("PyTapo KLAP Error #5: " + str(err))
         elif not self.stok:
-            return self.refreshStok()
+            if self.hass is None:
+                return self.refreshStok()
+            else:
+                await self.hass.async_add_executor_job(self.refreshStok)
         return True
 
     def request(self, method, url, **kwargs):
