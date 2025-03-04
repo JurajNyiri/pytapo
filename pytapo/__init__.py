@@ -63,7 +63,7 @@ class Tapo:
         controlPort=443,
         retryStok=True,
         redactConfidentialInformation=True,
-        streamPort=8880,
+        streamPort=8800,
         isKLAP=None,
         KLAPVersion=None,
         hass=None,
