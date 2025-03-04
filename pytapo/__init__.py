@@ -3,7 +3,6 @@
 #
 import hashlib
 import json
-from aiohttp import ServerDisconnectedError
 import requests
 import base64
 import copy

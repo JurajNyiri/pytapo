@@ -15,13 +15,19 @@ window_size = os.environ.get(
 )  # set to prefferred window size, affects download speed and stability, recommended: 50
 
 print("Connecting to camera...")
-tapo = Tapo(host, "admin", password_cloud, password_cloud)
+tapo = Tapo(host, "admin", password_cloud, password_cloud, printDebugInformation=True)
 
 
 async def download_async():
     print("Getting recordings...")
-    recordings = tapo.getRecordings(date)
-    timeCorrection = tapo.getTimeCorrection()
+    recordings = await asyncio.get_event_loop().run_in_executor(
+        None, tapo.getRecordings, date
+    )
+    print("Getting time correction...")
+    timeCorrection = await asyncio.get_event_loop().run_in_executor(
+        None, tapo.getTimeCorrection
+    )
+    print("Looping through recordings...")
     for recording in recordings:
         for key in recording:
             downloader = Downloader(
@@ -52,5 +58,7 @@ async def download_async():
             print("")
 
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(download_async())
+if __name__ == "__main__":
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(download_async())
