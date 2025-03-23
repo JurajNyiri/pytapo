@@ -574,9 +574,10 @@ class Tapo:
             and "sec_left" in responseData["result"]["data"]
             and responseData["result"]["data"]["sec_left"] > 0
         ):
+            timeout = responseData["result"]["data"]["sec_left"]
             raise TemporarySuspension(
-                f"Temporary Suspension: Try again in {str(responseData['result']['data']['sec_left'])} seconds",
-                responseData["result"]["data"]["sec_left"],
+                f"Temporary Suspension: Try again in {str(timeout)} seconds",
+                timeout,
             )
         if (
             "data" in responseData
@@ -585,9 +586,10 @@ class Tapo:
             and responseData["data"]["code"] == -40404
             and responseData["data"]["sec_left"] > 0
         ):
+            timeout = responseData["data"]["sec_left"]
             raise TemporarySuspension(
-                f"Temporary Suspension: Try again in {str(responseData['data']['sec_left'])} seconds",
-                responseData["data"]["sec_left"]
+                f"Temporary Suspension: Try again in {str(timeout)} seconds",
+                timeout
             )
 
         if self.responseIsOK(res):
