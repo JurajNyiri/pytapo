@@ -4,6 +4,11 @@ Python library for communication with Tapo Cameras.
 
 Used inside Home Assistant Integration [HomeAssistant-Tapo-Control](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control).
 
+## Pre-Requirements
+
+- Python3.13
+- PIP modules installed
+
 ## Install:
 
 ```
