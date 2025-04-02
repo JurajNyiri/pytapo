@@ -13,3 +13,4 @@ htmlcov
 output
 .DS_Store
 .vscode
+.idea/
