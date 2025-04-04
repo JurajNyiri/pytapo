@@ -14,7 +14,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/JurajNyiri/pytapo",
     packages=setuptools.find_packages(),
-    install_requires=["requests", "urllib3", "pycryptodome", "rtp"],
+    install_requires=["requests", "urllib3", "pycryptodome", "rtp", "python-kasa"],
     tests_require=["pytest", "pytest-asyncio", "mock"],
     classifiers=[
         "Programming Language :: Python :: 3",
