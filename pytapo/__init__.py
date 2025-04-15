@@ -2252,6 +2252,11 @@ class Tapo:
             }
         )
 
+    def getDeviceIpAddress(self):
+        return self.executeFunction(
+            "getDeviceIpAddress", {"network": {"name": ["wan"]}}
+        )["network"]["wan"]
+
     def getChimeRingPlan(self):
         return self.executeFunction(
             "getChimeRingPlan", {"chime_ring_plan": {"name": "chn1_chime_ring_plan"}}
@@ -2405,6 +2410,10 @@ class Tapo:
                 "method": "multipleRequest",
                 "params": {
                     "requests": [
+                        {
+                            "method": "getDeviceIpAddress",
+                            "params": {"network": {"name": ["wan"]}},
+                        },
                         {
                             "method": "getFloodlightStatus",
                             "params": {"floodlight": {"get_floodlight_status": ""}},
