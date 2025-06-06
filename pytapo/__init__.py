@@ -1278,10 +1278,76 @@ class Tapo:
             "getAlertTypeList", {"msg_alarm": {"name": "alert_type"}}
         )
 
+    def getDayNightModeConfig(self):
+        return self.executeFunction(
+            "getDayNightModeConfig",
+            {"image": {"name": "common"}},
+        )
+
+    def getThirdAccount(self):
+        return self.executeFunction(
+            "getThirdAccount",
+            {"user_management": {"name": ["third_account"]}},
+        )
+
+    def getTapoCareServiceList(self):
+        return self.executeFunction(
+            "getTapoCareServiceList",
+            {"tapo_care": {"name": ["service_list"]}},
+        )
+
+    def getCoverConfig(self):
+        return self.executeFunction(
+            "getCoverConfig",
+            {"cover": {"name": ["cover"]}},
+        )
+
+    def setCoverConfig(self, enabled: bool):
+        return self.executeFunction(
+            "setCoverConfig",
+            {"cover": {"cover": {"enabled": "on" if enabled else "off"}}},
+        )
+
+    def getCoverRegion(self):
+        return self.executeFunction(
+            "getCoverConfig",
+            {"cover": {"table": ["region_info"]}},
+        )
+
     def getFirmwareAutoUpgradeConfig(self):
         return self.executeFunction(
             "getFirmwareAutoUpgradeConfig",
             {"auto_upgrade": {"name": ["common"]}},
+        )
+
+    def getWifiBackup(self):
+        return self.executeFunction(
+            "getWifiBackup",
+            {"hub_manage": {"name": "wifi_backup"}},
+        )
+
+    def startScanHub(self):
+        return self.executeFunction(
+            "startScanHub",
+            {"hub_manage": {"start_scan_hub": {"unicast_hub_info": []}}},
+        )
+
+    def checkDiagnoseStatus(self):
+        return self.executeFunction(
+            "checkDiagnoseStatus",
+            {"system": {"check_diagnose_status": ""}},
+        )
+
+    def getDiagnoseMode(self):
+        return self.executeFunction(
+            "getDiagnoseMode",
+            {"system": {"name": "sys"}},
+        )
+
+    def setDiagnoseMode(self, enabled: bool):
+        return self.executeFunction(
+            "setDiagnoseMode",
+            {"system": {"sys": {"diagnose_mode": "on" if enabled else "off"}}},
         )
 
     # enabled is boolean, time is string like "03:00", random_range is constant in app
@@ -1397,7 +1463,16 @@ class Tapo:
     def getAudioConfig(self):
         return self.executeFunction(
             "getAudioConfig",
-            {"method": "get", "audio_config": {"name": ["speaker", "microphone"]}},
+            {
+                "method": "get",
+                "audio_config": {"name": ["speaker", "microphone", "record_audio"]},
+            },
+        )
+
+    def setRecordAudio(self, enabled: bool):
+        return self.executeFunction(
+            "setRecordAudio",
+            {"audio_config": {"record_audio": {"enabled": "on" if enabled else "off"}}},
         )
 
     def setSpeakerVolume(self, volume):
@@ -1563,6 +1638,12 @@ class Tapo:
         return self.executeFunction(
             "setLensMaskConfig",
             {"lens_mask": {"lens_mask_info": {"enabled": "on" if enabled else "off"}}},
+        )
+
+    def getSmartTrackConfig(self):
+        return self.executeFunction(
+            "getSmartTrackConfig",
+            {"smart_track": {"name": "smart_track_info"}},
         )
 
     def getWhitelampConfig(self):
@@ -2051,6 +2132,18 @@ class Tapo:
             },
         )
 
+    def setSmartTrackConfig(self, type: str, enabled: bool):
+        return self.executeFunction(
+            "setSmartTrackConfig",
+            {
+                "smart_track": {
+                    "smart_track_info": {
+                        type: "on" if enabled else "off",
+                    }
+                }
+            },
+        )
+
     def setCruise(self, enabled, coord=False):
         if coord not in ["x", "y"] and coord is not False:
             raise Exception("Invalid coord parameter. Can be 'x' or 'y'.")
@@ -2411,6 +2504,18 @@ class Tapo:
                 "params": {
                     "requests": [
                         {
+                            "method": "getCoverConfig",
+                            "params": {"cover": {"name": ["cover"]}},
+                        },
+                        {
+                            "method": "getCoverConfig",
+                            "params": {"cover": {"table": ["region_info"]}},
+                        },
+                        {
+                            "method": "getSmartTrackConfig",
+                            "params": {"smart_track": {"name": "smart_track_info"}},
+                        },
+                        {
                             "method": "getDeviceIpAddress",
                             "params": {"network": {"name": ["wan"]}},
                         },
@@ -2613,7 +2718,9 @@ class Tapo:
                         {
                             "method": "getAudioConfig",
                             "params": {
-                                "audio_config": {"name": ["speaker", "microphone"]},
+                                "audio_config": {
+                                    "name": ["speaker", "microphone", "record_audio"]
+                                },
                             },
                         },
                         {
