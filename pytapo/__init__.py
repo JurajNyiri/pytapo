@@ -2504,6 +2504,10 @@ class Tapo:
                 "params": {
                     "requests": [
                         {
+                            "method": "getDiagnoseMode",
+                            "params": {"system": {"name": "sys"}},
+                        },
+                        {
                             "method": "getCoverConfig",
                             "params": {"cover": {"name": ["cover"]}},
                         },
