@@ -113,6 +113,10 @@ After the tests are done, your camera should be in the initial state.
 - [Davide Depau](https://github.com/Depau) for additional [research](https://md.depau.eu/s/r1Ys_oWoP) of the cameras and work on pytapo library
 - [Alex X](https://github.com/AlexxIT) for his incredible work on go2rtc library, and its code for Tapo stream communication which was rewritten to python in order to implement stream-related features of this library
 
+# FAQ
+
+See https://github.com/JurajNyiri/HomeAssistant-Tapo-Control?tab=readme-ov-file#troubleshooting--faq
+
 # Disclaimer
 
 Pytapo is an unofficial module for achieving interoperability with Tapo cameras.
