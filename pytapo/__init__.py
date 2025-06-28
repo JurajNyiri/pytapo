@@ -2194,7 +2194,7 @@ class Tapo:
                 raise Exception("Preset {} is not set in the app".format(str(presetID)))
 
         self.executeFunction(
-            "deletePreset", {"preset": {"remove_preset": {"id": [presetID]}}}
+            "deletePreset", {"preset": {"remove_preset": {"id": [str(presetID)]}}}
         )
         self.getPresets()
         return True
