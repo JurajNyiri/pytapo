@@ -39,9 +39,13 @@ async def download_async():
     print("Getting recordings...")
     ranFor = 0
     downloader = Streamer(
-        tapo, callback, outputDir, includeAudio=True if enable_audio == "yes" else False
+        tapo,
+        callback,
+        outputDir,
+        includeAudio=True if enable_audio == "yes" else False,
+        mode="hls",
     )
-    pids = await downloader.start_hls()
+    pids = await downloader.start()
     print(pids)
 
     while True:
