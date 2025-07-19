@@ -40,6 +40,9 @@ class Streamer:
         self.analyzeDuration = analyzeDuration
         self.includeAudio = includeAudio
         self.mode = mode.lower()
+        # initialise in case audio is disabled
+        self.audio_r = None
+        self.audio_w = None
 
     async def start(self):
         if self.mode == "hls":
@@ -64,8 +67,12 @@ class Streamer:
             "pipe:0",
         ]
 
+        # pass_fds list depends on whether audio is enabled
+        pass_fds = ()
+
         if self.includeAudio:
             self.audio_r, self.audio_w = os.pipe()
+            pass_fds = (self.audio_r,)
             pipe_cmd += [
                 "-f",
                 "alaw",
@@ -103,7 +110,7 @@ class Streamer:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            pass_fds=(self.audio_r,),
+            pass_fds=pass_fds,
         )
 
         asyncio.create_task(self._print_ffmpeg_logs(self.hlsProcess.stderr))
@@ -128,21 +135,26 @@ class Streamer:
         for f in os.listdir(self.outputDirectory):
             os.remove(os.path.join(self.outputDirectory, f))
 
-        self.audio_r, self.audio_w = os.pipe()
+        hls_cmd = [
+            "ffmpeg",
+            "-loglevel",
+            f"{self.logLevel}",
+            "-probesize",
+            f"{self.probeSize}",
+            "-analyzeduration",
+            f"{self.analyzeDuration}",
+            "-f",
+            "mpegts",
+            "-i",
+            "pipe:0",  # Video input from pipe
+        ]
+
+        pass_fds = ()
 
         if self.includeAudio:
-            hls_cmd = [
-                "ffmpeg",
-                "-loglevel",
-                f"{self.logLevel}",
-                "-probesize",
-                f"{self.probeSize}",
-                "-analyzeduration",
-                f"{self.analyzeDuration}",
-                "-f",
-                "mpegts",
-                "-i",
-                "pipe:0",  # Video input from pipe
+            self.audio_r, self.audio_w = os.pipe()
+            pass_fds = (self.audio_r,)
+            hls_cmd += [
                 "-f",
                 "alaw",
                 "-ar",
@@ -159,50 +171,33 @@ class Streamer:
                 "aac",
                 "-b:a",
                 "128k",
-                "-f",
-                "hls",
-                "-hls_time",
-                f"{HLS_TIME}",
-                "-hls_list_size",
-                f"{HLS_LIST_SIZE}",
-                "-hls_flags",
-                HLS_FLAGS,
-                os.path.join(self.outputDirectory, self.fileName),
             ]
         else:
-            hls_cmd = [
-                "ffmpeg",
-                "-loglevel",
-                f"{self.logLevel}",
-                "-probesize",
-                f"{self.probeSize}",
-                "-analyzeduration",
-                f"{self.analyzeDuration}",
-                "-f",
-                "mpegts",
-                "-i",
-                "pipe:0",
+            hls_cmd += [
                 "-map",
                 "0:v:0",
                 "-c:v",
                 "copy",
-                "-f",
-                "hls",
-                "-hls_time",
-                f"{HLS_TIME}",
-                "-hls_list_size",
-                f"{HLS_LIST_SIZE}",
-                "-hls_flags",
-                HLS_FLAGS,
-                os.path.join(self.outputDirectory, self.fileName),
             ]
+
+        hls_cmd += [
+            "-f",
+            "hls",
+            "-hls_time",
+            f"{HLS_TIME}",
+            "-hls_list_size",
+            f"{HLS_LIST_SIZE}",
+            "-hls_flags",
+            HLS_FLAGS,
+            os.path.join(self.outputDirectory, self.fileName),
+        ]
 
         self.hlsProcess = await asyncio.create_subprocess_exec(
             *hls_cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,  # Capture stderr for logs
-            pass_fds=(self.audio_r,),  # Pass the read end of the pipe
+            pass_fds=pass_fds,  # Pass the read end of the pipe only if audio enabled
         )
 
         asyncio.create_task(self._print_ffmpeg_logs(self.hlsProcess.stderr))
@@ -258,14 +253,16 @@ class Streamer:
                         )
                         continue
 
-                    if resp.audioPayload:
+                    # Always write video to ffmpeg
+                    self.hlsProcess.stdin.write(resp.plaintext)
+
+                    # Write audio only if enabled and present
+                    if self.includeAudio and resp.audioPayload:
                         try:
                             os.write(self.audio_w, resp.audioPayload)
                         except OSError as e:
                             print(f"Error writing audio to pipe: {e}")
                             break
-                    else:
-                        self.hlsProcess.stdin.write(resp.plaintext)
 
     async def stop_hls(self):
         """Stops the HLS streaming process."""
