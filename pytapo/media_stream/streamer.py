@@ -43,6 +43,8 @@ class Streamer:
         # initialise in case audio is disabled
         self.audio_r = None
         self.audio_w = None
+        self._ts_buffer = bytearray()
+        self._audio_buffer = bytearray()
 
     async def start(self):
         if self.mode == "hls":
@@ -276,15 +278,26 @@ class Streamer:
 
                 # ---------- audio (optional) ----------
                 if self.includeAudio and resp.audioPayload:
-                    try:
-                        os.write(self.audio_w, resp.audioPayload)
-                    except OSError:
-                        break
+                    self._audio_buffer += resp.audioPayload
+                    # flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
+                    while len(self._audio_buffer) >= 160:
+                        chunk = self._audio_buffer[:160]
+                        self._audio_buffer = self._audio_buffer[160:]
+                        try:
+                            os.write(self.audio_w, chunk)
+                        except OSError:
+                            break
 
                 # ---------- video ----------
-                self.hlsProcess.stdin.write(resp.plaintext)
+                self._ts_buffer += resp.plaintext
 
-                # Drain only when *not* multiplexing audio; otherwise dead‑lock
+                # write only complete 188‑byte cells
+                while len(self._ts_buffer) >= 188:
+                    packet = self._ts_buffer[:188]
+                    self._ts_buffer = self._ts_buffer[188:]
+                    self.hlsProcess.stdin.write(packet)
+
+                # drain only in video‑only mode
                 if not self.includeAudio:
                     await self.hlsProcess.stdin.drain()
 
