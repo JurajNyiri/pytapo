@@ -270,7 +270,9 @@ class Streamer:
 
                 # Keep only full 188‑byte TS packets
                 if len(resp.plaintext) % 188 != 0:
-                    continue
+                    print(
+                        f"Warning: Forwarding short TS packet ({len(resp.plaintext)} bytes)"
+                    )
 
                 # ---------- audio (optional) ----------
                 if self.includeAudio and resp.audioPayload:
