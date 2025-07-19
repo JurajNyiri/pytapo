@@ -115,7 +115,7 @@ class Streamer:
             pass_fds=pass_fds,
         )
 
-        asyncio.create_task(self._drain_stdout(self.hlsProcess.stdout))
+        # asyncio.create_task(self._drain_stdout(self.hlsProcess.stdout))
         asyncio.create_task(self._print_ffmpeg_logs(self.hlsProcess.stderr))
 
         self.running = True
@@ -233,15 +233,15 @@ class Streamer:
 
     async def _stream_to_ffmpeg(self):
         """
-        Send TS packets to ffmpeg.
+        Forward camera preview to FFmpeg.
 
-        • Video always goes to ffmpeg.stdin (async StreamWriter).
-        • If self.includeAudio is True, raw A‑law is written to the
-        separate audio pipe (self.audio_w).
+        ▸ Video (MPEG‑TS, 188‑byte cells) → ffmpeg.stdin
+        ▸ Optional A‑law audio           → dedicated pipe (self.audio_w)
 
-        Calling `await stdin.drain()` is safe when *only* video is flowing,
-        but it can block indefinitely when ffmpeg is also waiting on the
-        audio pipe.  Therefore we skip the drain when audio is enabled.
+        When audio is enabled we never call `await stdin.drain()` because
+        FFmpeg blocks until it has data on *both* inputs; that would dead‑lock
+        the coroutine.  In video‑only mode we keep the drain to avoid filling
+        the kernel pipe.
         """
         mediaSession = self.tapo.getMediaSession()
         mediaSession.set_window_size(self.window_size)
@@ -264,40 +264,53 @@ class Streamer:
             )
 
             async for resp in mediaSession.transceive(payload):
+                # ----------------------------------------------------------------
+                # 1.  Stop on cancellation
+                # ----------------------------------------------------------------
                 if not self.running:
                     break
 
                 if resp.mimetype != "video/mp2t":
                     continue
 
-                # Keep only full 188‑byte TS packets
-                if len(resp.plaintext) % 188 != 0:
-                    print(
-                        f"Warning: Forwarding short TS packet ({len(resp.plaintext)} bytes)"
-                    )
-
-                # ---------- audio (optional) ----------
+                # ----------------------------------------------------------------
+                # 2.  Optional audio
+                # ----------------------------------------------------------------
                 if self.includeAudio and resp.audioPayload:
                     self._audio_buffer += resp.audioPayload
-                    # flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
+
+                    # Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
                     while len(self._audio_buffer) >= 160:
-                        chunk = self._audio_buffer[:160]
+                        frame = self._audio_buffer[:160]
                         self._audio_buffer = self._audio_buffer[160:]
                         try:
-                            os.write(self.audio_w, chunk)
+                            os.write(self.audio_w, frame)
                         except OSError:
                             break
 
-                # ---------- video ----------
+                # ----------------------------------------------------------------
+                # 3.  Video – re‑assemble & byte‑align to 188‑byte TS cells
+                # ----------------------------------------------------------------
                 self._ts_buffer += resp.plaintext
 
-                # write only complete 188‑byte cells
+                # ── drop leading garbage until the first real sync byte (0x47) ──
+                while len(self._ts_buffer) >= 188 and self._ts_buffer[0] != 0x47:
+                    pos = self._ts_buffer.find(0x47, 1)
+                    if pos == -1:
+                        # no sync byte in current buffer – wait for more data
+                        self._ts_buffer.clear()
+                        break
+                    self._ts_buffer = self._ts_buffer[pos:]
+
+                # ── forward only full, correctly aligned 188‑byte packets ───────
                 while len(self._ts_buffer) >= 188:
                     packet = self._ts_buffer[:188]
                     self._ts_buffer = self._ts_buffer[188:]
                     self.hlsProcess.stdin.write(packet)
 
-                # drain only in video‑only mode
+                # ----------------------------------------------------------------
+                # 4.  Back‑pressure only in video‑only mode
+                # ----------------------------------------------------------------
                 if not self.includeAudio:
                     await self.hlsProcess.stdin.drain()
 
