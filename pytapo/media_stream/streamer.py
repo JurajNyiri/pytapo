@@ -9,13 +9,10 @@ HLS_FLAGS = "delete_segments+append_list"
 
 
 class Streamer:
-    FRESH_RECORDING_TIME_SECONDS = 60
-    CHUNK_SAVE_INTERVAL = 150  # Save after 10 chunks
-
     def __init__(
         self,
         tapo,
-        callbackFunction,
+        logFunction=None,
         outputDirectory="./",
         removeFilesInOutputDirectory=False,
         quality="HD",
@@ -28,7 +25,7 @@ class Streamer:
         mode="pipe",
     ):
         self.currentAction = "Idle"
-        self.callbackFunction = callbackFunction
+        self.logFunction = logFunction
         self.tapo = tapo
         self.fileName = fileName or "stream_output.m3u8"
         self.outputDirectory = outputDirectory
@@ -48,7 +45,6 @@ class Streamer:
         self._audio_buffer = bytearray()
 
     async def start(self):
-        """Starts ffmpeg that writes MPEG‑TS to stdout"""
         self.currentAction = "FFMpeg Starting"
 
         if self.mode == "hls":
@@ -147,17 +143,17 @@ class Streamer:
         }
 
     async def _print_ffmpeg_logs(self, stderr):
-        """Reads and prints FFmpeg logs asynchronously."""
         while True:
             line = await stderr.readline()
             if not line:
                 break
-            self.callbackFunction(
-                {
-                    "currentAction": self.currentAction,
-                    "ffmpegLog": line.decode().strip(),
-                }
-            )
+            if self.logFunction is not None:
+                self.logFunction(
+                    {
+                        "currentAction": self.currentAction,
+                        "ffmpegLog": line.decode().strip(),
+                    }
+                )
 
     async def _stream_to_ffmpeg(self):
         mediaSession = self.tapo.getMediaSession()
