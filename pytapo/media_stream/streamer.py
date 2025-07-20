@@ -17,6 +17,7 @@ class Streamer:
         tapo,
         callbackFunction,
         outputDirectory="./",
+        removeFilesInOutputDirectory=False,
         quality="HD",
         window_size=None,
         fileName=None,
@@ -32,7 +33,7 @@ class Streamer:
         self.fileName = fileName or "stream_output.m3u8"
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 50
-        self.hls_task = None
+        self.stream_task = None
         self.quality = quality
         self.running = False
         self.logLevel = logLevel
@@ -40,19 +41,11 @@ class Streamer:
         self.analyzeDuration = analyzeDuration
         self.includeAudio = includeAudio
         self.mode = mode.lower()
-        # initialise in case audio is disabled
+        self.removeFilesInOutputDirectory = removeFilesInOutputDirectory
         self.audio_r = None
         self.audio_w = None
         self._ts_buffer = bytearray()
         self._audio_buffer = bytearray()
-
-    async def _drain_stdout(self, stdout: asyncio.StreamReader):
-        """Read & discard all bytes from ffmpeg stdout."""
-        try:
-            while await stdout.read(65536):
-                pass
-        except asyncio.CancelledError:
-            pass
 
     async def start(self):
         """Starts ffmpeg that writes MPEG‑TS to stdout"""
@@ -60,10 +53,11 @@ class Streamer:
 
         if self.mode == "hls":
             os.makedirs(self.outputDirectory, exist_ok=True)
-            for f in os.listdir(self.outputDirectory):
-                os.remove(os.path.join(self.outputDirectory, f))
+            if self.removeFilesInOutputDirectory:
+                for f in os.listdir(self.outputDirectory):
+                    os.remove(os.path.join(self.outputDirectory, f))
 
-        pipe_cmd = [
+        cmd = [
             "ffmpeg",
             "-loglevel",
             f"{self.logLevel}",
@@ -81,7 +75,7 @@ class Streamer:
         if self.includeAudio:
             self.audio_r, self.audio_w = os.pipe()
             pass_fds = (self.audio_r,)
-            pipe_cmd += [
+            cmd += [
                 "-f",
                 "alaw",
                 "-ar",
@@ -100,7 +94,7 @@ class Streamer:
                 "128k",
             ]
         else:
-            pipe_cmd += [
+            cmd += [
                 "-map",
                 "0:v:0",
                 "-c:v",
@@ -108,7 +102,7 @@ class Streamer:
             ]
 
         if self.mode == "hls":
-            pipe_cmd += [
+            cmd += [
                 "-f",
                 "hls",
                 "-hls_time",
@@ -120,34 +114,35 @@ class Streamer:
                 os.path.join(self.outputDirectory, self.fileName),
             ]
         else:
-            pipe_cmd += [
+            cmd += [
                 "-f",
                 "mpegts",
                 "pipe:1",
             ]
 
-        self.hlsProcess = await asyncio.create_subprocess_exec(
-            *pipe_cmd,
+        self.streamProcess = await asyncio.create_subprocess_exec(
+            *cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             pass_fds=pass_fds,
         )
 
-        # asyncio.create_task(self._drain_stdout(self.hlsProcess.stdout))
-        asyncio.create_task(self._print_ffmpeg_logs(self.hlsProcess.stderr))
+        asyncio.create_task(self._print_ffmpeg_logs(self.streamProcess.stderr))
 
         self.running = True
-        if self.hls_task is None or self.hls_task.done():
-            self.hls_task = asyncio.create_task(self._stream_to_ffmpeg())
+        if self.stream_task is None or self.stream_task.done():
+            self.stream_task = asyncio.create_task(self._stream_to_ffmpeg())
 
         read_fd = None
         if self.mode == "pipe":
-            read_fd = self.hlsProcess.stdout._transport.get_extra_info("pipe").fileno()
+            read_fd = self.streamProcess.stdout._transport.get_extra_info(
+                "pipe"
+            ).fileno()
 
         return {
-            "ffmpegProcess": self.hlsProcess,
-            "streamProcess": self.hls_task,
+            "ffmpegProcess": self.streamProcess,
+            "streamProcess": self.stream_task,
             "read_fd": read_fd,
         }
 
@@ -165,17 +160,6 @@ class Streamer:
             )
 
     async def _stream_to_ffmpeg(self):
-        """
-        Forward camera preview to FFmpeg.
-
-        ▸ Video (MPEG‑TS, 188‑byte cells) → ffmpeg.stdin
-        ▸ Optional A‑law audio           → dedicated pipe (self.audio_w)
-
-        When audio is enabled we never call `await stdin.drain()` because
-        FFmpeg blocks until it has data on *both* inputs; that would dead‑lock
-        the coroutine.  In video‑only mode we keep the drain to avoid filling
-        the kernel pipe.
-        """
         mediaSession = self.tapo.getMediaSession()
         mediaSession.set_window_size(self.window_size)
         self.currentAction = "Streaming"
@@ -197,22 +181,16 @@ class Streamer:
             )
 
             async for resp in mediaSession.transceive(payload):
-                # ----------------------------------------------------------------
-                # 1.  Stop on cancellation
-                # ----------------------------------------------------------------
                 if not self.running:
                     break
 
                 if resp.mimetype != "video/mp2t":
                     continue
 
-                # ----------------------------------------------------------------
-                # 2.  Optional audio
-                # ----------------------------------------------------------------
+                # Audio - Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
                 if self.includeAudio and resp.audioPayload:
                     self._audio_buffer += resp.audioPayload
 
-                    # Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
                     while len(self._audio_buffer) >= 160:
                         frame = self._audio_buffer[:160]
                         self._audio_buffer = self._audio_buffer[160:]
@@ -221,12 +199,10 @@ class Streamer:
                         except OSError:
                             break
 
-                # ----------------------------------------------------------------
-                # 3.  Video – re‑assemble & byte‑align to 188‑byte TS cells
-                # ----------------------------------------------------------------
+                # Video – re‑assemble & byte‑align to 188‑byte TS cells
                 self._ts_buffer += resp.plaintext
 
-                # ── drop leading garbage until the first real sync byte (0x47) ──
+                # drop leading garbage until the first real sync byte (0x47)
                 while len(self._ts_buffer) >= 188 and self._ts_buffer[0] != 0x47:
                     pos = self._ts_buffer.find(0x47, 1)
                     if pos == -1:
@@ -235,25 +211,21 @@ class Streamer:
                         break
                     self._ts_buffer = self._ts_buffer[pos:]
 
-                # ── forward only full, correctly aligned 188‑byte packets ───────
+                # forward only full, correctly aligned 188‑byte packets
                 while len(self._ts_buffer) >= 188:
                     packet = self._ts_buffer[:188]
                     self._ts_buffer = self._ts_buffer[188:]
-                    self.hlsProcess.stdin.write(packet)
+                    self.streamProcess.stdin.write(packet)
 
-                # ----------------------------------------------------------------
-                # 4.  Back‑pressure only in video‑only mode
-                # ----------------------------------------------------------------
                 if not self.includeAudio:
-                    await self.hlsProcess.stdin.drain()
+                    await self.streamProcess.stdin.drain()
 
-    async def stop_hls(self):
-        """Stops the HLS streaming process."""
-        self.currentAction = "Stopping HLS..."
+    async def stop(self):
+        self.currentAction = "Stopping stream"
         self.running = False
-        if self.hls_task:
-            self.hls_task.cancel()
+        if self.stream_task:
+            self.stream_task.cancel()
             try:
-                await self.hls_task
+                await self.stream_task
             except asyncio.CancelledError:
                 pass
