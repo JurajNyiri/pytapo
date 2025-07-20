@@ -30,18 +30,15 @@ def callback(status: dict):
 
 
 async def main():
-    # ── start the in‑memory stream ───────────────────────────────────────
     streamer = Streamer(
         tapo,
-        callback,
-        outputDirectory=".",  # not used in pipe mode
+        logFunction=callback,
         includeAudio=enable_audio,
         mode="pipe",
     )
     info = await streamer.start()
-    fd = info["read_fd"]  # OS descriptor that carries MPEG‑TS
+    fd = info["read_fd"]
 
-    # make sure it's inheritable; Python will still close it unless we pass it
     os.set_inheritable(fd, True)
 
     print(f"Starting VLC on fd://{fd} …")
@@ -51,13 +48,13 @@ async def main():
         "--demux=ts",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
-        pass_fds=(fd,),  # ← KEEP THE FD OPEN IN THE CHILD
+        pass_fds=(fd,),
     )
 
     try:
-        await vlc.wait()  # block until VLC quits
+        await vlc.wait()
     finally:
-        await streamer.stop_hls()
+        await streamer.stop()
         vlc.terminate()
 
 

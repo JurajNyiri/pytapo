@@ -40,8 +40,8 @@ async def download_async():
     ranFor = 0
     downloader = Streamer(
         tapo,
-        callback,
-        outputDir,
+        logFunction=callback,
+        outputDirectory=outputDir,
         includeAudio=True if enable_audio == "yes" else False,
         mode="hls",
     )
@@ -52,7 +52,7 @@ async def download_async():
         ranFor += 1
         await asyncio.sleep(1)  # Use asyncio.sleep()
         if ranFor > keepRunningFor:
-            await downloader.stop_hls()
+            await downloader.stop()
             break
     print("")
 
