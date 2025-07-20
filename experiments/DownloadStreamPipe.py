@@ -35,6 +35,8 @@ async def main():
         logFunction=callback,
         includeAudio=enable_audio,
         mode="pipe",
+        analyzeDuration=2000000,
+        probeSize="512k",
     )
     info = await streamer.start()
     fd = info["read_fd"]
