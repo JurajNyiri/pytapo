@@ -3,6 +3,9 @@ import os
 import asyncio
 import subprocess
 
+# Add the Queue import
+from asyncio import Queue
+
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
 HLS_FLAGS = "delete_segments+append_list"
@@ -19,7 +22,7 @@ class Streamer:
         window_size=None,
         fileName=None,
         logLevel="debug",
-        probeSize=32,
+        probeSize=131072,
         analyzeDuration=0,
         includeAudio=False,
         mode="pipe",
@@ -31,6 +34,8 @@ class Streamer:
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 50
         self.stream_task = None
+        # NEW: A queue to buffer video packets between the reader and writer
+        self.video_queue = Queue(maxsize=20)
         self.quality = quality
         self.running = False
         self.logLevel = logLevel
@@ -41,7 +46,6 @@ class Streamer:
         self.removeFilesInOutputDirectory = removeFilesInOutputDirectory
         self.audio_r = None
         self.audio_w = None
-        self._ts_buffer = bytearray()
         self._audio_buffer = bytearray()
 
     async def start(self):
@@ -87,15 +91,10 @@ class Streamer:
                 "-c:a",
                 "aac",
                 "-b:a",
-                "128k",
+                "32k",
             ]
         else:
-            cmd += [
-                "-map",
-                "0:v:0",
-                "-c:v",
-                "copy",
-            ]
+            cmd += ["-map", "0:v:0", "-c:v", "copy"]
 
         if self.mode == "hls":
             cmd += [
@@ -110,11 +109,7 @@ class Streamer:
                 os.path.join(self.outputDirectory, self.fileName),
             ]
         else:
-            cmd += [
-                "-f",
-                "mpegts",
-                "pipe:1",
-            ]
+            cmd += ["-f", "mpegts", "pipe:1"]
 
         self.streamProcess = await asyncio.create_subprocess_exec(
             *cmd,
@@ -128,7 +123,11 @@ class Streamer:
 
         self.running = True
         if self.stream_task is None or self.stream_task.done():
-            self.stream_task = asyncio.create_task(self._stream_to_ffmpeg())
+            # MODIFIED: Start two concurrent tasks and group them
+            self.stream_task = asyncio.gather(
+                self._stream_to_ffmpeg(),  # The producer
+                self._write_to_pipe(),  # The consumer
+            )
 
         read_fd = None
         if self.mode == "pipe":
@@ -155,66 +154,80 @@ class Streamer:
                     }
                 )
 
+    # NEW: The consumer task. This is the ONLY place that writes to the pipe.
+    async def _write_to_pipe(self):
+        while self.running:
+            try:
+                packet = await self.video_queue.get()
+                if packet is None:  # Sentinel value to stop the loop
+                    break
+                self.streamProcess.stdin.write(packet)
+                await self.streamProcess.stdin.drain()
+            except asyncio.CancelledError:
+                break
+        if self.streamProcess.stdin and not self.streamProcess.stdin.is_closing():
+            self.streamProcess.stdin.close()
+
+    # MODIFIED: The producer task. It only reads from the camera and puts data on the queue.
     async def _stream_to_ffmpeg(self):
+        loop = asyncio.get_running_loop()
         mediaSession = self.tapo.getMediaSession()
         mediaSession.set_window_size(self.window_size)
         self.currentAction = "Streaming"
+        _ts_buffer = bytearray()
 
-        async with mediaSession:
-            payload = json.dumps(
-                {
-                    "type": "request",
-                    "seq": 1,
-                    "params": {
-                        "preview": {
-                            "audio": ["default"],
-                            "channels": [0],
-                            "resolutions": [self.quality],
+        try:
+            async with mediaSession:
+                payload = json.dumps(
+                    {
+                        "type": "request",
+                        "seq": 1,
+                        "params": {
+                            "preview": {
+                                "audio": ["default"],
+                                "channels": [0],
+                                "resolutions": [self.quality],
+                            },
+                            "method": "get",
                         },
-                        "method": "get",
-                    },
-                }
-            )
-
-            async for resp in mediaSession.transceive(payload):
-                if not self.running:
-                    break
-
-                if resp.mimetype != "video/mp2t":
-                    continue
-
-                # Audio - Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
-                if self.includeAudio and resp.audioPayload:
-                    self._audio_buffer += resp.audioPayload
-
-                    while len(self._audio_buffer) >= 160:
-                        frame = self._audio_buffer[:160]
-                        self._audio_buffer = self._audio_buffer[160:]
-                        try:
-                            os.write(self.audio_w, frame)
-                        except OSError:
-                            break
-
-                # Video – re‑assemble & byte‑align to 188‑byte TS cells
-                self._ts_buffer += resp.plaintext
-
-                # drop leading garbage until the first real sync byte (0x47)
-                while len(self._ts_buffer) >= 188 and self._ts_buffer[0] != 0x47:
-                    pos = self._ts_buffer.find(0x47, 1)
-                    if pos == -1:
-                        # no sync byte in current buffer – wait for more data
-                        self._ts_buffer.clear()
+                    }
+                )
+                async for resp in mediaSession.transceive(payload):
+                    if not self.running:
                         break
-                    self._ts_buffer = self._ts_buffer[pos:]
+                    if resp.mimetype != "video/mp2t":
+                        continue
 
-                # forward only full, correctly aligned 188‑byte packets
-                while len(self._ts_buffer) >= 188:
-                    packet = self._ts_buffer[:188]
-                    self._ts_buffer = self._ts_buffer[188:]
-                    self.streamProcess.stdin.write(packet)
+                    if self.includeAudio and resp.audioPayload:
+                        self._audio_buffer += resp.audioPayload
+                        while len(self._audio_buffer) >= 160:
+                            frame = self._audio_buffer[:160]
+                            self._audio_buffer = self._audio_buffer[160:]
+                            try:
+                                await loop.run_in_executor(
+                                    None, os.write, self.audio_w, frame
+                                )
+                            except OSError:
+                                break
 
-                if not self.includeAudio:
-                    await self.streamProcess.stdin.drain()
+                    _ts_buffer += resp.plaintext
+                    while len(_ts_buffer) >= 188 and _ts_buffer[0] != 0x47:
+                        pos = _ts_buffer.find(b"\x47", 1)
+                        if pos == -1:
+                            _ts_buffer.clear()
+                            break
+                        _ts_buffer = _ts_buffer[pos:]
+
+                    while len(_ts_buffer) >= 188:
+                        packet = _ts_buffer[:188]
+                        _ts_buffer = _ts_buffer[188:]
+                        await self.video_queue.put(
+                            packet
+                        )  # Put video packet on the queue
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await self.video_queue.put(None)  # Signal the writer to stop
 
     async def stop(self):
         self.currentAction = "Stopping stream"
@@ -225,3 +238,12 @@ class Streamer:
                 await self.stream_task
             except asyncio.CancelledError:
                 pass
+
+        if self.audio_w:
+            os.close(self.audio_w)
+        if self.audio_r:
+            os.close(self.audio_r)
+
+        if self.streamProcess and self.streamProcess.returncode is None:
+            self.streamProcess.terminate()
+            await self.streamProcess.wait()
