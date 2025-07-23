@@ -5,26 +5,26 @@ import logging
 import random
 import warnings
 import urllib.parse
-from pytapo.const import EncryptionMethod
+from ..const import EncryptionMethod
 from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
 from typing import Optional, Mapping, Generator, MutableMapping
 
 from rtp import PayloadType
 
-from pytapo.media_stream._utils import (
+from ._utils import (
     generate_nonce,
     pwd_digest,
     parse_http_response,
     parse_http_headers,
 )
-from pytapo.media_stream.crypto import AESHelper
-from pytapo.media_stream.error import (
+from .crypto import AESHelper
+from .error import (
     HttpStatusCodeException,
     KeyExchangeMissingException,
 )
-from pytapo.media_stream.response import HttpMediaResponse
-from pytapo.media_stream.tsReader import TSReader
+from .response import HttpMediaResponse
+from .tsReader import TSReader
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ class HttpMediaSession:
             self._reader, self._writer = await asyncio.open_connection(
                 self.ip, self.port
             )
-            logger.info("Connected to the media streaming server")
+            logger.debug("Connected to the media streaming server")
 
             # Step one: perform unauthenticated request
             await self._send_http_request(req_line, headers)
@@ -164,7 +164,10 @@ class HttpMediaSession:
             # Ensure the request was successful
             data = await self._reader.readuntil(b"\r\n\r\n")
             res_line, headers_block = data.split(b"\r\n", 1)
+            logger.debug("Before parsing http response")
+            logger.debug(res_line)
             _, status_code, _ = parse_http_response(res_line)
+            logger.debug("After parsing http response")
             if status_code != 200:
                 raise HttpStatusCodeException(status_code)
 
