@@ -2,6 +2,7 @@ import json
 import os
 import asyncio
 import subprocess
+from ._utils import StreamType
 
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
@@ -156,7 +157,7 @@ class Streamer:
                 )
 
     async def _stream_to_ffmpeg(self):
-        mediaSession = self.tapo.getMediaSession()
+        mediaSession = self.tapo.getMediaSession(StreamType.Stream)
         mediaSession.set_window_size(self.window_size)
         self.currentAction = "Streaming"
 

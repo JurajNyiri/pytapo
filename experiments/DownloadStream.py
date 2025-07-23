@@ -10,6 +10,7 @@ password_cloud = os.environ.get("PASSWORD_CLOUD")  # set to your cloud password
 stream_port = os.environ.get("STREAM_PORT")
 control_port = os.environ.get("CONTROL_PORT")
 enable_audio = os.environ.get("ENABLE_AUDIO")
+stream_from_device_mac = os.environ.get("STREAM_FROM_MAC")
 
 # optional
 window_size = os.environ.get(
@@ -26,6 +27,22 @@ tapo = Tapo(
     streamPort=stream_port,
 )
 
+childrenDevices = {}
+try:
+    for child in tapo.getChildDevices():
+        print("Connecting to " + child["device_name"] + "...")
+        childrenDevices[child["mac"].replace(":", "")] = Tapo(
+            host,
+            "admin",
+            password_cloud,
+            password_cloud,
+            childID=child["device_id"],
+        )
+
+except Exception:
+    print("Device is not a hub.")
+    pass
+
 
 def callback(status):
     print(status)
@@ -36,23 +53,36 @@ keepRunningFor = 6000
 
 
 async def download_async():
-    print("Getting recordings...")
+    if childrenDevices:
+        if stream_from_device_mac in childrenDevices:
+            tapoDevice = childrenDevices[stream_from_device_mac.replace(":", "")]
+        else:
+            print(
+                "Error: You need to set STREAM_FROM_MAC environment variable, choose from below:"
+            )
+            for mac in childrenDevices:
+                print(mac)
+            raise Exception("You need to set STREAM_FROM_MAC environment variable.")
+    else:
+        tapoDevice = tapo
+    print("Starting stream...")
     ranFor = 0
-    downloader = Streamer(
-        tapo,
+    streamer = Streamer(
+        tapoDevice,
         logFunction=callback,
         outputDirectory=outputDir,
         includeAudio=True if enable_audio == "yes" else False,
         mode="hls",
+        quality="VGA",
     )
-    pids = await downloader.start()
+    pids = await streamer.start()
     print(pids)
 
     while True:
         ranFor += 1
         await asyncio.sleep(1)  # Use asyncio.sleep()
         if ranFor > keepRunningFor:
-            await downloader.stop()
+            await streamer.stop()
             break
     print("")
 

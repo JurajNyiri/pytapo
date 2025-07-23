@@ -4,6 +4,7 @@ import json
 import logging
 import random
 import warnings
+import urllib.parse
 from pytapo.const import EncryptionMethod
 from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
@@ -39,6 +40,7 @@ class HttpMediaSession:
         port: int = 8800,
         username: str = "admin",
         multipart_boundary: bytes = b"--client-stream-boundary--",
+        query_params: dict = {},
     ):
         self.ip = ip
         self.window_size = window_size
@@ -67,6 +69,10 @@ class HttpMediaSession:
 
         self._sequence_numbers: MutableMapping[int, Queue] = {}
         self._sessions: MutableMapping[int, Queue] = {}
+        self.query_params = query_params
+        self.query_params_str = ""
+        if any(query_params):
+            self.query_params_str = f"?{urllib.parse.urlencode(query_params)}"
 
     def set_window_size(self, window_size):
         self.window_size = window_size
@@ -80,7 +86,7 @@ class HttpMediaSession:
         return self
 
     async def start(self):
-        req_line = b"POST /stream HTTP/1.1"
+        req_line = f"POST /stream{self.query_params_str} HTTP/1.1".encode()
         headers = {
             b"Content-Type": "multipart/mixed;boundary={}".format(
                 self.client_boundary.decode()
@@ -88,6 +94,8 @@ class HttpMediaSession:
             b"Connection": b"keep-alive",
             b"Content-Length": b"-1",
         }
+        if self.query_params_str:
+            headers[b"X-Client-UUID"] = self.query_params["playerId"].encode()
         try:
             self._reader, self._writer = await asyncio.open_connection(
                 self.ip, self.port

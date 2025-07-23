@@ -1,8 +1,15 @@
 import hashlib
 import os
+from enum import Enum
+
 from pytapo.const import EncryptionMethod
 
 from typing import Mapping, Tuple, Optional
+
+
+class StreamType(Enum):
+    Stream = "Stream"
+    Download = "Download"
 
 
 def pwd_digest(
@@ -30,7 +37,28 @@ def parse_http_headers(data: bytes) -> Mapping[str, str]:
     }
 
 
+# Some devices respond with 'HTTP ERROR 401HTTP/1.0 200 OK'. This fixes it. ¯\_(ツ)_/¯
+def check_and_correct_http_response(data: bytes) -> bytes:
+    __HTTP_VERSION_LIST = [
+        "HTTP/0.9",
+        "HTTP/1.0",
+        "HTTP/1.1",
+        "HTTP/2",
+        "HTTP/3",
+    ]
+    decode_data = data.decode()
+    check = any([decode_data.startswith(v) for v in __HTTP_VERSION_LIST])
+    if not check:
+        for v in __HTTP_VERSION_LIST:
+            pos = decode_data.find(v)
+            if pos != -1:
+                return decode_data[pos:].encode()
+    else:
+        return data
+
+
 def parse_http_response(res_line: bytes) -> Tuple[bytes, int, Optional[bytes]]:
+    res_line = check_and_correct_http_response(res_line)
     http_ver, status_code_and_status = res_line.split(b" ", 1)
     if b" " in status_code_and_status:
         status_code, status = status_code_and_status.split(b" ", 1)
