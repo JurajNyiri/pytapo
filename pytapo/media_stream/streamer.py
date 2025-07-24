@@ -69,6 +69,13 @@ class Streamer:
             "-i",
             "pipe:0",
         ]
+
+        if "-frames:v" in self.ff_args:
+            cmd += [
+                "-frames:v",
+                self.ff_args["-frames:v"],
+            ]
+
         pass_fds = ()
 
         if self.includeAudio:
