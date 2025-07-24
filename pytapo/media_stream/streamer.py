@@ -24,6 +24,7 @@ class Streamer:
         analyzeDuration=0,
         includeAudio=False,
         mode="pipe",
+        ff_args={},
     ):
         self.currentAction = "Idle"
         self.logFunction = logFunction
@@ -44,6 +45,7 @@ class Streamer:
         self.audio_w = None
         self._ts_buffer = bytearray()
         self._audio_buffer = bytearray()
+        self.ff_args = ff_args
 
     async def start(self):
         self.currentAction = "FFMpeg Starting"
@@ -57,11 +59,11 @@ class Streamer:
         cmd = [
             "ffmpeg",
             "-loglevel",
-            f"{self.logLevel}",
+            self.ff_args.get("-loglevel", f"{self.logLevel}"),
             "-probesize",
-            f"{self.probeSize}",
+            self.ff_args.get("-probesize", f"{self.probeSize}"),
             "-analyzeduration",
-            f"{self.analyzeDuration}",
+            self.ff_args.get("-analyzeduration", f"{self.analyzeDuration}"),
             "-f",
             "mpegts",
             "-i",
@@ -84,24 +86,32 @@ class Streamer:
                 "-map",
                 "1:a:0",
                 "-c:v",
-                "copy",
+                self.ff_args.get("-c:v", "copy"),
+            ]
+            if "-vsync" in self.ff_args:
+                cmd += [
+                    "-vsync",
+                    self.ff_args["-vsync"],
+                ]
+            cmd += [
                 "-c:a",
-                "aac",
+                self.ff_args.get("-c:a", "aac"),
                 "-b:a",
-                "128k",
+                self.ff_args.get("-b:a", "128k"),
             ]
         else:
-            cmd += [
-                "-map",
-                "0:v:0",
-                "-c:v",
-                "copy",
-            ]
+            cmd += ["-map", "0:v:0"]
+            if "-vsync" in self.ff_args:
+                cmd += [
+                    "-vsync",
+                    self.ff_args["-vsync"],
+                ]
+            cmd += ["-c:v", self.ff_args.get("-c:v", "copy")]
 
         if self.mode == "hls":
             cmd += [
                 "-f",
-                "hls",
+                self.ff_args.get("-f", "hls"),
                 "-hls_time",
                 f"{HLS_TIME}",
                 "-hls_list_size",
@@ -113,7 +123,7 @@ class Streamer:
         else:
             cmd += [
                 "-f",
-                "mpegts",
+                self.ff_args.get("-f", "mpegts"),
                 "pipe:1",
             ]
 

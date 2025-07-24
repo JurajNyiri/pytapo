@@ -1,5 +1,5 @@
 from rtp import RTP, PayloadType
-from pytapo.media_stream._utils import parse_time, annexB2AVC
+from ..media_stream._utils import parse_time, annexB2AVC
 
 
 class PES:

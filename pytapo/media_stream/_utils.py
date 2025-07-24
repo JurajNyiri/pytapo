@@ -2,7 +2,7 @@ import hashlib
 import os
 from enum import Enum
 
-from pytapo.const import EncryptionMethod
+from ..const import EncryptionMethod
 
 from typing import Mapping, Tuple, Optional
 
