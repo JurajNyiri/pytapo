@@ -8,13 +8,14 @@ import base64
 import copy
 import asyncio
 import logging
+import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
 from kasa.exceptions import AuthenticationError
 from kasa import DeviceConfig
 from kasa import Credentials
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from warnings import warn
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
@@ -22,9 +23,7 @@ from Crypto.Util.Padding import pad, unpad
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES, EncryptionMethod
 from .media_stream.session import HttpMediaSession
 from .TlsAdapter import TlsAdapter
-from .media_stream._utils import (
-    generate_nonce,
-)
+from .media_stream._utils import generate_nonce, StreamType
 
 LOGGER = logging.getLogger("pytapo")
 
@@ -66,6 +65,7 @@ class Tapo:
         isKLAP=None,
         KLAPVersion=None,
         hass=None,
+        playerID=None,
     ):
         logger = logging.getLogger("kasa.transports.klaptransport")
         logger.addFilter(SuppressPythonKasaLogs())
@@ -95,6 +95,12 @@ class Tapo:
             self.KLAPVersion = KLAPVersion
         else:
             self.KLAPVersion = None
+
+        if playerID is None:
+            self.playerID = str(uuid.uuid4())
+        else:
+            self.playerID = playerID
+
         self.klapTransport = None
         self.user = user
         self.password = password
@@ -838,13 +844,33 @@ class Tapo:
             elif self.responseIsOK(res):
                 return responseJSON
 
-    def getMediaSession(self):
+    def getMediaSession(self, stream_type: StreamType = None, start_time=""):
+        query_params = {}
+        if self.childID is not None:
+            if stream_type == StreamType.Download:
+                query_params = {
+                    "deviceId": self.childID,
+                    "playerId": self.playerID,
+                    "type": "sdvod",
+                    "start_time": start_time,
+                }
+            elif stream_type == StreamType.Stream:
+                query_params = {
+                    "deviceId": self.childID,
+                    "playerId": self.playerID,
+                    "type": "video",
+                }
+            else:
+                raise Exception(
+                    "Incorrect stream type. Choose StreamType.Stream or StreamType.Download."
+                )
         return HttpMediaSession(
             self.host,
             self.cloudPassword,
             self.superSecretKey,
             self.getEncryptionMethod(),
             port=self.streamPort,
+            query_params=query_params,
         )  # pragma: no cover
 
     def getChildDevices(self):
@@ -1848,7 +1874,46 @@ class Tapo:
             raise Exception("Video playback is not supported by this camera")
         return result["playback"]["search_results"]
 
+    def getRecordingsUTC(
+        self, start_time, end_time, start_index=0, end_index=999999999
+    ):
+        try:
+            result = self.executeFunction(
+                "searchVideoWithUTC",
+                {
+                    "playback": {
+                        "search_video_with_utc": {
+                            "channel": 0,
+                            "end_time": end_time,
+                            "end_index": end_index,
+                            "id": self.getUserID(),
+                            "start_index": start_index,
+                            "start_time": start_time,
+                        }
+                    }
+                },
+            )
+
+            if "playback" not in result:
+                raise Exception("Video playback is not supported by this camera")
+
+            return result["playback"]["search_video_results"]
+        except Exception as err:
+            # user ID expired, get a new one
+            if ERROR_CODES["-71103"] in str(err):
+                self.getUserID(True)
+                return self.getRecordingsUTC(
+                    start_time, end_time, start_index, end_index
+                )
+
     def getRecordings(self, date, start_index=0, end_index=999999999):
+        if self.childID is not None:
+            date_object = datetime.strptime(date, "%Y%m%d")
+            start_time = int(date_object.timestamp())
+            end_time = int(
+                (date_object + timedelta(hours=23, minutes=59, seconds=59)).timestamp()
+            )
+            return self.getRecordingsUTC(start_time, end_time, start_index, end_index)
         try:
             result = self.executeFunction(
                 "searchVideoOfDay",

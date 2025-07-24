@@ -2,6 +2,7 @@ from .convert import Convert
 from pytapo import Tapo
 from datetime import datetime
 from json import JSONDecodeError
+from ._utils import StreamType
 
 import json
 import os
@@ -107,7 +108,7 @@ class Downloader:
                 downloading = False
             else:
                 convert = Convert()
-                mediaSession = self.tapo.getMediaSession()
+                mediaSession = self.tapo.getMediaSession(StreamType.Download)
                 if retry:
                     mediaSession.set_window_size(50)
                 else:

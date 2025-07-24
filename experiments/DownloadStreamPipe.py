@@ -1,23 +1,21 @@
+#!/usr/bin/env python3
 import asyncio
 import os
+import sys
+
 from pytapo import Tapo
 from pytapo.media_stream.streamer import Streamer
 
-# mandatory
-outputDir = os.environ.get("OUTPUT")  # directory path where videos will be saved
-host = os.environ.get("HOST")  # change to camera IP
-password_cloud = os.environ.get("PASSWORD_CLOUD")  # set to your cloud password
+# ── ENVIRONMENT ────────────────────────────────────────────────────────────
+host = os.environ["HOST"]
+password_cloud = os.environ["PASSWORD_CLOUD"]
 stream_port = os.environ.get("STREAM_PORT")
 control_port = os.environ.get("CONTROL_PORT")
-enable_audio = os.environ.get("ENABLE_AUDIO")
+enable_audio = os.environ.get("ENABLE_AUDIO", "no").lower() == "yes"
 stream_from_device_mac = os.environ.get("STREAM_FROM_MAC")
+# ───────────────────────────────────────────────────────────────────────────
 
-# optional
-window_size = os.environ.get(
-    "WINDOW_SIZE"
-)  # set to prefferred window size, affects download speed and stability, recommended: 50
-
-print("Connecting to camera...")
+print("Connecting to camera …")
 tapo = Tapo(
     host,
     "admin",
@@ -26,6 +24,11 @@ tapo = Tapo(
     controlPort=control_port,
     streamPort=stream_port,
 )
+
+
+def callback(status: dict):
+    print(status)
+
 
 childrenDevices = {}
 try:
@@ -38,21 +41,12 @@ try:
             password_cloud,
             childID=child["device_id"],
         )
-
 except Exception:
     print("Device is not a hub.")
     pass
 
 
-def callback(status):
-    print(status)
-    pass
-
-
-keepRunningFor = 6000
-
-
-async def download_async():
+async def main():
     if childrenDevices:
         if stream_from_device_mac in childrenDevices:
             tapoDevice = childrenDevices[stream_from_device_mac.replace(":", "")]
@@ -66,26 +60,38 @@ async def download_async():
     else:
         tapoDevice = tapo
     print("Starting stream...")
-    ranFor = 0
     streamer = Streamer(
         tapoDevice,
         logFunction=callback,
-        outputDirectory=outputDir,
-        includeAudio=True if enable_audio == "yes" else False,
-        mode="hls",
-        quality="VGA",
+        includeAudio=enable_audio,
+        mode="pipe",
+        analyzeDuration=2000000,
+        probeSize="512k",
     )
-    pids = await streamer.start()
-    print(pids)
+    info = await streamer.start()
+    fd = info["read_fd"]
 
-    while True:
-        ranFor += 1
-        await asyncio.sleep(1)  # Use asyncio.sleep()
-        if ranFor > keepRunningFor:
-            await streamer.stop()
-            break
-    print("")
+    os.set_inheritable(fd, True)
+
+    print(f"Starting VLC on fd://{fd} …")
+    vlc = await asyncio.create_subprocess_exec(
+        "/Applications/VLC.app/Contents/MacOS/VLC",
+        f"fd://{fd}",
+        "--demux=ts",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+        pass_fds=(fd,),
+    )
+
+    try:
+        await vlc.wait()
+    finally:
+        await streamer.stop()
+        vlc.terminate()
 
 
 if __name__ == "__main__":
-    asyncio.run(download_async())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        sys.exit(0)

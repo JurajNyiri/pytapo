@@ -1,4 +1,4 @@
-from pytapo.media_stream.pes import PES
+from ..media_stream.pes import PES
 
 
 class TSReader:
