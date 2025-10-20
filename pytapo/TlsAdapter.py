@@ -5,12 +5,7 @@ import urllib3
 from urllib3.util import ssl_
 from urllib3.poolmanager import PoolManager
 
-CIPHERS = ":".join(
-    [
-        "AES256-SHA",
-        "AES128-GCM-SHA256",
-    ]
-)
+CIPHERS = ":".join(["AES256-SHA", "AES128-GCM-SHA256", "ECDHE-ECDSA-AES128-GCM-SHA256"])
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
