@@ -673,7 +673,7 @@ class Tapo:
             return data
         else:
             if "error_code" in data and data["error_code"] == -64303 and retry is False:
-                self.setCruise(False)
+                self.setCruise(False, retry=True)
                 return self.executeFunction(method, params, True)
             raise Exception(
                 "Error: {}, Response: {}".format(
@@ -2209,18 +2209,20 @@ class Tapo:
             },
         )
 
-    def setCruise(self, enabled, coord=False):
+    def setCruise(self, enabled, coord=False, retry=False):
         if coord not in ["x", "y"] and coord is not False:
             raise Exception("Invalid coord parameter. Can be 'x' or 'y'.")
         if enabled and coord is not False:
             return self.executeFunction(
                 "cruiseMove",
                 {"motor": {"cruise": {"coord": coord}}},
+                retry=retry,
             )
         else:
             return self.executeFunction(
                 "cruiseStop",
                 {"motor": {"cruise_stop": {}}},
+                retry=retry,
             )
 
     def reboot(self, delay=None):
