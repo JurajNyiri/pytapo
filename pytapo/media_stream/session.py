@@ -349,6 +349,7 @@ class HttpMediaSession:
                 plaintext=plaintext,
                 json_data=json_data,
                 audioPayload=b"",
+                audioPayloadType=None,
             )
 
             if seq is not None and seq % self.window_size == 0:  # never ack live stream
@@ -510,9 +511,9 @@ class HttpMediaSession:
 
                 tsReader.setBuffer(list(resp.plaintext))
                 pkt = tsReader.getPacket()
-                if pkt:
-                    if pkt.payloadType == PayloadType.PCMA:
-                        resp.audioPayload = pkt.payload
+                if pkt and pkt.payloadType in (PayloadType.PCMA, PayloadType.PCMU):
+                    resp.audioPayload = pkt.payload
+                    resp.audioPayloadType = pkt.payloadType
 
                 yield resp
 

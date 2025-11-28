@@ -12,6 +12,7 @@ class HttpMediaResponse:
         ciphertext: Optional[bytes],
         plaintext: bytes,
         audioPayload: bytes,
+        audioPayloadType,
         json_data,
     ):
         self.seq = seq
@@ -23,3 +24,4 @@ class HttpMediaResponse:
         self.plaintext = plaintext
         self.json_data = json_data
         self.audioPayload = audioPayload
+        self.audioPayloadType = audioPayloadType

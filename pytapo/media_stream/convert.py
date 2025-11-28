@@ -5,6 +5,7 @@ import os
 import datetime
 import tempfile
 import aiofiles
+from rtp import PayloadType
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -18,6 +19,12 @@ class Convert:
         self.known_lengths = {}
         self.addedChunks = 0
         self.lengthLastCalculatedAtChunk = 0
+        self.audio_payload_type = PayloadType.PCMA
+
+    def _get_audio_format(self):
+        if self.audio_payload_type == PayloadType.PCMU:
+            return "mulaw"
+        return "alaw"
 
     # cuts and saves the video
     async def save(self, fileLocation, fileLength, method="ffmpeg"):
@@ -25,16 +32,18 @@ class Convert:
             tempVideoFileLocation = fileLocation + ".ts"
             async with aiofiles.open(tempVideoFileLocation, "wb") as file:
                 await file.write(self.writer.getvalue())
-            tempAudioFileLocation = fileLocation + ".alaw"
+            audio_format = self._get_audio_format()
+            tempAudioFileLocation = f"{fileLocation}.{audio_format}"
             async with aiofiles.open(tempAudioFileLocation, "wb") as file:
                 await file.write(self.audioWriter.getvalue())
 
-            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f alaw -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
+            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f {audioFormat} -ar 8000 -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
                 inputVideoFile=tempVideoFileLocation,
                 inputAudioFile=tempAudioFileLocation,
                 outputFile=fileLocation,
                 videoLength=str(datetime.timedelta(seconds=fileLength)),
                 devnull=os.devnull,
+                audioFormat=audio_format,
             )
             os.system(cmd)
 
@@ -110,6 +119,8 @@ class Convert:
             return self.addedChunks / bytesPerChunk
         return False
 
-    def write(self, data: bytes, audioData: bytes):
+    def write(self, data: bytes, audioData: bytes, audioPayloadType=None):
         self.addedChunks += 1
+        if audioPayloadType is not None:
+            self.audio_payload_type = audioPayloadType
         return self.writer.write(data) and self.audioWriter.write(audioData)

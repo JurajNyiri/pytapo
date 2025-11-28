@@ -140,7 +140,9 @@ class Downloader:
                     async for resp in mediaSession.transceive(payload):
                         if resp.mimetype == "video/mp2t":
                             dataChunks += 1
-                            convert.write(resp.plaintext, resp.audioPayload)
+                            convert.write(
+                                resp.plaintext, resp.audioPayload, resp.audioPayloadType
+                            )
                             detectedLength = convert.getLength()
                             if detectedLength is False:
                                 yield {

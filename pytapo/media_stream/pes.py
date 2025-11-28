@@ -16,7 +16,7 @@ class PES:
     StreamTypeH264 = 0x1B
     StreamTypeH265 = 0x24
     StreamTypePCMATapo = 0x90
-    StreamTypeTapoUnknown = 0x91  # todo what is this audio stream?
+    StreamTypePCMUTapo = 0x91  # G.711 u-law audio
     ModeUnknown = 0
     ModeSize = 1
     ModeStream = 2
@@ -85,25 +85,26 @@ class PES:
                     payloadType=streamType,
                     timestamp=ts,
                 )
-            elif self.StreamType == self.StreamTypePCMATapo:
+            elif self.StreamType in (
+                self.StreamTypePCMATapo,
+                self.StreamTypePCMUTapo,
+            ):
                 self.Sequence = (self.Sequence + 1) % 2**16
                 self.Timestamp += len(payload)
 
-                streamType = None
-                for var_name, var_value in vars(PayloadType).items():
-                    if var_value == self.StreamType:
-                        streamType = PayloadType[var_name]
+                payload_type = (
+                    PayloadType.PCMA
+                    if self.StreamType == self.StreamTypePCMATapo
+                    else PayloadType.PCMU
+                )
 
                 pkt = RTP(
                     version=2,
                     sequenceNumber=self.Sequence,
                     timestamp=self.Timestamp,
                     payload=bytearray(payload),
-                    payloadType=PayloadType.PCMA,  # todo is this correct?
+                    payloadType=payload_type,
                 )
-            elif self.StreamType == self.StreamTypeTapoUnknown:
-                # for some reason, this is sending a payload of 0xFF bytes for audio, maybe it needs to be initiated differently, audio not being default?
-                pass
             else:
                 pkt = None
 
