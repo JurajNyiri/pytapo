@@ -1,18 +1,18 @@
-from .convert import Convert
-from pytapo import Tapo
-from datetime import datetime
-from json import JSONDecodeError
-from ._utils import StreamType
-
+import asyncio
+import aiofiles
 import json
 import os
 import hashlib
-import aiofiles
-import asyncio
+from datetime import datetime
+from json import JSONDecodeError
+from pytapo import Tapo
+from .convert import Convert
+from ._utils import StreamType
 
 
 class Downloader:
     FRESH_RECORDING_TIME_SECONDS = 60
+    STALL_TIMEOUT_SECONDS = 120
 
     def __init__(
         self,
@@ -25,6 +25,7 @@ class Downloader:
         overwriteFiles=None,
         window_size=None,  # affects download speed, with higher values camera sometimes stops sending data
         fileName=None,
+        stall_timeout=None,
     ):
         self.tapo = tapo
         self.startTime = startTime
@@ -44,6 +45,9 @@ class Downloader:
         else:
             self.window_size = int(window_size)
         self.audio_sample_rate = None
+        self.stall_timeout = (
+            self.STALL_TIMEOUT_SECONDS if stall_timeout is None else int(stall_timeout)
+        )
 
     async def md5(self, fileName):
         if os.path.isfile(fileName):
@@ -156,7 +160,23 @@ class Downloader:
                     else:
                         currentAction = "Downloading"
                     downloadedFull = False
-                    async for resp in mediaSession.transceive(payload):
+                    stream = mediaSession.transceive(payload)
+                    while True:
+                        try:
+                            if self.stall_timeout and self.stall_timeout > 0:
+                                resp = await asyncio.wait_for(
+                                    stream.__anext__(), timeout=self.stall_timeout
+                                )
+                            else:
+                                resp = await stream.__anext__()
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            # Camera stopped responding mid-download; break out so we can retry.
+                            self.tapo.debugLog(
+                                "Timed out waiting for recording data, retrying."
+                            )
+                            break
                         if resp.mimetype == "video/mp2t":
                             dataChunks += 1
                             convert.write(
