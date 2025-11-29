@@ -8,6 +8,7 @@ import json
 import os
 import hashlib
 import aiofiles
+import asyncio
 
 
 class Downloader:
@@ -42,6 +43,7 @@ class Downloader:
             self.window_size = 200
         else:
             self.window_size = int(window_size)
+        self.audio_sample_rate = None
 
     async def md5(self, fileName):
         if os.path.isfile(fileName):
@@ -49,6 +51,21 @@ class Downloader:
                 contents = await file.read()
             return hashlib.md5(contents).hexdigest()
         return False
+
+    async def _get_audio_sample_rate(self):
+        try:
+            loop = asyncio.get_event_loop()
+            audio_config = await loop.run_in_executor(None, self.tapo.getAudioConfig)
+            rate = (
+                audio_config.get("audio_config", {})
+                .get("microphone", {})
+                .get("sampling_rate")
+            )
+            if rate is None:
+                return None
+            return int(rate) * 1000
+        except Exception:
+            return None
 
     async def downloadFile(self, callbackFunc=None):
         if callbackFunc is not None:
@@ -108,6 +125,8 @@ class Downloader:
                 downloading = False
             else:
                 convert = Convert()
+                if self.audio_sample_rate is None:
+                    self.audio_sample_rate = await self._get_audio_sample_rate()
                 mediaSession = self.tapo.getMediaSession(StreamType.Download)
                 if retry:
                     mediaSession.set_window_size(50)
@@ -141,7 +160,10 @@ class Downloader:
                         if resp.mimetype == "video/mp2t":
                             dataChunks += 1
                             convert.write(
-                                resp.plaintext, resp.audioPayload, resp.audioPayloadType
+                                resp.plaintext,
+                                resp.audioPayload,
+                                resp.audioPayloadType,
+                                self.audio_sample_rate,
                             )
                             detectedLength = convert.getLength()
                             if detectedLength is False:
