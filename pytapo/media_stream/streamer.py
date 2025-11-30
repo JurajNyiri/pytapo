@@ -43,9 +43,40 @@ class Streamer:
         self.removeFilesInOutputDirectory = removeFilesInOutputDirectory
         self.audio_r = None
         self.audio_w = None
+        self.audio_format = None
+        self.audio_rate = None
         self._ts_buffer = bytearray()
         self._audio_buffer = bytearray()
         self.ff_args = ff_args
+
+    async def _init_audio_params(self):
+        if not self.includeAudio:
+            return
+        if self.audio_format is not None and self.audio_rate is not None:
+            return
+
+        audio_format = "alaw"
+        audio_rate = 8000
+
+        try:
+            loop = asyncio.get_event_loop()
+            audio_config = await loop.run_in_executor(None, self.tapo.getAudioConfig)
+            microphone = audio_config.get("audio_config", {}).get("microphone", {})
+            encode_type = str(microphone.get("encode_type", "")).lower()
+            if "ulaw" in encode_type:
+                audio_format = "mulaw"
+            elif "alaw" in encode_type:
+                audio_format = "alaw"
+
+            sampling_rate = microphone.get("sampling_rate")
+            if sampling_rate is not None:
+                audio_rate = int(sampling_rate) * 1000
+        except Exception:
+            # fall back to defaults if detection fails
+            pass
+
+        self.audio_format = audio_format
+        self.audio_rate = audio_rate
 
     async def start(self):
         self.currentAction = "FFMpeg Starting"
@@ -55,6 +86,9 @@ class Streamer:
             if self.removeFilesInOutputDirectory:
                 for f in os.listdir(self.outputDirectory):
                     os.remove(os.path.join(self.outputDirectory, f))
+
+        if self.includeAudio:
+            await self._init_audio_params()
 
         cmd = [
             "ffmpeg",
@@ -83,9 +117,9 @@ class Streamer:
             pass_fds = (self.audio_r,)
             cmd += [
                 "-f",
-                "alaw",
+                self.audio_format or "alaw",
                 "-ar",
-                "8000",
+                f"{self.audio_rate or 8000}",
                 "-i",
                 f"/dev/fd/{self.audio_r}",
                 "-map",
