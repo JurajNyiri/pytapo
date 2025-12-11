@@ -966,7 +966,7 @@ class Tapo:
         else:
             return self.executeFunction(
                 "getOsd",
-                {"OSD": {"name": ["date", "week", "font"], "table": ["label_info"]}},
+                {"OSD": {"name": ["logo", "date", "week", "font"], "table": ["label_info"]}},
             )
 
     def setOsd(
@@ -975,12 +975,15 @@ class Tapo:
         dateEnabled=True,
         labelEnabled=False,
         weekEnabled=False,
+        logoEnabled=False,
         dateX=0,
         dateY=0,
         labelX=0,
         labelY=500,
         weekX=0,
         weekY=0,
+        logoX=0,
+        logoY=0,
     ):
         if self.childID:
             raise Exception("setOsd not supported for child devices yet")
@@ -1007,6 +1010,11 @@ class Tapo:
                     "enabled": "on" if labelEnabled else "off",
                     "x_coor": labelX,
                     "y_coor": labelY,
+                },
+                "logo": {
+                    "enabled": "on" if logoEnabled else "off",
+                    "x_coor": logoX,
+                    "y_coor": logoY,
                 },
             },
         }
