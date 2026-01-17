@@ -350,11 +350,13 @@ class Tapo:
     def isSecureConnection(self):
         if self.isSecureConnectionCached is None:
             url = "https://{host}".format(host=self.getControlHost())
+            probe_cnonce = generate_nonce(8).decode().upper()
             data = {
                 "method": "login",
                 "params": {
                     "encrypt_type": "3",
                     "username": self.user,
+                    "cnonce": probe_cnonce,
                 },
             }
             res = self.request(
