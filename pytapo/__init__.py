@@ -21,6 +21,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES, EncryptionMethod
+from .exceptions.temporary_suspension import TemporarySuspension
 from .media_stream.session import HttpMediaSession
 from .TlsAdapter import TlsAdapter
 from .media_stream._utils import generate_nonce, StreamType
@@ -581,8 +582,10 @@ class Tapo:
             and "sec_left" in responseData["result"]["data"]
             and responseData["result"]["data"]["sec_left"] > 0
         ):
-            raise Exception(
-                f"Temporary Suspension: Try again in {str(responseData['result']['data']['sec_left'])} seconds"
+            timeout = responseData["result"]["data"]["sec_left"]
+            raise TemporarySuspension(
+                f"Temporary Suspension: Try again in {str(timeout)} seconds",
+                timeout,
             )
         if (
             "data" in responseData
@@ -591,8 +594,10 @@ class Tapo:
             and responseData["data"]["code"] == -40404
             and responseData["data"]["sec_left"] > 0
         ):
-            raise Exception(
-                f"Temporary Suspension: Try again in {str(responseData['data']['sec_left'])} seconds"
+            timeout = responseData["data"]["sec_left"]
+            raise TemporarySuspension(
+                f"Temporary Suspension: Try again in {str(timeout)} seconds",
+                timeout
             )
 
         if self.responseIsOK(res):
