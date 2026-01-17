@@ -1443,19 +1443,19 @@ class Tapo:
         recordPlan = {"enabled": "on" if enabled else "off"}
 
         if sunday is not None and type(sunday) is list:
-            recordPlan["sunday"] = json.dumps(sunday)
+            recordPlan["sunday"] = json.dumps(sunday, separators=(',', ':'))
         if monday is not None and type(monday) is list:
-            recordPlan["monday"] = json.dumps(monday)
+            recordPlan["monday"] = json.dumps(monday, separators=(',', ':'))
         if tuesday is not None and type(tuesday) is list:
-            recordPlan["tuesday"] = json.dumps(tuesday)
+            recordPlan["tuesday"] = json.dumps(tuesday, separators=(',', ':'))
         if wednesday is not None and type(wednesday) is list:
-            recordPlan["wednesday"] = json.dumps(wednesday)
+            recordPlan["wednesday"] = json.dumps(wednesday, separators=(',', ':'))
         if thursday is not None and type(thursday) is list:
-            recordPlan["thursday"] = json.dumps(thursday)
+            recordPlan["thursday"] = json.dumps(thursday, separators=(',', ':'))
         if friday is not None and type(friday) is list:
-            recordPlan["friday"] = json.dumps(friday)
+            recordPlan["friday"] = json.dumps(friday, separators=(',', ':'))
         if saturday is not None and type(saturday) is list:
-            recordPlan["saturday"] = json.dumps(saturday)
+            recordPlan["saturday"] = json.dumps(saturday, separators=(',', ':'))
 
         return self.executeFunction(
             "setRecordPlan",
