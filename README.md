@@ -31,6 +31,8 @@ tapo = Tapo(host, user, password)
 print(tapo.getBasicInfo())
 ```
 
+See another example for [streaming the video from two devices to a webpage](https://gitlab.com/evgeny-blokhin/smarthome).
+
 ## Authentication
 
 Depending on your camera model and firmware version, the authentication method varies.
