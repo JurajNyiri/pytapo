@@ -440,7 +440,6 @@ class Tapo:
             self.executeAsyncExecutorJob(self._close_kasa_device)
             raise Exception("Invalid authentication data") from err
         except DeviceError as err:
-            self.executeAsyncExecutorJob(self._close_kasa_device)
             raise Exception(self._format_device_error(err)) from err
         except Exception as err:
             if loginRetryCount < MAX_LOGIN_RETRIES:
