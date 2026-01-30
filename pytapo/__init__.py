@@ -314,6 +314,7 @@ class Tapo:
 
     def performRequest(self, requestData, loginRetryCount=0):
         self.executeAsyncExecutorJob(self.ensureAuthenticated)
+        authValid = True
 
         if self.isKLAP:
             if self.childID:
@@ -346,12 +347,7 @@ class Tapo:
                 and len(responseJSON["result"]["responses"]) == 1
             ):
                 if not self.responseIsOK(res, responseJSON["result"]["responses"][0]):
-                    raise Exception(
-                        "Error: {}, Response: {}".format(
-                            self.getErrorMessage(responseJSON["error_code"]),
-                            json.dumps(responseJSON),
-                        )
-                    )
+                    authValid = False
         else:
             if self.childID:
                 fullRequest = {
@@ -384,6 +380,20 @@ class Tapo:
                 raise Exception(f"PyTapo Kasa Error: {err}")
 
             if not self.responseIsOK(None, responseJSON):
+                authValid = False
+            # normalize kasa shape to legacy result/responses for downstream code
+            if "result" not in responseJSON and "multipleRequest" in responseJSON:
+                responseJSON = {"result": responseJSON["multipleRequest"]}
+
+        if not authValid:
+            if loginRetryCount < MAX_LOGIN_RETRIES:
+                if self.isKLAP:
+                    self.klapTransport = None
+                else:
+                    self.dev = None
+                    self._kasa_ready = False
+                return self.performRequest(requestData, loginRetryCount + 1)
+            else:
                 raise Exception(
                     "Error: {}, Response: {}".format(
                         self.getErrorMessage(
@@ -394,9 +404,6 @@ class Tapo:
                         json.dumps(responseJSON),
                     )
                 )
-            # normalize kasa shape to legacy result/responses for downstream code
-            if "result" not in responseJSON and "multipleRequest" in responseJSON:
-                responseJSON = {"result": responseJSON["multipleRequest"]}
 
         # strip away child device stuff to ensure consistent response format for HUB cameras
         if self.childID:
