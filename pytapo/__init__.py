@@ -285,9 +285,15 @@ class Tapo:
     async def _kasa_query(self, payload):
         """Send a raw payload through python-kasa transport."""
         await self.ensureAuthenticated()
-        return await self.dev.protocol.query(payload)
+        self.debugLog("Sending payload:")
+        self.debugLog(payload)
+        response = await self.dev.protocol.query(payload)
+        self.debugLog("Response:")
+        self.debugLog(response)
+        return response
 
     def responseIsOK(self, res, data=None):
+        self.debugLog("Verifying response...")
         if data is None:
             data = res
         if not isinstance(data, dict):
@@ -534,10 +540,13 @@ class Tapo:
                 authValid = False
             # normalize kasa shape to legacy result/responses for downstream code
             if "result" not in responseJSON and "multipleRequest" in responseJSON:
+                self.debugLog("Normalizing Kasa response...")
                 responseJSON = {"result": responseJSON["multipleRequest"]}
+                self.debugLog(f"Normalized: {responseJSON}")
 
         if not authValid:
             if loginRetryCount < MAX_LOGIN_RETRIES:
+                self.debugLog("Retrying request...")
                 if self.isKLAP:
                     self.klapTransport = None
                 else:
@@ -558,6 +567,8 @@ class Tapo:
 
         # strip away child device stuff to ensure consistent response format for HUB cameras
         if self.childID:
+            self.debugLog("Handling response for child...")
+            self.debugLog(responseJSON)
             if (
                 "result" in responseJSON
                 and "responses" in responseJSON["result"]
@@ -573,10 +584,15 @@ class Tapo:
                     else:
                         responses.append(response.get("result"))
                 responseJSON["result"]["responses"] = responses
+                self.debugLog("Returning:")
+                self.debugLog(responseJSON["result"]["responses"][0])
                 return responseJSON["result"]["responses"][0]
         else:
             if self.isKLAP:
+                self.debugLog("Device is KLAP")
                 if self.responseIsOK(None, responseJSON):
+                    self.debugLog("Returning:")
+                    self.debugLog(responseJSON)
                     return responseJSON
                 else:
                     raise Exception(
@@ -586,6 +602,9 @@ class Tapo:
                         )
                     )
             else:
+                self.debugLog("Device is not a child and not KLAP.")
+                self.debugLog("Returning:")
+                self.debugLog(responseJSON)
                 return responseJSON
 
     def getMediaSession(self, stream_type: StreamType = None, start_time=""):
