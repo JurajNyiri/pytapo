@@ -250,7 +250,12 @@ class Tapo:
 
         if self.dev is None:
             creds = Credentials(self.user, self.password)
-            self.dev = await Discover.discover_single(self.host, credentials=creds)
+            try:
+                self.dev = await Discover.discover_single(self.host, credentials=creds)
+            except TimeoutError as err:
+                raise Exception(
+                    f"Failed to establish a new connection: {str(err)}"
+                ) from err
             if self.dev is None:
                 raise Exception("Device not found via python-kasa Discover")
             self.debugLog(
@@ -440,6 +445,9 @@ class Tapo:
             self.executeAsyncExecutorJob(self._close_kasa_device)
             raise Exception("Invalid authentication data") from err
         except DeviceError as err:
+            errMsg = self._format_device_error(err)
+            if "Device blocked for" in errMsg:
+                raise Exception(f"Temporary Suspension: {str(errMsg)}") from err
             raise Exception(self._format_device_error(err)) from err
         except Exception as err:
             if loginRetryCount < MAX_LOGIN_RETRIES:
@@ -505,6 +513,9 @@ class Tapo:
                     self._kasa_query, fullRequest
                 )
             except DeviceError as err:
+                errMsg = self._format_device_error(err)
+                if "Device blocked for" in errMsg:
+                    raise Exception(f"Temporary Suspension: {str(errMsg)}") from err
                 raise Exception(self._format_device_error(err)) from err
             except (AuthenticationError, KasaException) as err:
                 if loginRetryCount < MAX_LOGIN_RETRIES:
