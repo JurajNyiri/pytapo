@@ -442,9 +442,6 @@ class Tapo:
         except DeviceError as err:
             self.executeAsyncExecutorJob(self._close_kasa_device)
             raise Exception(self._format_device_error(err)) from err
-        except UnsupportedDeviceError as err:
-            self.executeAsyncExecutorJob(self._close_kasa_device)
-            raise Exception(self._format_device_error(err)) from err
         except Exception as err:
             if loginRetryCount < MAX_LOGIN_RETRIES:
                 self.executeAsyncExecutorJob(self._close_kasa_device)
