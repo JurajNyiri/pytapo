@@ -6,10 +6,17 @@ import json
 import requests
 import asyncio
 import logging
+from logging import Handler
+import re
 import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import AuthenticationError, KasaException, DeviceError
+from kasa.exceptions import (
+    AuthenticationError,
+    KasaException,
+    DeviceError,
+    UnsupportedDeviceError,
+)
 from kasa import DeviceConfig, Credentials, Discover
 
 from datetime import datetime, timedelta
@@ -93,6 +100,8 @@ class Tapo:
         self.dev = None
         self._kasa_ready = False
         self._loop = None
+        self._last_kasa_unknown_code = None
+        self._kasa_warn_handler = None
 
         self.klapTransport = None
         self.user = user
@@ -247,6 +256,7 @@ class Tapo:
             self.debugLog(
                 f"kasa discover_single: host={self.host} proto={type(self.dev.protocol).__name__}"
             )
+            self._install_kasa_warn_handler()
         if not self._kasa_ready:
             try:
                 self.debugLog("kasa update: starting initial state fetch")
@@ -338,6 +348,12 @@ class Tapo:
             pass
         self.dev = None
         self._kasa_ready = False
+        if self._kasa_warn_handler:
+            logging.getLogger("kasa.protocols.smartcamprotocol").removeHandler(
+                self._kasa_warn_handler
+            )
+            self._kasa_warn_handler = None
+        self._last_kasa_unknown_code = None
 
     def _log_kasa_connection_info(self):
         ct = getattr(getattr(self.dev, "config", None), "connection_type", None)
@@ -371,6 +387,52 @@ class Tapo:
         else:
             self.debugLog("kasa connection_type: <unavailable>")
 
+    def _install_kasa_warn_handler(self):
+        if self._kasa_warn_handler:
+            return
+
+        class _WarnHandler(Handler):
+            def __init__(self, outer):
+                super().__init__(level=logging.WARNING)
+                self.outer = outer
+
+            def emit(self, record):
+                msg = record.getMessage()
+                m = re.search(r"received unknown error code: (-?\d+)", msg)
+                if m:
+                    try:
+                        self.outer._last_kasa_unknown_code = int(m.group(1))
+                    except Exception:
+                        pass
+                    # downgrade the log so it doesn't surface as a warning
+                    record.levelno = logging.DEBUG
+                    record.levelname = "DEBUG"
+
+        self._kasa_warn_handler = _WarnHandler(self)
+        logging.getLogger("kasa.protocols.smartcamprotocol").addHandler(
+            self._kasa_warn_handler
+        )
+
+    def _format_device_error(self, err):
+        """Return a user-friendly message for kasa DeviceError."""
+        msg = str(err)
+        code = getattr(err, "error_code", None)
+        if code is not None and str(code) in ERROR_CODES:
+            return self.getErrorMessage(str(code))
+        # use the last unknown code observed from kasa warnings if available
+        if (
+            self._last_kasa_unknown_code
+            and str(self._last_kasa_unknown_code) in ERROR_CODES
+        ):
+            errMsg = self.getErrorMessage(str(self._last_kasa_unknown_code))
+            self._last_kasa_unknown_code = None
+            return errMsg
+        if self._last_kasa_unknown_code:
+            code = self._last_kasa_unknown_code
+            self._last_kasa_unknown_code = None
+            return f"Device error {code}"
+        return f"Device error: {msg}"
+
     def performRequest(self, requestData, loginRetryCount=0):
         try:
             self.executeAsyncExecutorJob(self.ensureAuthenticated)
@@ -379,7 +441,10 @@ class Tapo:
             raise Exception("Invalid authentication data") from err
         except DeviceError as err:
             self.executeAsyncExecutorJob(self._close_kasa_device)
-            raise Exception(f"Device error: {err}") from err
+            raise Exception(self._format_device_error(err)) from err
+        except UnsupportedDeviceError as err:
+            self.executeAsyncExecutorJob(self._close_kasa_device)
+            raise Exception(self._format_device_error(err)) from err
         except Exception as err:
             if loginRetryCount < MAX_LOGIN_RETRIES:
                 self.executeAsyncExecutorJob(self._close_kasa_device)
@@ -443,6 +508,8 @@ class Tapo:
                 responseJSON = self.executeAsyncExecutorJob(
                     self._kasa_query, fullRequest
                 )
+            except DeviceError as err:
+                raise Exception(self._format_device_error(err)) from err
             except (AuthenticationError, KasaException) as err:
                 if loginRetryCount < MAX_LOGIN_RETRIES:
                     self.dev = None
