@@ -9,7 +9,7 @@ import logging
 import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import AuthenticationError
+from kasa.exceptions import AuthenticationError, KasaException, DeviceError
 from kasa import DeviceConfig, Credentials, Discover
 
 from datetime import datetime, timedelta
@@ -244,9 +244,27 @@ class Tapo:
             self.dev = await Discover.discover_single(self.host, credentials=creds)
             if self.dev is None:
                 raise Exception("Device not found via python-kasa Discover")
+            self.debugLog(
+                f"kasa discover_single: host={self.host} proto={type(self.dev.protocol).__name__}"
+            )
         if not self._kasa_ready:
-            await self.dev.update()
-            self._kasa_ready = True
+            try:
+                self.debugLog("kasa update: starting initial state fetch")
+                self._log_kasa_connection_info()
+                await self.dev.update()
+                self._kasa_ready = True
+            except AuthenticationError as err:
+                self.debugLog(f"kasa update failed (auth): {err}")
+                await self._close_kasa_device()
+                raise Exception("Invalid authentication data") from err
+            except DeviceError as err:
+                self.debugLog(f"kasa update failed (device error): {err}")
+                await self._close_kasa_device()
+                raise
+            except Exception as err:
+                self.debugLog(f"kasa update failed: {err}")
+                await self._close_kasa_device()
+                raise
         return True
 
     async def _kasa_query(self, payload):
@@ -312,8 +330,61 @@ class Tapo:
         else:
             return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
 
+    async def _close_kasa_device(self):
+        try:
+            if self.dev and getattr(self.dev, "protocol", None):
+                await self.dev.protocol.close()
+        except Exception:
+            pass
+        self.dev = None
+        self._kasa_ready = False
+
+    def _log_kasa_connection_info(self):
+        ct = getattr(getattr(self.dev, "config", None), "connection_type", None)
+        transport = getattr(self.dev, "protocol", None)
+        transport_impl = getattr(transport, "_transport", None)
+
+        device_info = {
+            "alias": getattr(self.dev, "alias", None),
+            "model": getattr(self.dev, "model", None),
+            "mac": getattr(self.dev, "mac", None),
+        }
+        hw_info = getattr(self.dev, "hw_info", {}) or {}
+        device_info["fw"] = hw_info.get("sw_ver") or hw_info.get("fw_ver")
+
+        self.debugLog(f"kasa device: {device_info}")
+        self.debugLog(f"kasa chosen encryption: {self.getEncryptionMethod()}")
+
+        if ct:
+            fields = {
+                "device_family": getattr(ct, "device_family", None),
+                "encryption_type": getattr(ct, "encryption_type", None),
+                "https": getattr(ct, "https", None),
+                "login_version": getattr(ct, "login_version", None),
+                "http_port": getattr(ct, "http_port", None),
+            }
+            self.debugLog(
+                f"kasa connection_type: {fields}, "
+                f"protocol={type(transport).__name__}, "
+                f"transport={type(transport_impl).__name__ if transport_impl else None}"
+            )
+        else:
+            self.debugLog("kasa connection_type: <unavailable>")
+
     def performRequest(self, requestData, loginRetryCount=0):
-        self.executeAsyncExecutorJob(self.ensureAuthenticated)
+        try:
+            self.executeAsyncExecutorJob(self.ensureAuthenticated)
+        except AuthenticationError as err:
+            self.executeAsyncExecutorJob(self._close_kasa_device)
+            raise Exception("Invalid authentication data") from err
+        except DeviceError as err:
+            self.executeAsyncExecutorJob(self._close_kasa_device)
+            raise Exception(f"Device error: {err}") from err
+        except Exception as err:
+            if loginRetryCount < MAX_LOGIN_RETRIES:
+                self.executeAsyncExecutorJob(self._close_kasa_device)
+                return self.performRequest(requestData, loginRetryCount + 1)
+            raise err
         authValid = True
 
         if self.isKLAP:
@@ -372,6 +443,12 @@ class Tapo:
                 responseJSON = self.executeAsyncExecutorJob(
                     self._kasa_query, fullRequest
                 )
+            except (AuthenticationError, KasaException) as err:
+                if loginRetryCount < MAX_LOGIN_RETRIES:
+                    self.dev = None
+                    self._kasa_ready = False
+                    return self.performRequest(requestData, loginRetryCount + 1)
+                raise Exception(f"Invalid authentication data (kasa): {err}")
             except Exception as err:
                 if loginRetryCount < MAX_LOGIN_RETRIES:
                     self.dev = None
