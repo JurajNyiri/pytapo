@@ -4,26 +4,20 @@
 import hashlib
 import json
 import requests
-import base64
-import copy
 import asyncio
 import logging
 import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
 from kasa.exceptions import AuthenticationError
-from kasa import DeviceConfig
-from kasa import Credentials
+from kasa import DeviceConfig, Credentials, Discover
 
 from datetime import datetime, timedelta
 from warnings import warn
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
 
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES, EncryptionMethod
 from .media_stream.session import HttpMediaSession
-from .TlsAdapter import TlsAdapter
-from .media_stream._utils import generate_nonce, StreamType
+from .media_stream._utils import StreamType
 
 LOGGER = logging.getLogger("pytapo")
 
@@ -70,11 +64,8 @@ class Tapo:
         logger = logging.getLogger("kasa.transports.klaptransport")
         logger.addFilter(SuppressPythonKasaLogs())
 
-        self.retryStok = retryStok
         self.redactConfidentialInformation = redactConfidentialInformation
         self.printDebugInformation = printDebugInformation
-        self.passwordEncryptionMethod = None
-        self.seq = None
         self.host = host
         if hass is not None:
             self.hass = hass
@@ -84,9 +75,6 @@ class Tapo:
             self.controlPort = 443
         else:
             self.controlPort = controlPort
-        self.lsk = None
-        self.cnonce = None
-        self.ivb = None
         if isKLAP is not None:
             self.isKLAP = isKLAP
         else:
@@ -101,12 +89,16 @@ class Tapo:
         else:
             self.playerID = playerID
 
+        # python-kasa device handle
+        self.dev = None
+        self._kasa_ready = False
+        self._loop = None
+
         self.klapTransport = None
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
         self.superSecretKey = superSecretKey
-        self.stok = False
         self.userID = False
         self.childID = childID
         self.timeCorrection = False
@@ -159,11 +151,6 @@ class Tapo:
             return presets
         except Exception:
             return False
-
-    def getHostURL(self):
-        return "https://{host}/stok={stok}/ds".format(
-            host=self.getControlHost(), stok=self.stok
-        )
 
     def getStreamURL(self):
         return "{host}:{streamPort}".format(host=self.host, streamPort=self.streamPort)
@@ -218,6 +205,7 @@ class Tapo:
                 await self.klapTransport.close()
 
     async def ensureAuthenticated(self):
+        # Use python-kasa for auth/transport
         if self.isKLAP:
             if self.klapTransport is None:
                 if self.KLAPVersion is None:
@@ -249,419 +237,42 @@ class Tapo:
                             raise Exception("Invalid authentication data")
                         except Exception as err:
                             raise Exception("PyTapo KLAP Error #5: " + str(err))
-        elif not self.stok:
-            if self.hass is None:
-                return self.refreshStok()
-            else:
-                await self.hass.async_add_executor_job(self.refreshStok)
+            return True
+
+        if self.dev is None:
+            creds = Credentials(self.user, self.password)
+            self.dev = await Discover.discover_single(self.host, credentials=creds)
+            if self.dev is None:
+                raise Exception("Device not found via python-kasa Discover")
+        if not self._kasa_ready:
+            await self.dev.update()
+            self._kasa_ready = True
         return True
 
-    def request(self, method, url, **kwargs):
-        if self.session is False and self.reuseSession is True:
-            self.session = requests.session()
-            self.session.mount("https://", TlsAdapter())
-
-        if self.reuseSession is True:
-            session = self.session
-        else:
-            session = requests.session()
-            session.mount("https://", TlsAdapter())
-        if self.printDebugInformation:
-            redactedKwargs = copy.deepcopy(kwargs)
-            if self.redactConfidentialInformation:
-                if "data" in redactedKwargs:
-                    redactedKwargsData = json.loads(redactedKwargs["data"])
-                    if "params" in redactedKwargsData:
-                        if (
-                            "password" in redactedKwargsData["params"]
-                            and redactedKwargsData["params"]["password"] != ""
-                        ):
-                            redactedKwargsData["params"]["password"] = "REDACTED"
-                        if (
-                            "digest_passwd" in redactedKwargsData["params"]
-                            and redactedKwargsData["params"]["digest_passwd"] != ""
-                        ):
-                            redactedKwargsData["params"]["digest_passwd"] = "REDACTED"
-                        if (
-                            "cnonce" in redactedKwargsData["params"]
-                            and redactedKwargsData["params"]["cnonce"] != ""
-                        ):
-                            redactedKwargsData["params"]["cnonce"] = "REDACTED"
-                    redactedKwargs["data"] = redactedKwargsData
-                if "headers" in redactedKwargs:
-                    redactedKwargsHeaders = redactedKwargs["headers"]
-                    if (
-                        "Tapo_tag" in redactedKwargsHeaders
-                        and redactedKwargsHeaders["Tapo_tag"] != ""
-                    ):
-                        redactedKwargsHeaders["Tapo_tag"] = "REDACTED"
-                    if (
-                        "Host" in redactedKwargsHeaders
-                        and redactedKwargsHeaders["Host"] != ""
-                    ):
-                        redactedKwargsHeaders["Host"] = "REDACTED"
-                    if (
-                        "Referer" in redactedKwargsHeaders
-                        and redactedKwargsHeaders["Referer"] != ""
-                    ):
-                        redactedKwargsHeaders["Referer"] = "REDACTED"
-                    redactedKwargs["headers"] = redactedKwargsHeaders
-            self.debugLog("New request:")
-            self.debugLog(redactedKwargs)
-        response = session.request(method, url, **kwargs)
-        if self.printDebugInformation:
-            self.debugLog(response.status_code)
-            try:
-                loadJson = json.loads(response.text)
-                if self.redactConfidentialInformation:
-                    if "result" in loadJson:
-                        if (
-                            "stok" in loadJson["result"]
-                            and loadJson["result"]["stok"] != ""
-                        ):
-                            loadJson["result"]["stok"] = "REDACTED"
-                        if "data" in loadJson["result"]:
-                            if (
-                                "key" in loadJson["result"]["data"]
-                                and loadJson["result"]["data"]["key"] != ""
-                            ):
-                                loadJson["result"]["data"]["key"] = "REDACTED"
-                            if (
-                                "nonce" in loadJson["result"]["data"]
-                                and loadJson["result"]["data"]["nonce"] != ""
-                            ):
-                                loadJson["result"]["data"]["nonce"] = "REDACTED"
-                            if (
-                                "device_confirm" in loadJson["result"]["data"]
-                                and loadJson["result"]["data"]["device_confirm"] != ""
-                            ):
-                                loadJson["result"]["data"][
-                                    "device_confirm"
-                                ] = "REDACTED"
-                self.debugLog(loadJson)
-            except Exception as err:
-                self.debugLog("Failed to load json:" + str(err))
-
-        if self.reuseSession is False:
-            response.close()
-            session.close()
-        return response
-
-    def isSecureConnection(self):
-        if self.isSecureConnectionCached is None:
-            url = "https://{host}".format(host=self.getControlHost())
-            probe_cnonce = generate_nonce(8).decode().upper()
-            data = {
-                "method": "login",
-                "params": {
-                    "encrypt_type": "3",
-                    "username": self.user,
-                    "cnonce": probe_cnonce,
-                },
-            }
-            res = self.request(
-                "POST", url, data=json.dumps(data), headers=self.headers, verify=False
-            )
-            response = res.json()
-            self.isSecureConnectionCached = (
-                "error_code" in response
-                and response["error_code"] == -40413
-                and "result" in response
-                and "data" in response["result"]
-                and "encrypt_type" in response["result"]["data"]
-                and "3" in response["result"]["data"]["encrypt_type"]
-            )
-        return self.isSecureConnectionCached
-
-    def validateDeviceConfirm(self, nonce, deviceConfirm):
-        self.passwordEncryptionMethod = None
-        hashedNoncesWithSHA256 = (
-            hashlib.sha256(
-                self.cnonce.encode("utf8")
-                + self.hashedSha256Password.encode("utf8")
-                + nonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        hashedNoncesWithMD5 = (
-            hashlib.sha256(
-                self.cnonce.encode("utf8")
-                + self.hashedPassword.encode("utf8")
-                + nonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        if deviceConfirm == (hashedNoncesWithSHA256 + nonce + self.cnonce):
-            self.passwordEncryptionMethod = EncryptionMethod.SHA256
-        elif deviceConfirm == (hashedNoncesWithMD5 + nonce + self.cnonce):
-            self.passwordEncryptionMethod = EncryptionMethod.MD5
-        return self.passwordEncryptionMethod is not None
-
-    def getTag(self, request):
-        tag = (
-            hashlib.sha256(
-                self.getHashedPassword().encode("utf8") + self.cnonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        tag = (
-            hashlib.sha256(
-                tag.encode("utf8")
-                + json.dumps(request).encode("utf8")
-                + str(self.seq).encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        return tag
-
-    def generateEncryptionToken(self, tokenType, nonce):
-        hashedKey = (
-            hashlib.sha256(
-                self.cnonce.encode("utf8")
-                + self.getHashedPassword().encode("utf8")
-                + nonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        return hashlib.sha256(
-            (
-                tokenType.encode("utf8")
-                + self.cnonce.encode("utf8")
-                + nonce.encode("utf8")
-                + hashedKey.encode("utf8")
-            )
-        ).digest()[:16]
-
-    def getEncryptionMethod(self):
-        return self.passwordEncryptionMethod
-
-    def getHashedPassword(self):
-        if self.passwordEncryptionMethod == EncryptionMethod.MD5:
-            return self.hashedPassword
-        elif self.passwordEncryptionMethod == EncryptionMethod.SHA256:
-            return self.hashedSha256Password
-        else:
-            raise Exception("Failure detecting hashing algorithm.")
-
-    def refreshStok(self, loginRetryCount=0):
-        self.debugLog("Refreshing stok...")
-        self.cnonce = generate_nonce(8).decode().upper()
-        url = "https://{host}".format(host=self.getControlHost())
-        if self.isSecureConnection():
-            self.debugLog("Connection is secure.")
-            data = {
-                "method": "login",
-                "params": {
-                    "cnonce": self.cnonce,
-                    "encrypt_type": "3",
-                    "username": self.user,
-                },
-            }
-        else:
-            self.debugLog("Connection is insecure.")
-            data = {
-                "method": "login",
-                "params": {
-                    "hashed": True,
-                    "password": self.hashedPassword,
-                    "username": self.user,
-                },
-            }
-        res = self.request(
-            "POST", url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        self.debugLog("Status code: " + str(res.status_code))
-
-        if res.status_code == 401:
-            try:
-                data = res.json()
-                if data["result"]["data"]["code"] == -40411:
-                    self.debugLog("Code is -40411, raising Exception.")
-                    raise Exception("Invalid authentication data")
-            except Exception as e:
-                if str(e) == "Invalid authentication data":
-                    raise e
-                else:
-                    pass
-
-        responseData = res.json()
-        if self.isSecureConnection():
-            self.debugLog("Processing secure response.")
-            if (
-                "result" in responseData
-                and "data" in responseData["result"]
-                and "nonce" in responseData["result"]["data"]
-                and "device_confirm" in responseData["result"]["data"]
-            ):
-                self.debugLog("Validating device confirm.")
-                nonce = responseData["result"]["data"]["nonce"]
-                if self.validateDeviceConfirm(
-                    nonce, responseData["result"]["data"]["device_confirm"]
-                ):  # sets self.passwordEncryptionMethod, password verified on client, now request stok
-                    self.debugLog("Signing in with digestPasswd.")
-                    digestPasswd = (
-                        hashlib.sha256(
-                            self.getHashedPassword().encode("utf8")
-                            + self.cnonce.encode("utf8")
-                            + nonce.encode("utf8")
-                        )
-                        .hexdigest()
-                        .upper()
-                    )
-                    data = {
-                        "method": "login",
-                        "params": {
-                            "cnonce": self.cnonce,
-                            "encrypt_type": "3",
-                            "digest_passwd": (
-                                digestPasswd.encode("utf8")
-                                + self.cnonce.encode("utf8")
-                                + nonce.encode("utf8")
-                            ).decode(),
-                            "username": self.user,
-                        },
-                    }
-                    res = self.request(
-                        "POST",
-                        url,
-                        data=json.dumps(data),
-                        headers=self.headers,
-                        verify=False,
-                    )
-                    responseData = res.json()
-                    if (
-                        "result" in responseData
-                        and "start_seq" in responseData["result"]
-                    ):
-                        if (
-                            "user_group" in responseData["result"]
-                            and responseData["result"]["user_group"] != "root"
-                        ):
-                            self.debugLog(
-                                "Incorrect user_group detected, raising Exception."
-                            )
-                            # encrypted control via 3rd party account does not seem to be supported
-                            # see https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/456
-                            raise Exception("Invalid authentication data")
-                        self.debugLog("Geneerating encryption tokens.")
-                        self.lsk = self.generateEncryptionToken("lsk", nonce)
-                        self.ivb = self.generateEncryptionToken("ivb", nonce)
-                        self.seq = responseData["result"]["start_seq"]
-                else:
-                    if (
-                        self.retryStok
-                        and (
-                            "error_code" in responseData
-                            and responseData["error_code"] == -40413
-                        )
-                        and loginRetryCount < MAX_LOGIN_RETRIES
-                    ):
-                        loginRetryCount += 1
-                        self.debugLog(
-                            f"Incorrect device_confirm value, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
-                        )
-                        return self.refreshStok(loginRetryCount)
-                    else:
-                        self.debugLog(
-                            "Incorrect device_confirm value, raising Exception."
-                        )
-                        raise Exception("Invalid authentication data")
-        else:
-            self.passwordEncryptionMethod = EncryptionMethod.MD5
-        if (
-            "result" in responseData
-            and "data" in responseData["result"]
-            and "time" in responseData["result"]["data"]
-            and "max_time" in responseData["result"]["data"]
-            and "sec_left" in responseData["result"]["data"]
-            and responseData["result"]["data"]["sec_left"] > 0
-        ):
-            raise Exception(
-                f"Temporary Suspension: Try again in {str(responseData['result']['data']['sec_left'])} seconds"
-            )
-        if (
-            "data" in responseData
-            and "code" in responseData["data"]
-            and "sec_left" in responseData["data"]
-            and responseData["data"]["code"] == -40404
-            and responseData["data"]["sec_left"] > 0
-        ):
-            raise Exception(
-                f"Temporary Suspension: Try again in {str(responseData['data']['sec_left'])} seconds"
-            )
-
-        if self.responseIsOK(res):
-            self.debugLog("Saving stok.")
-            self.stok = res.json()["result"]["stok"]
-            return self.stok
-        if (
-            self.retryStok
-            and ("error_code" in responseData and responseData["error_code"] == -40413)
-            and loginRetryCount < MAX_LOGIN_RETRIES
-        ):
-            loginRetryCount += 1
-            self.debugLog(
-                f"Unexpected response, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
-            )
-            return self.refreshStok(loginRetryCount)
-        else:
-            self.debugLog("Unexpected response, raising Exception.")
-            raise Exception("Invalid authentication data")
+    async def _kasa_query(self, payload):
+        """Send a raw payload through python-kasa transport."""
+        await self.ensureAuthenticated()
+        return await self.dev.protocol.query(payload)
 
     def responseIsOK(self, res, data=None):
-        if res is None and self.isKLAP is True and data is None:
+        if data is None:
+            data = res
+        if not isinstance(data, dict):
             return True
-        if res is not None and (
-            (res.status_code != 200 and not self.isSecureConnection())
-            or (
-                res.status_code != 200
-                and res.status_code != 500
-                and self.isSecureConnection()  # pass responseIsOK for secure connections 500 which are communicating expiring session
-            )
-        ):
-            raise Exception(
-                "Error communicating with Tapo Camera. Status code: "
-                + str(res.status_code)
-            )
-        try:
-            if data is None:
-                data = res.json()
-            if "error_code" not in data or data["error_code"] == 0:
-                return True
-            return False
-        except Exception as e:
-            raise Exception("Unexpected response from Tapo Camera: " + str(e))
+        return "error_code" not in data or data["error_code"] == 0
 
     def executeFunction(self, method, params, retry=False):
         if method == "multipleRequest":
-            if params is not None:
-                data = self.performRequest(
-                    {"method": "multipleRequest", "params": params}
-                )["result"]["responses"]
-            else:
-                data = self.performRequest({"method": "multipleRequest"})["result"][
-                    "responses"
-                ]
+            request_payload = {"multipleRequest": params or {}}
+            resp = self.performRequest(request_payload)
+            data = resp["result"]["responses"]
         else:
+            req = {"multipleRequest": {"requests": [{"method": method}]}}
             if params is not None:
-                data = self.performRequest(
-                    {
-                        "method": "multipleRequest",
-                        "params": {"requests": [{"method": method, "params": params}]},
-                    }
-                )["result"]["responses"][0]
-            else:
-                data = self.performRequest(
-                    {
-                        "method": "multipleRequest",
-                        "params": {"requests": [{"method": method}]},
-                    }
-                )["result"]["responses"][0]
+                req["multipleRequest"]["requests"][0]["params"] = params
+
+            resp = self.performRequest(req)
+            data = resp["result"]["responses"][0]
 
         if type(data) == list:
             return data
@@ -688,47 +299,43 @@ class Tapo:
                 )
             )
 
-    def encryptRequest(self, request):
-        cipher = AES.new(self.lsk, AES.MODE_CBC, self.ivb)
-        ct_bytes = cipher.encrypt(pad(request, AES.block_size))
-        return ct_bytes
-
-    def decryptResponse(self, response):
-        cipher = AES.new(self.lsk, AES.MODE_CBC, self.ivb)
-        pt = cipher.decrypt(response)
-        return unpad(pt, AES.block_size)
-
     def executeAsyncExecutorJob(self, job, *args):
         if self.hass is None:
-            return asyncio.run(job(*args))
+            # reuse a dedicated loop so kasa aiohttp sessions stay alive between calls
+            if self._loop is None or self._loop.is_closed():
+                self._loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(self._loop)
+                return self._loop.run_until_complete(job(*args))
+            finally:
+                asyncio.set_event_loop(None)
         else:
             return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
 
     def performRequest(self, requestData, loginRetryCount=0):
         self.executeAsyncExecutorJob(self.ensureAuthenticated)
-        authValid = True
-        url = self.getHostURL()
-        if self.childID:
-            fullRequest = {
-                "method": "multipleRequest",
-                "params": {
-                    "requests": [
-                        {
-                            "method": "controlChild",
-                            "params": {
-                                "childControl": {
-                                    "device_id": self.childID,
-                                    "request_data": requestData,
-                                }
-                            },
-                        }
-                    ]
-                },
-            }
-        else:
-            fullRequest = requestData
 
         if self.isKLAP:
+            if self.childID:
+                fullRequest = {
+                    "method": "multipleRequest",
+                    "params": {
+                        "requests": [
+                            {
+                                "method": "controlChild",
+                                "params": {
+                                    "childControl": {
+                                        "device_id": self.childID,
+                                        "request_data": requestData,
+                                    }
+                                },
+                            }
+                        ]
+                    },
+                }
+            else:
+                fullRequest = requestData
+
             responseJSON = self.executeAsyncExecutorJob(
                 self.sendKlapRequest, fullRequest
             )
@@ -746,95 +353,72 @@ class Tapo:
                         )
                     )
         else:
-            if self.seq is not None and self.isSecureConnection():
+            if self.childID:
                 fullRequest = {
-                    "method": "securePassthrough",
-                    "params": {
-                        "request": base64.b64encode(
-                            self.encryptRequest(json.dumps(fullRequest).encode("utf-8"))
-                        ).decode("utf8")
-                    },
+                    "multipleRequest": {
+                        "requests": [
+                            {
+                                "method": "controlChild",
+                                "params": {
+                                    "childControl": {
+                                        "device_id": self.childID,
+                                        "request_data": requestData,
+                                    }
+                                },
+                            }
+                        ]
+                    }
                 }
-                self.headers["Seq"] = str(self.seq)
-                try:
-                    self.headers["Tapo_tag"] = self.getTag(fullRequest)
-                except Exception as err:
-                    if str(err) == "Failure detecting hashing algorithm.":
-                        authValid = False
-                        self.debugLog(
-                            "Failure detecting hashing algorithm on getTag, reauthenticating."
-                        )
-                    else:
-                        raise err
-                self.seq += 1
+            else:
+                fullRequest = requestData
 
-            res = self.request(
-                "POST",
-                url,
-                data=json.dumps(fullRequest),
-                headers=self.headers,
-                verify=False,
-            )
-            responseData = res.json()
-            if (
-                self.isSecureConnection()
-                and "result" in responseData
-                and "response" in responseData["result"]
-            ):
-                encryptedResponse = responseData["result"]["response"]
-                encryptedResponse = base64.b64decode(responseData["result"]["response"])
-                try:
-                    responseJSON = json.loads(self.decryptResponse(encryptedResponse))
-                except Exception as err:
-                    if (
-                        str(err) == "Padding is incorrect."
-                        or str(err) == "PKCS#7 padding is incorrect."
-                    ):
-                        self.debugLog(f"{str(err)} Reauthenticating.")
-                        authValid = False
-                    else:
-                        raise err
-            else:
-                responseJSON = res.json()
-        if not authValid or not self.responseIsOK(res, responseJSON):
-            #  -40401: Invalid Stok
-            if (
-                not authValid
-                or (
-                    responseJSON
-                    and "error_code" in responseJSON
-                    and (
-                        responseJSON["error_code"] == -40401
-                        or responseJSON["error_code"] == -1
-                    )
+            try:
+                responseJSON = self.executeAsyncExecutorJob(
+                    self._kasa_query, fullRequest
                 )
-            ) and loginRetryCount < MAX_LOGIN_RETRIES:
-                self.refreshStok()
-                return self.performRequest(requestData, loginRetryCount + 1)
-            else:
+            except Exception as err:
+                if loginRetryCount < MAX_LOGIN_RETRIES:
+                    self.dev = None
+                    self._kasa_ready = False
+                    return self.performRequest(requestData, loginRetryCount + 1)
+                raise Exception(f"PyTapo Kasa Error: {err}")
+
+            if not self.responseIsOK(None, responseJSON):
                 raise Exception(
                     "Error: {}, Response: {}".format(
-                        self.getErrorMessage(responseJSON["error_code"]),
+                        self.getErrorMessage(
+                            responseJSON.get("error_code")
+                            if isinstance(responseJSON, dict)
+                            else None
+                        ),
                         json.dumps(responseJSON),
                     )
                 )
+            # normalize kasa shape to legacy result/responses for downstream code
+            if "result" not in responseJSON and "multipleRequest" in responseJSON:
+                responseJSON = {"result": responseJSON["multipleRequest"]}
 
         # strip away child device stuff to ensure consistent response format for HUB cameras
         if self.childID:
-            responses = []
-            for response in responseJSON["result"]["responses"]:
-                if "method" in response and response["method"] == "controlChild":
-                    if "response_data" in response["result"]:
-                        responses.append(response["result"]["response_data"])
+            if (
+                "result" in responseJSON
+                and "responses" in responseJSON["result"]
+                and len(responseJSON["result"]["responses"]) >= 1
+            ):
+                responses = []
+                for response in responseJSON["result"]["responses"]:
+                    if "method" in response and response["method"] == "controlChild":
+                        if "response_data" in response.get("result", {}):
+                            responses.append(response["result"]["response_data"])
+                        else:
+                            responses.append(response.get("result"))
                     else:
-                        responses.append(response["result"])
-                else:
-                    responses.append(response["result"])  # not sure if needed
-            responseJSON["result"]["responses"] = responses
-            return responseJSON["result"]["responses"][0]
+                        responses.append(response.get("result"))
+                responseJSON["result"]["responses"] = responses
+                return responseJSON["result"]["responses"][0]
         else:
             if self.isKLAP:
-                if self.responseIsOK(res, responseJSON):
+                if self.responseIsOK(None, responseJSON):
                     return responseJSON
                 else:
                     raise Exception(
@@ -843,7 +427,7 @@ class Tapo:
                             json.dumps(responseJSON),
                         )
                     )
-            elif self.responseIsOK(res):
+            else:
                 return responseJSON
 
     def getMediaSession(self, stream_type: StreamType = None, start_time=""):
@@ -875,12 +459,25 @@ class Tapo:
             query_params=query_params,
         )  # pragma: no cover
 
+    def getEncryptionMethod(self):
+        """
+        Pick the password digest method for media/auth based on connection details.
+        - KLAP devices use SHA256.
+        - For python-kasa devices, prefer SHA256 when login_version >=2, else MD5.
+        Defaults to SHA256 if unknown.
+        """
+        if self.isKLAP:
+            return EncryptionMethod.SHA256
+        if self.dev and getattr(self.dev, "config", None):
+            ct = getattr(self.dev.config, "connection_type", None)
+            login_version = getattr(ct, "login_version", None) if ct else None
+            if login_version is not None and login_version < 2:
+                return EncryptionMethod.MD5
+        return EncryptionMethod.SHA256
+
     def getChildDevices(self):
         childDevices = self.performRequest(
-            {
-                "method": "getChildDeviceList",
-                "params": {"childControl": {"start_index": 0}},
-            }
+            {"getChildDeviceList": {"childControl": {"start_index": 0}}}
         )
         return childDevices["result"]["child_device_list"]
 
@@ -987,30 +584,31 @@ class Tapo:
         if self.childID:
             raise Exception("setOsd not supported for child devices yet")
         data = {
-            "method": "set",
-            "OSD": {
-                "date": {
-                    "enabled": "on" if dateEnabled else "off",
-                    "x_coor": dateX,
-                    "y_coor": dateY,
+            "set": {
+                "OSD": {
+                    "date": {
+                        "enabled": "on" if dateEnabled else "off",
+                        "x_coor": dateX,
+                        "y_coor": dateY,
+                    },
+                    "week": {
+                        "enabled": "on" if weekEnabled else "off",
+                        "x_coor": weekX,
+                        "y_coor": weekY,
+                    },
+                    "font": {
+                        "color": "white",
+                        "color_type": "auto",
+                        "display": "ntnb",
+                        "size": "auto",
+                    },
+                    "label_info_1": {
+                        "enabled": "on" if labelEnabled else "off",
+                        "x_coor": labelX,
+                        "y_coor": labelY,
+                    },
                 },
-                "week": {
-                    "enabled": "on" if weekEnabled else "off",
-                    "x_coor": weekX,
-                    "y_coor": weekY,
-                },
-                "font": {
-                    "color": "white",
-                    "color_type": "auto",
-                    "display": "ntnb",
-                    "size": "auto",
-                },
-                "label_info_1": {
-                    "enabled": "on" if labelEnabled else "off",
-                    "x_coor": labelX,
-                    "y_coor": labelY,
-                },
-            },
+            }
         }
 
         if len(label) >= 16:
@@ -1039,9 +637,7 @@ class Tapo:
 
     # does not work for child devices, function discovery needed
     def getModuleSpec(self):
-        return self.performRequest(
-            {"method": "get", "function": {"name": ["module_spec"]}}
-        )
+        return self.performRequest({"get": {"function": {"name": ["module_spec"]}}})
 
     def getPrivacyMode(self):
         data = self.executeFunction(
@@ -1483,18 +1079,18 @@ class Tapo:
     def getAudioSpec(self):
         return self.performRequest(
             {
-                "method": "get",
-                "audio_capability": {"name": ["device_speaker", "device_microphone"]},
+                "get": {
+                    "audio_capability": {
+                        "name": ["device_speaker", "device_microphone"]
+                    }
+                }
             }
         )
 
     def getAudioConfig(self):
         return self.executeFunction(
             "getAudioConfig",
-            {
-                "method": "get",
-                "audio_config": {"name": ["speaker", "microphone", "record_audio"]},
-            },
+            {"audio_config": {"name": ["speaker", "microphone", "record_audio"]}},
         )
 
     def setRecordAudio(self, enabled: bool):
@@ -1506,11 +1102,11 @@ class Tapo:
     def setSpeakerVolume(self, volume):
         return self.executeFunction(
             "setSpeakerVolume",
-            {"method": "set", "audio_config": {"speaker": {"volume": volume}}},
+            {"audio_config": {"speaker": {"volume": volume}}},
         )
 
     def setMicrophone(self, volume=None, mute=None, noise_cancelling=None):
-        params = {"method": "set", "audio_config": {"microphone": {}}}
+        params = {"audio_config": {"microphone": {}}}
         if volume is not None:
             params["audio_config"]["microphone"]["volume"] = volume
         if mute is not None:
@@ -1526,7 +1122,7 @@ class Tapo:
 
     # does not work for child devices, function discovery needed
     def getVhttpd(self):
-        return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
+        return self.performRequest({"get": {"cet": {"name": ["vhttpd"]}}})
 
     def getWhitelampStatus(self):
         return self.executeFunction(
@@ -1660,7 +1256,7 @@ class Tapo:
 
     # does not work for child devices, function discovery needed
     def getMotorCapability(self):
-        return self.performRequest({"method": "get", "motor": {"name": ["capability"]}})
+        return self.performRequest({"get": {"motor": {"name": ["capability"]}}})
 
     def setPrivacyMode(self, enabled):
         return self.executeFunction(
@@ -1765,15 +1361,16 @@ class Tapo:
             return self.executeFunction("setAlarmConfig", data)
         else:
             data = {
-                "method": "set",
-                "msg_alarm": {
-                    "chn1_msg_alarm_info": {
-                        "alarm_type": "0",
-                        "enabled": "on" if enabled else "off",
-                        "light_type": "0",
-                        "alarm_mode": alarm_mode,
-                    }
-                },
+                "set": {
+                    "msg_alarm": {
+                        "chn1_msg_alarm_info": {
+                            "alarm_type": "0",
+                            "enabled": "on" if enabled else "off",
+                            "light_type": "0",
+                            "alarm_mode": alarm_mode,
+                        }
+                    },
+                }
             }
             if alarmVolume is not None:
                 data["msg_alarm"]["chn1_msg_alarm_info"]["alarm_volume"] = alarmVolume
@@ -1788,7 +1385,7 @@ class Tapo:
     # todo child
     def moveMotor(self, x, y):
         return self.performRequest(
-            {"method": "do", "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}
+            {"do": {"motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}}
         )
 
     # todo child
@@ -1797,7 +1394,7 @@ class Tapo:
             raise Exception("Angle must be in a range 0 <= angle < 360")
 
         return self.performRequest(
-            {"method": "do", "motor": {"movestep": {"direction": str(angle)}}}
+            {"do": {"motor": {"movestep": {"direction": str(angle)}}}}
         )
 
     def moveMotorClockWise(self):
@@ -1814,7 +1411,7 @@ class Tapo:
 
     # todo child
     def calibrateMotor(self):
-        return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
+        return self.performRequest({"do": {"motor": {"manual_cali": ""}}})
 
     def format(self):
         return self.executeFunction(
@@ -1837,15 +1434,14 @@ class Tapo:
         if not self.userID or forceReload is True:
             response = self.userID = self.performRequest(
                 {
-                    "method": "multipleRequest",
-                    "params": {
+                    "multipleRequest": {
                         "requests": [
                             {
                                 "method": "getUserID",
                                 "params": {"system": {"get_user_id": "null"}},
                             }
                         ]
-                    },
+                    }
                 }
             )["result"]["responses"][0]["result"]
             if "error_code" not in response or response["error_code"] == 0:
@@ -1943,7 +1539,7 @@ class Tapo:
     # does not work for child devices, function discovery needed
     def getCommonImage(self):
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
-        return self.performRequest({"method": "get", "image": {"name": "common"}})
+        return self.performRequest({"get": {"image": {"name": "common"}}})
 
     def __getSensitivityNumber(self, sensitivity):
         if isinstance(sensitivity, int) or (
@@ -2400,8 +1996,7 @@ class Tapo:
     def startManualAlarm(self):
         return self.performRequest(
             {
-                "method": "do",
-                "msg_alarm": {"manual_msg_alarm": {"action": "start"}},
+                "do": {"msg_alarm": {"manual_msg_alarm": {"action": "start"}}},
             }
         )
 
@@ -2409,8 +2004,7 @@ class Tapo:
     def stopManualAlarm(self):
         return self.performRequest(
             {
-                "method": "do",
-                "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},
+                "do": {"msg_alarm": {"manual_msg_alarm": {"action": "stop"}}},
             }
         )
 
@@ -2506,8 +2100,7 @@ class Tapo:
     def isUpdateAvailable(self):
         return self.performRequest(
             {
-                "method": "multipleRequest",
-                "params": {
+                "multipleRequest": {
                     "requests": [
                         {
                             "method": "checkFirmwareVersionByCloud",
@@ -2518,15 +2111,13 @@ class Tapo:
                             "params": {"cloud_config": {"name": ["upgrade_info"]}},
                         },
                     ]
-                },
+                }
             }
         )
 
     def startFirmwareUpgrade(self):
         try:
-            self.performRequest(
-                {"method": "do", "cloud_config": {"fw_download": "null"}}
-            )
+            self.performRequest({"do": {"cloud_config": {"fw_download": "null"}}})
         except Exception:
             raise Exception("No new firmware available.")
 
@@ -2547,8 +2138,7 @@ class Tapo:
     def getMost(self, omit_methods=[]):
         if self.deviceType == "SMART.TAPOCHIME":
             requestData = {
-                "method": "multipleRequest",
-                "params": {
+                "multipleRequest": {
                     "requests": [
                         {
                             "method": "get_device_info",
@@ -2557,11 +2147,11 @@ class Tapo:
                         {"method": "get_support_alarm_type_list"},
                         {"method": "get_device_time"},
                     ]
-                },
+                }
             }
 
             for macAddress in self.pairList["mac_list"]:
-                requestData["params"]["requests"].append(
+                requestData["multipleRequest"]["requests"].append(
                     {
                         "method": "get_chime_alarm_configure",
                         "params": {"mac": macAddress},
@@ -2569,8 +2159,7 @@ class Tapo:
                 )
         else:
             requestData = {
-                "method": "multipleRequest",
-                "params": {
+                "multipleRequest": {
                     "requests": [
                         {
                             "method": "getDiagnoseMode",
@@ -2877,20 +2466,20 @@ class Tapo:
                             "params": {"clips": {"name": "config"}},
                         },
                     ]
-                },
+                }
             }
         if len(omit_methods) != 0:
             filtered_requests = [
                 request
-                for request in requestData["params"]["requests"]
+                for request in requestData["multipleRequest"]["requests"]
                 if request.get("method") not in omit_methods
             ]
-            requestData["params"]["requests"] = filtered_requests
+            requestData["multipleRequest"]["requests"] = filtered_requests
 
         results = self.performRequest(requestData)
 
         # handle malformed / unexpected response from camera
-        if len(requestData["params"]["requests"]) != len(
+        if len(requestData["multipleRequest"]["requests"]) != len(
             results["result"]["responses"]
         ):
             if len(omit_methods) == 0:
@@ -2906,7 +2495,7 @@ class Tapo:
         returnData = {}
 
         # pre-allocate responses due to some devices not returning methods back
-        for request in requestData["params"]["requests"]:
+        for request in requestData["multipleRequest"]["requests"]:
             if request["method"] in returnData:
                 returnData[request["method"]].append(False)
             else:
