@@ -315,39 +315,100 @@ class Tapo:
                 raise
         return True
 
-    async def _kasa_send_raw(self, request, retry=0):
-        """Send a smart request directly via kasa transport (bypasses query shaping)."""
+    async def _kasa_send(self, request):
+        """Send a smart request via kasa protocol.query (with format translation)."""
         await self.ensureAuthenticated()
-        self.debugLog("Sending request:")
+        self.debugLog("Converting request:")
         self.debugLog(request)
+
         proto = self.dev.protocol
-        jsonRequest = json.dumps(request)
-        lock = getattr(proto, "_query_lock", None)
-        try:
-            if lock:
-                async with lock:
-                    result = await proto._transport.send(jsonRequest)
+        kasa_request = request
+        request_method = None
+        raw_response = None
+
+        if isinstance(request, dict) and "method" in request:
+            request_method = request.get("method")
+            if request_method == "multipleRequest":
+                params = request.get("params") or {}
+                kasa_request = {"multipleRequest": params}
+            elif request_method in {"get", "set", "do"}:
+                payload = {k: v for k, v in request.items() if k != "method"}
+                if "params" in payload and len(payload) == 1:
+                    payload = payload["params"]
+                kasa_request = {request_method: payload}
             else:
-                result = await proto._transport.send(jsonRequest)
+                if "params" in request and len(request) == 2:
+                    kasa_request = {request_method: request["params"]}
+                else:
+                    payload = {k: v for k, v in request.items() if k != "method"}
+                    kasa_request = (
+                        {request_method: payload} if payload else request_method
+                    )
+
+        self.debugLog("Converted query:")
+        self.debugLog(kasa_request)
+
+        original_send = proto._transport.send
+
+        self.debugLog("Overriding proto._transport.send...")
+
+        # Capture original error codes
+        async def send_wrapper(payload):
+            nonlocal raw_response
+            raw_response = await original_send(payload)
+            self.debugLog(f"Raw response: {raw_response}")
+            return raw_response
+
+        proto._transport.send = send_wrapper
+
+        self.debugLog("Sending query...")
+        try:
+            result = await proto.query(kasa_request)
         except DeviceError as err:
             code = getattr(err, "error_code", None)
-            if code in SMART_RETRYABLE_ERRORS and retry < MAX_LOGIN_RETRIES:
-                self.debugLog(
-                    f"Encountered {code}. Resetting transport and retrying request."
-                )
-                reset = getattr(proto._transport, "reset", None)
-                if reset is not None:
-                    self.debugLog("Requesting reset.")
-                    await reset()
-                else:
-                    self.debugLog("Recreating connection.")
-                    self.close()
-                return await self._kasa_send_raw(request, retry + 1)
+            self.debugLog(f"Received DeviceError, code: {code}")
+
+            if code == SmartErrorCode.INTERNAL_UNKNOWN_ERROR:
+                if isinstance(raw_response, dict) and "error_code" in raw_response:
+                    self.debugLog(
+                        f"Captured raw device error: {raw_response.get('error_code')}"
+                    )
+                    return raw_response
             if code == SmartErrorCode.DEVICE_BLOCKED:
                 raise Exception(f"Temporary Suspension: {str(err)}") from err
             raise
-        self.debugLog(f"Result: {result}")
-        return result
+        finally:
+            proto._transport.send = original_send
+
+        converted = result
+        if request_method == "multipleRequest":
+            multi_result = (
+                result.get("multipleRequest") if isinstance(result, dict) else None
+            )
+            if multi_result is not None:
+                converted = {"error_code": 0, "result": multi_result}
+        elif request_method in {"get", "set", "do"}:
+            if request_method == "set":
+                converted = {"error_code": 0}
+            elif request_method == "get":
+                data = result.get("get", {}) if isinstance(result, dict) else {}
+                if isinstance(data, dict):
+                    converted = {"error_code": 0, **data}
+                else:
+                    converted = {"error_code": 0}
+            else:
+                data = result.get("do", {}) if isinstance(result, dict) else {}
+                if isinstance(data, dict):
+                    converted = (
+                        data if "error_code" in data else {"error_code": 0, **data}
+                    )
+                else:
+                    converted = {"error_code": 0}
+        elif isinstance(result, dict) and request_method and request_method in result:
+            converted = {"error_code": 0, "result": result[request_method]}
+
+        self.debugLog(f"Result: {converted}")
+        return converted
 
     def getEncryptionMethod(self):
         """
@@ -496,9 +557,7 @@ class Tapo:
                         )
                     )
         else:
-            responseJSON = self.executeAsyncExecutorJob(
-                self._kasa_send_raw, fullRequest
-            )
+            responseJSON = self.executeAsyncExecutorJob(self._kasa_send, fullRequest)
         if not self.responseIsOK(responseJSON):
             #  -40401: Invalid Stok
             if (
