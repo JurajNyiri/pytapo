@@ -9,7 +9,7 @@ import logging
 import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import AuthenticationError
+from kasa.exceptions import AuthenticationError, SMART_RETRYABLE_ERRORS
 from kasa import DeviceConfig, DeviceError, Discover
 from kasa import Credentials
 
@@ -312,19 +312,35 @@ class Tapo:
                 raise
         return True
 
-    async def _kasa_send_raw(self, method, params=None):
+    async def _kasa_send_raw(self, request, retry=0):
         """Send a smart request directly via kasa transport (bypasses query shaping)."""
         await self.ensureAuthenticated()
-        self.debugLog(f"Sending method {method} with parameters {params}")
+        self.debugLog("Sending request:")
+        self.debugLog(request)
         proto = self.dev.protocol
-        smart_request = proto.get_smart_request(method, params)
+        jsonRequest = json.dumps(request)
         lock = getattr(proto, "_query_lock", None)
-        if lock:
-            async with lock:
-                result = await proto._transport.send(smart_request)
-                self.debugLog(f"Result: {result}")
-                return result
-        result = await proto._transport.send(smart_request)
+        try:
+            if lock:
+                async with lock:
+                    result = await proto._transport.send(jsonRequest)
+            else:
+                result = await proto._transport.send(jsonRequest)
+        except DeviceError as err:
+            code = getattr(err, "error_code", None)
+            if code in SMART_RETRYABLE_ERRORS and retry < MAX_LOGIN_RETRIES:
+                self.debugLog(
+                    f"Encountered {code}. Resetting transport and retrying request."
+                )
+                reset = getattr(proto._transport, "reset", None)
+                if reset is not None:
+                    self.debugLog("Requesting reset.")
+                    await reset()
+                else:
+                    self.debugLog("Recreating connection.")
+                    self.close()
+                return await self._kasa_send_raw(request, retry + 1)
+            raise
         self.debugLog(f"Result: {result}")
         return result
 
@@ -476,7 +492,7 @@ class Tapo:
                     )
         else:
             responseJSON = self.executeAsyncExecutorJob(
-                self._kasa_send_raw, fullRequest["method"], fullRequest.get("params")
+                self._kasa_send_raw, fullRequest
             )
         if not self.responseIsOK(responseJSON):
             #  -40401: Invalid Stok
