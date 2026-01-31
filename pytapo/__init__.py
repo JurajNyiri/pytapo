@@ -6,18 +6,12 @@ import json
 import requests
 import asyncio
 import logging
-from logging import Handler
-import re
 import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import (
-    AuthenticationError,
-    KasaException,
-    DeviceError,
-    UnsupportedDeviceError,
-)
-from kasa import DeviceConfig, Credentials, Discover
+from kasa.exceptions import AuthenticationError, SMART_RETRYABLE_ERRORS, SmartErrorCode
+from kasa import DeviceConfig, DeviceError, Discover
+from kasa import Credentials
 
 from datetime import datetime, timedelta
 from warnings import warn
@@ -100,8 +94,6 @@ class Tapo:
         self.dev = None
         self._kasa_ready = False
         self._loop = None
-        self._last_kasa_unknown_code = None
-        self._kasa_warn_handler = None
 
         self.klapTransport = None
         self.user = user
@@ -213,8 +205,39 @@ class Tapo:
             if self.klapTransport is not None:
                 await self.klapTransport.close()
 
-    async def ensureAuthenticated(self):
-        # Use python-kasa for auth/transport
+    def _log_kasa_connection_info(self):
+        ct = getattr(getattr(self.dev, "config", None), "connection_type", None)
+        transport = getattr(self.dev, "protocol", None)
+        transport_impl = getattr(transport, "_transport", None)
+
+        device_info = {
+            "alias": getattr(self.dev, "alias", None),
+            "model": getattr(self.dev, "model", None),
+            "mac": getattr(self.dev, "mac", None),
+        }
+        hw_info = getattr(self.dev, "hw_info", {}) or {}
+        device_info["fw"] = hw_info.get("sw_ver") or hw_info.get("fw_ver")
+
+        self.debugLog(f"kasa device: {device_info}")
+        self.debugLog(f"kasa chosen encryption: {self.getEncryptionMethod()}")
+
+        if ct:
+            fields = {
+                "device_family": getattr(ct, "device_family", None),
+                "encryption_type": getattr(ct, "encryption_type", None),
+                "https": getattr(ct, "https", None),
+                "login_version": getattr(ct, "login_version", None),
+                "http_port": getattr(ct, "http_port", None),
+            }
+            self.debugLog(
+                f"kasa connection_type: {fields}, "
+                f"protocol={type(transport).__name__}, "
+                f"transport={type(transport_impl).__name__ if transport_impl else None}"
+            )
+        else:
+            self.debugLog("kasa connection_type: <unavailable>")
+
+    async def ensureAuthenticated(self, retry=False):
         if self.isKLAP:
             if self.klapTransport is None:
                 if self.KLAPVersion is None:
@@ -249,6 +272,7 @@ class Tapo:
             return True
 
         if self.dev is None:
+            self.debugLog("Creating new Kasa-Tapo instance...")
             creds = Credentials(self.user, self.password)
             try:
                 self.dev = await Discover.discover_single(self.host, credentials=creds)
@@ -256,12 +280,18 @@ class Tapo:
                 raise Exception(
                     f"Failed to establish a new connection: {str(err)}"
                 ) from err
+            except Exception as err:
+                if retry is False:
+                    self.debugLog("Ensure authenticated failed, retrying. Error was:")
+                    self.debugLog(err)
+                    return await self.ensureAuthenticated(True)
+                else:
+                    raise err
             if self.dev is None:
                 raise Exception("Device not found via python-kasa Discover")
             self.debugLog(
                 f"kasa discover_single: host={self.host} proto={type(self.dev.protocol).__name__}"
             )
-            self._install_kasa_warn_handler()
         if not self._kasa_ready:
             try:
                 self.debugLog("kasa update: starting initial state fetch")
@@ -273,8 +303,11 @@ class Tapo:
                 await self._close_kasa_device()
                 raise Exception("Invalid authentication data") from err
             except DeviceError as err:
+                code = getattr(err, "error_code", None)
                 self.debugLog(f"kasa update failed (device error): {err}")
                 await self._close_kasa_device()
+                if code == SmartErrorCode.DEVICE_BLOCKED:
+                    raise Exception(f"Temporary Suspension: {str(err)}") from err
                 raise
             except Exception as err:
                 self.debugLog(f"kasa update failed: {err}")
@@ -282,36 +315,97 @@ class Tapo:
                 raise
         return True
 
-    async def _kasa_query(self, payload):
-        """Send a raw payload through python-kasa transport."""
+    async def _kasa_send_raw(self, request, retry=0):
+        """Send a smart request directly via kasa transport (bypasses query shaping)."""
         await self.ensureAuthenticated()
-        self.debugLog("Sending payload:")
-        self.debugLog(payload)
-        response = await self.dev.protocol.query(payload)
-        self.debugLog("Response:")
-        self.debugLog(response)
-        return response
+        self.debugLog("Sending request:")
+        self.debugLog(request)
+        proto = self.dev.protocol
+        jsonRequest = json.dumps(request)
+        lock = getattr(proto, "_query_lock", None)
+        try:
+            if lock:
+                async with lock:
+                    result = await proto._transport.send(jsonRequest)
+            else:
+                result = await proto._transport.send(jsonRequest)
+        except DeviceError as err:
+            code = getattr(err, "error_code", None)
+            if code in SMART_RETRYABLE_ERRORS and retry < MAX_LOGIN_RETRIES:
+                self.debugLog(
+                    f"Encountered {code}. Resetting transport and retrying request."
+                )
+                reset = getattr(proto._transport, "reset", None)
+                if reset is not None:
+                    self.debugLog("Requesting reset.")
+                    await reset()
+                else:
+                    self.debugLog("Recreating connection.")
+                    self.close()
+                return await self._kasa_send_raw(request, retry + 1)
+            if code == SmartErrorCode.DEVICE_BLOCKED:
+                raise Exception(f"Temporary Suspension: {str(err)}") from err
+            raise
+        self.debugLog(f"Result: {result}")
+        return result
 
-    def responseIsOK(self, res, data=None):
-        self.debugLog("Verifying response...")
-        if data is None:
-            data = res
-        if not isinstance(data, dict):
-            return True
-        return "error_code" not in data or data["error_code"] == 0
+    def getEncryptionMethod(self):
+        """
+        Pick the password digest method for media/auth based on connection details.
+        - KLAP devices use SHA256.
+        - For python-kasa devices, prefer SHA256 when login_version >=2, else MD5.
+        Defaults to SHA256 if unknown.
+        """
+        if self.isKLAP:
+            return EncryptionMethod.SHA256
+        if self.dev and getattr(self.dev, "config", None):
+            ct = getattr(self.dev.config, "connection_type", None)
+            login_version = getattr(ct, "login_version", None) if ct else None
+            if login_version is not None and login_version < 2:
+                return EncryptionMethod.MD5
+        return EncryptionMethod.SHA256
+
+    def getHashedPassword(self):
+        if self.passwordEncryptionMethod == EncryptionMethod.MD5:
+            return self.hashedPassword
+        elif self.passwordEncryptionMethod == EncryptionMethod.SHA256:
+            return self.hashedSha256Password
+        else:
+            raise Exception("Failure detecting hashing algorithm.")
+
+    def responseIsOK(self, data=None):
+        try:
+            if "error_code" not in data or data["error_code"] == 0:
+                return True
+            return False
+        except Exception as e:
+            raise Exception("Unexpected response from Tapo Camera: " + str(e))
 
     def executeFunction(self, method, params, retry=False):
         if method == "multipleRequest":
-            request_payload = {"multipleRequest": params or {}}
-            resp = self.performRequest(request_payload)
-            data = resp["result"]["responses"]
-        else:
-            req = {"multipleRequest": {"requests": [{"method": method}]}}
             if params is not None:
-                req["multipleRequest"]["requests"][0]["params"] = params
-
-            resp = self.performRequest(req)
-            data = resp["result"]["responses"][0]
+                data = self.performRequest(
+                    {"method": "multipleRequest", "params": params}
+                )["result"]["responses"]
+            else:
+                data = self.performRequest({"method": "multipleRequest"})["result"][
+                    "responses"
+                ]
+        else:
+            if params is not None:
+                data = self.performRequest(
+                    {
+                        "method": "multipleRequest",
+                        "params": {"requests": [{"method": method, "params": params}]},
+                    }
+                )["result"]["responses"][0]
+            else:
+                data = self.performRequest(
+                    {
+                        "method": "multipleRequest",
+                        "params": {"requests": [{"method": method}]},
+                    }
+                )["result"]["responses"][0]
 
         if type(data) == list:
             return data
@@ -338,6 +432,18 @@ class Tapo:
                 )
             )
 
+    def close(self):
+        return self.executeAsyncExecutorJob(self._close_kasa_device)
+
+    async def _close_kasa_device(self):
+        try:
+            if self.dev and getattr(self.dev, "protocol", None):
+                await self.dev.protocol.close()
+        except Exception:
+            pass
+        self.dev = None
+        self._kasa_ready = False
+
     def executeAsyncExecutorJob(self, job, *args):
         if self.hass is None:
             # reuse a dedicated loop so kasa aiohttp sessions stay alive between calls
@@ -351,261 +457,91 @@ class Tapo:
         else:
             return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
 
-    async def _close_kasa_device(self):
-        try:
-            if self.dev and getattr(self.dev, "protocol", None):
-                await self.dev.protocol.close()
-        except Exception:
-            pass
-        self.dev = None
-        self._kasa_ready = False
-        if self._kasa_warn_handler:
-            logging.getLogger("kasa.protocols.smartcamprotocol").removeHandler(
-                self._kasa_warn_handler
-            )
-            self._kasa_warn_handler = None
-        self._last_kasa_unknown_code = None
-
-    def _log_kasa_connection_info(self):
-        ct = getattr(getattr(self.dev, "config", None), "connection_type", None)
-        transport = getattr(self.dev, "protocol", None)
-        transport_impl = getattr(transport, "_transport", None)
-
-        device_info = {
-            "alias": getattr(self.dev, "alias", None),
-            "model": getattr(self.dev, "model", None),
-            "mac": getattr(self.dev, "mac", None),
-        }
-        hw_info = getattr(self.dev, "hw_info", {}) or {}
-        device_info["fw"] = hw_info.get("sw_ver") or hw_info.get("fw_ver")
-
-        self.debugLog(f"kasa device: {device_info}")
-        self.debugLog(f"kasa chosen encryption: {self.getEncryptionMethod()}")
-
-        if ct:
-            fields = {
-                "device_family": getattr(ct, "device_family", None),
-                "encryption_type": getattr(ct, "encryption_type", None),
-                "https": getattr(ct, "https", None),
-                "login_version": getattr(ct, "login_version", None),
-                "http_port": getattr(ct, "http_port", None),
-            }
-            self.debugLog(
-                f"kasa connection_type: {fields}, "
-                f"protocol={type(transport).__name__}, "
-                f"transport={type(transport_impl).__name__ if transport_impl else None}"
-            )
-        else:
-            self.debugLog("kasa connection_type: <unavailable>")
-
-    def _install_kasa_warn_handler(self):
-        if self._kasa_warn_handler:
-            return
-
-        class _WarnHandler(Handler):
-            def __init__(self, outer):
-                super().__init__(level=logging.WARNING)
-                self.outer = outer
-
-            def emit(self, record):
-                msg = record.getMessage()
-                m = re.search(r"received unknown error code: (-?\d+)", msg)
-                if m:
-                    try:
-                        self.outer._last_kasa_unknown_code = int(m.group(1))
-                    except Exception:
-                        pass
-                    # downgrade the log so it doesn't surface as a warning
-                    record.levelno = logging.DEBUG
-                    record.levelname = "DEBUG"
-
-        self._kasa_warn_handler = _WarnHandler(self)
-        logging.getLogger("kasa.protocols.smartcamprotocol").addHandler(
-            self._kasa_warn_handler
-        )
-
-    def _format_device_error(self, err):
-        """Return a user-friendly message for kasa DeviceError."""
-        msg = str(err)
-        code = getattr(err, "error_code", None)
-        if code is not None and str(code) in ERROR_CODES:
-            return self.getErrorMessage(str(code))
-        # use the last unknown code observed from kasa warnings if available
-        if (
-            self._last_kasa_unknown_code
-            and str(self._last_kasa_unknown_code) in ERROR_CODES
-        ):
-            errMsg = self.getErrorMessage(str(self._last_kasa_unknown_code))
-            self._last_kasa_unknown_code = None
-            return errMsg
-        if self._last_kasa_unknown_code:
-            code = self._last_kasa_unknown_code
-            self._last_kasa_unknown_code = None
-            return f"Device error {code}"
-        return f"Device error: {msg}"
-
     def performRequest(self, requestData, loginRetryCount=0):
-        try:
-            self.executeAsyncExecutorJob(self.ensureAuthenticated)
-        except AuthenticationError as err:
-            self.executeAsyncExecutorJob(self._close_kasa_device)
-            raise Exception("Invalid authentication data") from err
-        except DeviceError as err:
-            errMsg = self._format_device_error(err)
-            if "Device blocked for" in errMsg:
-                raise Exception(f"Temporary Suspension: {str(errMsg)}") from err
-            raise Exception(self._format_device_error(err)) from err
-        except Exception as err:
-            if loginRetryCount < MAX_LOGIN_RETRIES:
-                self.executeAsyncExecutorJob(self._close_kasa_device)
-                return self.performRequest(requestData, loginRetryCount + 1)
-            raise err
-        authValid = True
+        self.executeAsyncExecutorJob(self.ensureAuthenticated)
+        if self.childID:
+            fullRequest = {
+                "method": "multipleRequest",
+                "params": {
+                    "requests": [
+                        {
+                            "method": "controlChild",
+                            "params": {
+                                "childControl": {
+                                    "device_id": self.childID,
+                                    "request_data": requestData,
+                                }
+                            },
+                        }
+                    ]
+                },
+            }
+        else:
+            fullRequest = requestData
 
         if self.isKLAP:
-            if self.childID:
-                fullRequest = {
-                    "method": "multipleRequest",
-                    "params": {
-                        "requests": [
-                            {
-                                "method": "controlChild",
-                                "params": {
-                                    "childControl": {
-                                        "device_id": self.childID,
-                                        "request_data": requestData,
-                                    }
-                                },
-                            }
-                        ]
-                    },
-                }
-            else:
-                fullRequest = requestData
-
             responseJSON = self.executeAsyncExecutorJob(
                 self.sendKlapRequest, fullRequest
             )
-            res = None
             if (
                 "result" in responseJSON
                 and "responses" in responseJSON["result"]
                 and len(responseJSON["result"]["responses"]) == 1
             ):
-                if not self.responseIsOK(res, responseJSON["result"]["responses"][0]):
-                    authValid = False
-        else:
-            if self.childID:
-                fullRequest = {
-                    "multipleRequest": {
-                        "requests": [
-                            {
-                                "method": "controlChild",
-                                "params": {
-                                    "childControl": {
-                                        "device_id": self.childID,
-                                        "request_data": requestData,
-                                    }
-                                },
-                            }
-                        ]
-                    }
-                }
-            else:
-                fullRequest = requestData
-
-            try:
-                responseJSON = self.executeAsyncExecutorJob(
-                    self._kasa_query, fullRequest
-                )
-            except DeviceError as err:
-                errMsg = self._format_device_error(err)
-                if "Device blocked for" in errMsg:
-                    raise Exception(f"Temporary Suspension: {str(errMsg)}") from err
-                raise Exception(self._format_device_error(err)) from err
-            except (AuthenticationError, KasaException) as err:
-                if loginRetryCount < MAX_LOGIN_RETRIES:
-                    self.dev = None
-                    self._kasa_ready = False
-                    return self.performRequest(requestData, loginRetryCount + 1)
-                raise Exception(f"Invalid authentication data (kasa): {err}")
-            except Exception as err:
-                if loginRetryCount < MAX_LOGIN_RETRIES:
-                    self.dev = None
-                    self._kasa_ready = False
-                    return self.performRequest(requestData, loginRetryCount + 1)
-                raise Exception(f"PyTapo Kasa Error: {err}")
-
-            if not self.responseIsOK(None, responseJSON):
-                authValid = False
-            # normalize kasa shape to legacy result/responses for downstream code
-            if "result" not in responseJSON and "multipleRequest" in responseJSON:
-                self.debugLog("Normalizing Kasa response...")
-                responseJSON = {"result": responseJSON["multipleRequest"]}
-                self.debugLog(f"Normalized: {responseJSON}")
-
-        if not authValid:
-            if loginRetryCount < MAX_LOGIN_RETRIES:
-                self.debugLog("Retrying request...")
-                if self.isKLAP:
-                    self.klapTransport = None
-                else:
-                    self.dev = None
-                    self._kasa_ready = False
-                return self.performRequest(requestData, loginRetryCount + 1)
-            else:
-                raise Exception(
-                    "Error: {}, Response: {}".format(
-                        self.getErrorMessage(
-                            responseJSON.get("error_code")
-                            if isinstance(responseJSON, dict)
-                            else None
-                        ),
-                        json.dumps(responseJSON),
-                    )
-                )
-
-        # strip away child device stuff to ensure consistent response format for HUB cameras
-        if self.childID:
-            self.debugLog("Handling response for child...")
-            self.debugLog(responseJSON)
-            if (
-                "result" in responseJSON
-                and "responses" in responseJSON["result"]
-                and len(responseJSON["result"]["responses"]) >= 1
-            ):
-                responses = []
-                for response in responseJSON["result"]["responses"]:
-                    if "method" in response and response["method"] == "controlChild":
-                        if "response_data" in response.get("result", {}):
-                            responses.append(response["result"]["response_data"])
-                        else:
-                            responses.append(response.get("result"))
-                    else:
-                        responses.append(response.get("result"))
-                responseJSON["result"]["responses"] = responses
-                self.debugLog("Returning:")
-                self.debugLog(responseJSON["result"]["responses"][0])
-                return responseJSON["result"]["responses"][0]
-        else:
-            if self.isKLAP:
-                self.debugLog("Device is KLAP")
-                if self.responseIsOK(None, responseJSON):
-                    self.debugLog("Returning:")
-                    self.debugLog(responseJSON)
-                    return responseJSON
-                else:
+                if not self.responseIsOK(responseJSON["result"]["responses"][0]):
                     raise Exception(
                         "Error: {}, Response: {}".format(
                             self.getErrorMessage(responseJSON["error_code"]),
                             json.dumps(responseJSON),
                         )
                     )
+        else:
+            responseJSON = self.executeAsyncExecutorJob(
+                self._kasa_send_raw, fullRequest
+            )
+        if not self.responseIsOK(responseJSON):
+            #  -40401: Invalid Stok
+            if (
+                responseJSON
+                and "error_code" in responseJSON
+                and (
+                    responseJSON["error_code"] == -40401
+                    or responseJSON["error_code"] == -1
+                )
+            ) and loginRetryCount < MAX_LOGIN_RETRIES:
+                self.close()
+                return self.performRequest(requestData, loginRetryCount + 1)
             else:
-                self.debugLog("Device is not a child and not KLAP.")
-                self.debugLog("Returning:")
-                self.debugLog(responseJSON)
+                raise Exception(
+                    "Error: {}, Response: {}".format(
+                        self.getErrorMessage(responseJSON["error_code"]),
+                        json.dumps(responseJSON),
+                    )
+                )
+
+        # strip away child device stuff to ensure consistent response format for HUB cameras
+        if self.childID:
+            responses = []
+            for response in responseJSON["result"]["responses"]:
+                if "method" in response and response["method"] == "controlChild":
+                    if "response_data" in response["result"]:
+                        responses.append(response["result"]["response_data"])
+                    else:
+                        responses.append(response["result"])
+                else:
+                    responses.append(response["result"])  # not sure if needed
+            responseJSON["result"]["responses"] = responses
+            return responseJSON["result"]["responses"][0]
+        else:
+            if self.responseIsOK(responseJSON):
                 return responseJSON
+            else:
+                raise Exception(
+                    "Error: {}, Response: {}".format(
+                        self.getErrorMessage(responseJSON["error_code"]),
+                        json.dumps(responseJSON),
+                    )
+                )
 
     def getMediaSession(self, stream_type: StreamType = None, start_time=""):
         query_params = {}
@@ -636,25 +572,12 @@ class Tapo:
             query_params=query_params,
         )  # pragma: no cover
 
-    def getEncryptionMethod(self):
-        """
-        Pick the password digest method for media/auth based on connection details.
-        - KLAP devices use SHA256.
-        - For python-kasa devices, prefer SHA256 when login_version >=2, else MD5.
-        Defaults to SHA256 if unknown.
-        """
-        if self.isKLAP:
-            return EncryptionMethod.SHA256
-        if self.dev and getattr(self.dev, "config", None):
-            ct = getattr(self.dev.config, "connection_type", None)
-            login_version = getattr(ct, "login_version", None) if ct else None
-            if login_version is not None and login_version < 2:
-                return EncryptionMethod.MD5
-        return EncryptionMethod.SHA256
-
     def getChildDevices(self):
         childDevices = self.performRequest(
-            {"getChildDeviceList": {"childControl": {"start_index": 0}}}
+            {
+                "method": "getChildDeviceList",
+                "params": {"childControl": {"start_index": 0}},
+            }
         )
         return childDevices["result"]["child_device_list"]
 
@@ -761,31 +684,30 @@ class Tapo:
         if self.childID:
             raise Exception("setOsd not supported for child devices yet")
         data = {
-            "set": {
-                "OSD": {
-                    "date": {
-                        "enabled": "on" if dateEnabled else "off",
-                        "x_coor": dateX,
-                        "y_coor": dateY,
-                    },
-                    "week": {
-                        "enabled": "on" if weekEnabled else "off",
-                        "x_coor": weekX,
-                        "y_coor": weekY,
-                    },
-                    "font": {
-                        "color": "white",
-                        "color_type": "auto",
-                        "display": "ntnb",
-                        "size": "auto",
-                    },
-                    "label_info_1": {
-                        "enabled": "on" if labelEnabled else "off",
-                        "x_coor": labelX,
-                        "y_coor": labelY,
-                    },
+            "method": "set",
+            "OSD": {
+                "date": {
+                    "enabled": "on" if dateEnabled else "off",
+                    "x_coor": dateX,
+                    "y_coor": dateY,
                 },
-            }
+                "week": {
+                    "enabled": "on" if weekEnabled else "off",
+                    "x_coor": weekX,
+                    "y_coor": weekY,
+                },
+                "font": {
+                    "color": "white",
+                    "color_type": "auto",
+                    "display": "ntnb",
+                    "size": "auto",
+                },
+                "label_info_1": {
+                    "enabled": "on" if labelEnabled else "off",
+                    "x_coor": labelX,
+                    "y_coor": labelY,
+                },
+            },
         }
 
         if len(label) >= 16:
@@ -814,7 +736,9 @@ class Tapo:
 
     # does not work for child devices, function discovery needed
     def getModuleSpec(self):
-        return self.performRequest({"get": {"function": {"name": ["module_spec"]}}})
+        return self.performRequest(
+            {"method": "get", "function": {"name": ["module_spec"]}}
+        )
 
     def getPrivacyMode(self):
         data = self.executeFunction(
@@ -1256,18 +1180,18 @@ class Tapo:
     def getAudioSpec(self):
         return self.performRequest(
             {
-                "get": {
-                    "audio_capability": {
-                        "name": ["device_speaker", "device_microphone"]
-                    }
-                }
+                "method": "get",
+                "audio_capability": {"name": ["device_speaker", "device_microphone"]},
             }
         )
 
     def getAudioConfig(self):
         return self.executeFunction(
             "getAudioConfig",
-            {"audio_config": {"name": ["speaker", "microphone", "record_audio"]}},
+            {
+                "method": "get",
+                "audio_config": {"name": ["speaker", "microphone", "record_audio"]},
+            },
         )
 
     def setRecordAudio(self, enabled: bool):
@@ -1279,11 +1203,11 @@ class Tapo:
     def setSpeakerVolume(self, volume):
         return self.executeFunction(
             "setSpeakerVolume",
-            {"audio_config": {"speaker": {"volume": volume}}},
+            {"method": "set", "audio_config": {"speaker": {"volume": volume}}},
         )
 
     def setMicrophone(self, volume=None, mute=None, noise_cancelling=None):
-        params = {"audio_config": {"microphone": {}}}
+        params = {"method": "set", "audio_config": {"microphone": {}}}
         if volume is not None:
             params["audio_config"]["microphone"]["volume"] = volume
         if mute is not None:
@@ -1299,7 +1223,7 @@ class Tapo:
 
     # does not work for child devices, function discovery needed
     def getVhttpd(self):
-        return self.performRequest({"get": {"cet": {"name": ["vhttpd"]}}})
+        return self.performRequest({"method": "get", "cet": {"name": ["vhttpd"]}})
 
     def getWhitelampStatus(self):
         return self.executeFunction(
@@ -1433,7 +1357,7 @@ class Tapo:
 
     # does not work for child devices, function discovery needed
     def getMotorCapability(self):
-        return self.performRequest({"get": {"motor": {"name": ["capability"]}}})
+        return self.performRequest({"method": "get", "motor": {"name": ["capability"]}})
 
     def setPrivacyMode(self, enabled):
         return self.executeFunction(
@@ -1538,16 +1462,15 @@ class Tapo:
             return self.executeFunction("setAlarmConfig", data)
         else:
             data = {
-                "set": {
-                    "msg_alarm": {
-                        "chn1_msg_alarm_info": {
-                            "alarm_type": "0",
-                            "enabled": "on" if enabled else "off",
-                            "light_type": "0",
-                            "alarm_mode": alarm_mode,
-                        }
-                    },
-                }
+                "method": "set",
+                "msg_alarm": {
+                    "chn1_msg_alarm_info": {
+                        "alarm_type": "0",
+                        "enabled": "on" if enabled else "off",
+                        "light_type": "0",
+                        "alarm_mode": alarm_mode,
+                    }
+                },
             }
             if alarmVolume is not None:
                 data["msg_alarm"]["chn1_msg_alarm_info"]["alarm_volume"] = alarmVolume
@@ -1562,7 +1485,7 @@ class Tapo:
     # todo child
     def moveMotor(self, x, y):
         return self.performRequest(
-            {"do": {"motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}}
+            {"method": "do", "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}
         )
 
     # todo child
@@ -1571,7 +1494,7 @@ class Tapo:
             raise Exception("Angle must be in a range 0 <= angle < 360")
 
         return self.performRequest(
-            {"do": {"motor": {"movestep": {"direction": str(angle)}}}}
+            {"method": "do", "motor": {"movestep": {"direction": str(angle)}}}
         )
 
     def moveMotorClockWise(self):
@@ -1588,7 +1511,7 @@ class Tapo:
 
     # todo child
     def calibrateMotor(self):
-        return self.performRequest({"do": {"motor": {"manual_cali": ""}}})
+        return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
 
     def format(self):
         return self.executeFunction(
@@ -1611,14 +1534,15 @@ class Tapo:
         if not self.userID or forceReload is True:
             response = self.userID = self.performRequest(
                 {
-                    "multipleRequest": {
+                    "method": "multipleRequest",
+                    "params": {
                         "requests": [
                             {
                                 "method": "getUserID",
                                 "params": {"system": {"get_user_id": "null"}},
                             }
                         ]
-                    }
+                    },
                 }
             )["result"]["responses"][0]["result"]
             if "error_code" not in response or response["error_code"] == 0:
@@ -1716,7 +1640,7 @@ class Tapo:
     # does not work for child devices, function discovery needed
     def getCommonImage(self):
         warn("Prefer to use a specific value getter", DeprecationWarning, stacklevel=2)
-        return self.performRequest({"get": {"image": {"name": "common"}}})
+        return self.performRequest({"method": "get", "image": {"name": "common"}})
 
     def __getSensitivityNumber(self, sensitivity):
         if isinstance(sensitivity, int) or (
@@ -2173,7 +2097,8 @@ class Tapo:
     def startManualAlarm(self):
         return self.performRequest(
             {
-                "do": {"msg_alarm": {"manual_msg_alarm": {"action": "start"}}},
+                "method": "do",
+                "msg_alarm": {"manual_msg_alarm": {"action": "start"}},
             }
         )
 
@@ -2181,7 +2106,8 @@ class Tapo:
     def stopManualAlarm(self):
         return self.performRequest(
             {
-                "do": {"msg_alarm": {"manual_msg_alarm": {"action": "stop"}}},
+                "method": "do",
+                "msg_alarm": {"manual_msg_alarm": {"action": "stop"}},
             }
         )
 
@@ -2277,7 +2203,8 @@ class Tapo:
     def isUpdateAvailable(self):
         return self.performRequest(
             {
-                "multipleRequest": {
+                "method": "multipleRequest",
+                "params": {
                     "requests": [
                         {
                             "method": "checkFirmwareVersionByCloud",
@@ -2288,13 +2215,15 @@ class Tapo:
                             "params": {"cloud_config": {"name": ["upgrade_info"]}},
                         },
                     ]
-                }
+                },
             }
         )
 
     def startFirmwareUpgrade(self):
         try:
-            self.performRequest({"do": {"cloud_config": {"fw_download": "null"}}})
+            self.performRequest(
+                {"method": "do", "cloud_config": {"fw_download": "null"}}
+            )
         except Exception:
             raise Exception("No new firmware available.")
 
@@ -2315,7 +2244,8 @@ class Tapo:
     def getMost(self, omit_methods=[]):
         if self.deviceType == "SMART.TAPOCHIME":
             requestData = {
-                "multipleRequest": {
+                "method": "multipleRequest",
+                "params": {
                     "requests": [
                         {
                             "method": "get_device_info",
@@ -2324,11 +2254,11 @@ class Tapo:
                         {"method": "get_support_alarm_type_list"},
                         {"method": "get_device_time"},
                     ]
-                }
+                },
             }
 
             for macAddress in self.pairList["mac_list"]:
-                requestData["multipleRequest"]["requests"].append(
+                requestData["params"]["requests"].append(
                     {
                         "method": "get_chime_alarm_configure",
                         "params": {"mac": macAddress},
@@ -2336,7 +2266,8 @@ class Tapo:
                 )
         else:
             requestData = {
-                "multipleRequest": {
+                "method": "multipleRequest",
+                "params": {
                     "requests": [
                         {
                             "method": "getDiagnoseMode",
@@ -2643,20 +2574,20 @@ class Tapo:
                             "params": {"clips": {"name": "config"}},
                         },
                     ]
-                }
+                },
             }
         if len(omit_methods) != 0:
             filtered_requests = [
                 request
-                for request in requestData["multipleRequest"]["requests"]
+                for request in requestData["params"]["requests"]
                 if request.get("method") not in omit_methods
             ]
-            requestData["multipleRequest"]["requests"] = filtered_requests
+            requestData["params"]["requests"] = filtered_requests
 
         results = self.performRequest(requestData)
 
         # handle malformed / unexpected response from camera
-        if len(requestData["multipleRequest"]["requests"]) != len(
+        if len(requestData["params"]["requests"]) != len(
             results["result"]["responses"]
         ):
             if len(omit_methods) == 0:
@@ -2672,7 +2603,7 @@ class Tapo:
         returnData = {}
 
         # pre-allocate responses due to some devices not returning methods back
-        for request in requestData["multipleRequest"]["requests"]:
+        for request in requestData["params"]["requests"]:
             if request["method"] in returnData:
                 returnData[request["method"]].append(False)
             else:
