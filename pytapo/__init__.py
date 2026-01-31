@@ -315,41 +315,7 @@ class Tapo:
                 raise
         return True
 
-    async def _kasa_send_raw(self, request, retry=0):
-        """Send a smart request directly via kasa transport (bypasses query shaping)."""
-        await self.ensureAuthenticated()
-        self.debugLog("Sending request:")
-        self.debugLog(request)
-        proto = self.dev.protocol
-        jsonRequest = json.dumps(request)
-        lock = getattr(proto, "_query_lock", None)
-        try:
-            if lock:
-                async with lock:
-                    result = await proto._transport.send(jsonRequest)
-            else:
-                result = await proto._transport.send(jsonRequest)
-        except DeviceError as err:
-            code = getattr(err, "error_code", None)
-            if code in SMART_RETRYABLE_ERRORS and retry < MAX_LOGIN_RETRIES:
-                self.debugLog(
-                    f"Encountered {code}. Resetting transport and retrying request."
-                )
-                reset = getattr(proto._transport, "reset", None)
-                if reset is not None:
-                    self.debugLog("Requesting reset.")
-                    await reset()
-                else:
-                    self.debugLog("Recreating connection.")
-                    self.close()
-                return await self._kasa_send_raw(request, retry + 1)
-            if code == SmartErrorCode.DEVICE_BLOCKED:
-                raise Exception(f"Temporary Suspension: {str(err)}") from err
-            raise
-        self.debugLog(f"Result: {result}")
-        return result
-
-    async def _kasa_send(self, request, retry=0):
+    async def _kasa_send(self, request):
         """Send a smart request via kasa protocol.query (with format translation)."""
         await self.ensureAuthenticated()
         self.debugLog("Converting request:")
@@ -358,6 +324,7 @@ class Tapo:
         proto = self.dev.protocol
         kasa_request = request
         request_method = None
+        raw_response = None
 
         if isinstance(request, dict) and "method" in request:
             request_method = request.get("method")
@@ -381,6 +348,20 @@ class Tapo:
         self.debugLog("Converted query:")
         self.debugLog(kasa_request)
 
+        original_send = proto._transport.send
+
+        self.debugLog("Overriding proto._transport.send...")
+
+        # Capture original error codes
+        async def send_wrapper(payload):
+            nonlocal raw_response
+            raw_response = await original_send(payload)
+            self.debugLog(f"Raw response: {raw_response}")
+            return raw_response
+
+        proto._transport.send = send_wrapper
+
+        self.debugLog("Sending query...")
         try:
             result = await proto.query(kasa_request)
         except DeviceError as err:
@@ -388,10 +369,16 @@ class Tapo:
             self.debugLog(f"Received DeviceError, code: {code}")
 
             if code == SmartErrorCode.INTERNAL_UNKNOWN_ERROR:
-                self.debugLog("internal error")
+                if isinstance(raw_response, dict) and "error_code" in raw_response:
+                    self.debugLog(
+                        f"Captured raw device error: {raw_response.get('error_code')}"
+                    )
+                    return raw_response
             if code == SmartErrorCode.DEVICE_BLOCKED:
                 raise Exception(f"Temporary Suspension: {str(err)}") from err
             raise
+        finally:
+            proto._transport.send = original_send
 
         converted = result
         if request_method == "multipleRequest":
