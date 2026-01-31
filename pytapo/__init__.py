@@ -9,7 +9,7 @@ import logging
 import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import AuthenticationError, SMART_RETRYABLE_ERRORS
+from kasa.exceptions import AuthenticationError, SMART_RETRYABLE_ERRORS, SmartErrorCode
 from kasa import DeviceConfig, DeviceError, Discover
 from kasa import Credentials
 
@@ -300,15 +300,18 @@ class Tapo:
                 self._kasa_ready = True
             except AuthenticationError as err:
                 self.debugLog(f"kasa update failed (auth): {err}")
-                self.close()
+                await self._close_kasa_device()
                 raise Exception("Invalid authentication data") from err
             except DeviceError as err:
+                code = getattr(err, "error_code", None)
                 self.debugLog(f"kasa update failed (device error): {err}")
-                self.close()
+                await self._close_kasa_device()
+                if code == SmartErrorCode.DEVICE_BLOCKED:
+                    raise Exception(f"Temporary Suspension: {str(err)}") from err
                 raise
             except Exception as err:
                 self.debugLog(f"kasa update failed: {err}")
-                self.close()
+                await self._close_kasa_device()
                 raise
         return True
 
@@ -340,6 +343,8 @@ class Tapo:
                     self.debugLog("Recreating connection.")
                     self.close()
                 return await self._kasa_send_raw(request, retry + 1)
+            if code == SmartErrorCode.DEVICE_BLOCKED:
+                raise Exception(f"Temporary Suspension: {str(err)}") from err
             raise
         self.debugLog(f"Result: {result}")
         return result
