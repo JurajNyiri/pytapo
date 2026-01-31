@@ -349,6 +349,80 @@ class Tapo:
         self.debugLog(f"Result: {result}")
         return result
 
+    async def _kasa_send(self, request, retry=0):
+        """Send a smart request via kasa protocol.query (with format translation)."""
+        await self.ensureAuthenticated()
+        self.debugLog("Converting request:")
+        self.debugLog(request)
+
+        proto = self.dev.protocol
+        kasa_request = request
+        request_method = None
+
+        if isinstance(request, dict) and "method" in request:
+            request_method = request.get("method")
+            if request_method == "multipleRequest":
+                params = request.get("params") or {}
+                kasa_request = {"multipleRequest": params}
+            elif request_method in {"get", "set", "do"}:
+                payload = {k: v for k, v in request.items() if k != "method"}
+                if "params" in payload and len(payload) == 1:
+                    payload = payload["params"]
+                kasa_request = {request_method: payload}
+            else:
+                if "params" in request and len(request) == 2:
+                    kasa_request = {request_method: request["params"]}
+                else:
+                    payload = {k: v for k, v in request.items() if k != "method"}
+                    kasa_request = (
+                        {request_method: payload} if payload else request_method
+                    )
+
+        self.debugLog("Converted query:")
+        self.debugLog(kasa_request)
+
+        try:
+            result = await proto.query(kasa_request)
+        except DeviceError as err:
+            code = getattr(err, "error_code", None)
+            self.debugLog(f"Received DeviceError, code: {code}")
+
+            if code == SmartErrorCode.INTERNAL_UNKNOWN_ERROR:
+                self.debugLog("internal error")
+            if code == SmartErrorCode.DEVICE_BLOCKED:
+                raise Exception(f"Temporary Suspension: {str(err)}") from err
+            raise
+
+        converted = result
+        if request_method == "multipleRequest":
+            multi_result = (
+                result.get("multipleRequest") if isinstance(result, dict) else None
+            )
+            if multi_result is not None:
+                converted = {"error_code": 0, "result": multi_result}
+        elif request_method in {"get", "set", "do"}:
+            if request_method == "set":
+                converted = {"error_code": 0}
+            elif request_method == "get":
+                data = result.get("get", {}) if isinstance(result, dict) else {}
+                if isinstance(data, dict):
+                    converted = {"error_code": 0, **data}
+                else:
+                    converted = {"error_code": 0}
+            else:
+                data = result.get("do", {}) if isinstance(result, dict) else {}
+                if isinstance(data, dict):
+                    converted = (
+                        data if "error_code" in data else {"error_code": 0, **data}
+                    )
+                else:
+                    converted = {"error_code": 0}
+        elif isinstance(result, dict) and request_method and request_method in result:
+            converted = {"error_code": 0, "result": result[request_method]}
+
+        self.debugLog(f"Result: {converted}")
+        return converted
+
     def getEncryptionMethod(self):
         """
         Pick the password digest method for media/auth based on connection details.
@@ -496,9 +570,7 @@ class Tapo:
                         )
                     )
         else:
-            responseJSON = self.executeAsyncExecutorJob(
-                self._kasa_send_raw, fullRequest
-            )
+            responseJSON = self.executeAsyncExecutorJob(self._kasa_send, fullRequest)
         if not self.responseIsOK(responseJSON):
             #  -40401: Invalid Stok
             if (
