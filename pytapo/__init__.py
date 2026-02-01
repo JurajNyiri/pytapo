@@ -315,7 +315,7 @@ class Tapo:
                 raise
         return True
 
-    async def _kasa_send(self, request):
+    async def _kasa_send(self, request, retry=0):
         """Send a smart request via kasa protocol.query (with format translation)."""
         await self.ensureAuthenticated()
         self.debugLog("Converting request:")
@@ -376,6 +376,19 @@ class Tapo:
                     return raw_response
             if code == SmartErrorCode.DEVICE_BLOCKED:
                 raise Exception(f"Temporary Suspension: {str(err)}") from err
+            raise
+        except Exception as err:
+            self.debugLog(f"Received error: {err}")
+            if retry < MAX_LOGIN_RETRIES:
+                self.debugLog("Resetting transport and retrying request.")
+                reset = getattr(proto._transport, "reset", None)
+                if reset is not None:
+                    self.debugLog("Requesting reset.")
+                    await reset()
+                else:
+                    self.debugLog("Recreating connection.")
+                    self.close()
+                return await self._kasa_send(request, retry + 1)
             raise
         finally:
             proto._transport.send = original_send
