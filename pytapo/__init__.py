@@ -800,7 +800,7 @@ class Tapo:
     def getVideoCapability(self):
         return self.executeFunction(
             "getVideoCapability",
-            {"video_capability": {"name": "main"}},
+            {"video_capability": {"name": ["main", "minor"]}},
         )
 
     # returns empty response for child devices
@@ -2654,7 +2654,7 @@ class Tapo:
                         },
                         {
                             "method": "getVideoCapability",
-                            "params": {"video_capability": {"name": "main"}},
+                            "params": {"video_capability": {"name": ["main", "minor"]}},
                         },
                         {
                             "method": "getQuickRespList",
