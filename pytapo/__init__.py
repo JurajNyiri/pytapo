@@ -803,6 +803,18 @@ class Tapo:
             {"video_capability": {"name": ["main", "minor"]}},
         )
 
+    def getDualCamCapability(self):
+        return self.executeFunction(
+            "getDualCamCapability",
+            {"image_capability": {"name": ["dualCam"]}},
+        )
+
+    def getAllChnInfo(self):
+        return self.executeFunction(
+            "getAllChnInfo",
+            {"system": {"table": "chn_info"}},
+        )
+
     # returns empty response for child devices
     def getOsd(self):
         # no, asking for all does not work...
@@ -2418,6 +2430,14 @@ class Tapo:
                 "method": "multipleRequest",
                 "params": {
                     "requests": [
+                        {
+                            "method": "getDualCamCapability",
+                            "params": {"image_capability": {"name": ["dualCam"]}},
+                        },
+                        {
+                            "method": "getAllChnInfo",
+                            "params": {"system": {"table": "chn_info"}},
+                        },
                         {
                             "method": "getDiagnoseMode",
                             "params": {"system": {"name": "sys"}},
