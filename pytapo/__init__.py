@@ -328,6 +328,17 @@ class Tapo:
                                 connection_type=conn_params,
                             )
                             return await Device.connect(config=config)
+                        except AuthenticationError as err:
+                            raise err
+                        except DeviceError as err:
+                            code = getattr(err, "error_code", None)
+                            self.debugLog(f"kasa update failed (device error): {err}")
+                            await self._close_kasa_device()
+                            if code == SmartErrorCode.DEVICE_BLOCKED:
+                                raise Exception(
+                                    f"Temporary Suspension: {str(err)}"
+                                ) from err
+                            raise
                         except Exception as err:
                             self.debugLog(err)
                             last_err = err
@@ -337,7 +348,11 @@ class Tapo:
 
                 try:
                     self.dev = await try_direct_connect()
+                except AuthenticationError as err:
+                    raise Exception("Invalid authentication data") from err
                 except Exception as direct_err:
+                    if "Temporary Suspension" in str(direct_err):
+                        raise direct_err
                     raise Exception(
                         "Failed to establish a new connection: "
                         f"{str(err)} (direct connect failed: {direct_err})"
