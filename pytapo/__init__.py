@@ -291,50 +291,50 @@ class Tapo:
                     https=True,
                 )
             ]
-            for encrypt_type in DeviceEncryptionType:
-                if encrypt_type is DeviceEncryptionType.Klap:
-                    continue
-                for https in (True, False):
-                    if encrypt_type is DeviceEncryptionType.Aes and https is True:
-                        continue
-                    direct_connection_options.append(
-                        DeviceConnectionParameters(
-                            DeviceFamily.SmartIpCamera,
-                            encrypt_type,
-                            https=https,
-                        )
-                    )
-
-            async def try_direct_connect():
-                last_err = None
-                for conn_params in direct_connection_options:
-                    self.debugLog(
-                        "kasa direct connect attempt: "
-                        f"encrypt={conn_params.encryption_type.value} "
-                        f"https={conn_params.https}"
-                    )
-                    try:
-                        config = DeviceConfig(
-                            host=self.host,
-                            port_override=self.controlPort,
-                            timeout=10,
-                            credentials=creds,
-                            connection_type=conn_params,
-                        )
-                        return await Device.connect(config=config)
-                    except Exception as err:
-                        self.debugLog(err)
-                        last_err = err
-                if last_err is not None:
-                    raise last_err
-                return None
-
             try:
                 self.dev = await Discover.discover_single(self.host, credentials=creds)
             except KasaTimeoutError as err:
                 self.debugLog(
                     "kasa discover_single timed out, trying Device.connect..."
                 )
+                for encrypt_type in DeviceEncryptionType:
+                    if encrypt_type is DeviceEncryptionType.Klap:
+                        continue
+                    for https in (True, False):
+                        if encrypt_type is DeviceEncryptionType.Aes and https is True:
+                            continue
+                        direct_connection_options.append(
+                            DeviceConnectionParameters(
+                                DeviceFamily.SmartIpCamera,
+                                encrypt_type,
+                                https=https,
+                            )
+                        )
+
+                async def try_direct_connect():
+                    last_err = None
+                    for conn_params in direct_connection_options:
+                        self.debugLog(
+                            "kasa direct connect attempt: "
+                            f"encrypt={conn_params.encryption_type.value} "
+                            f"https={conn_params.https}"
+                        )
+                        try:
+                            config = DeviceConfig(
+                                host=self.host,
+                                port_override=self.controlPort,
+                                timeout=10,
+                                credentials=creds,
+                                connection_type=conn_params,
+                            )
+                            return await Device.connect(config=config)
+                        except Exception as err:
+                            self.debugLog(err)
+                            last_err = err
+                    if last_err is not None:
+                        raise last_err
+                    return None
+
                 try:
                     self.dev = await try_direct_connect()
                 except Exception as direct_err:
