@@ -9,9 +9,19 @@ import logging
 import uuid
 
 from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import AuthenticationError, SMART_RETRYABLE_ERRORS, SmartErrorCode
-from kasa import DeviceConfig, DeviceError, Discover
+from kasa.exceptions import (
+    AuthenticationError,
+    SMART_RETRYABLE_ERRORS,
+    SmartErrorCode,
+    TimeoutError as KasaTimeoutError,
+)
+from kasa import Device, DeviceConfig, DeviceError, Discover
 from kasa import Credentials
+from kasa.deviceconfig import (
+    DeviceConnectionParameters,
+    DeviceEncryptionType,
+    DeviceFamily,
+)
 
 from datetime import datetime, timedelta
 from warnings import warn
@@ -275,11 +285,30 @@ class Tapo:
             self.debugLog("Creating new Kasa-Tapo instance...")
             creds = Credentials(self.user, self.password)
             try:
+                raise KasaTimeoutError("temp")
                 self.dev = await Discover.discover_single(self.host, credentials=creds)
-            except TimeoutError as err:
-                raise Exception(
-                    f"Failed to establish a new connection: {str(err)}"
-                ) from err
+            except KasaTimeoutError as err:
+                self.debugLog(
+                    "kasa discover_single timed out, trying Device.connect..."
+                )
+                try:
+                    direct_config = DeviceConfig(
+                        host=self.host,
+                        port_override=self.controlPort,
+                        timeout=10,
+                        credentials=creds,
+                        connection_type=DeviceConnectionParameters(
+                            DeviceFamily.SmartIpCamera,
+                            DeviceEncryptionType.Aes,
+                            https=True,
+                        ),
+                    )
+                    self.dev = await Device.connect(config=direct_config)
+                except Exception as direct_err:
+                    raise Exception(
+                        "Failed to establish a new connection: "
+                        f"{str(err)} (direct connect failed: {direct_err})"
+                    ) from direct_err
             except Exception as err:
                 if retry is False:
                     self.debugLog("Ensure authenticated failed, retrying. Error was:")
@@ -288,7 +317,10 @@ class Tapo:
                 else:
                     raise err
             if self.dev is None:
-                raise Exception("Device not found via python-kasa Discover")
+                raise Exception(
+                    "Device not found via python-kasa "
+                    + ("direct connect" if self.skipDiscovery else "Discover")
+                )
             self.debugLog(
                 f"kasa discover_single: host={self.host} proto={type(self.dev.protocol).__name__}"
             )
