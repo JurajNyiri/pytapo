@@ -10,6 +10,14 @@ HLS_FLAGS = "delete_segments+append_list"
 
 
 class Streamer:
+    """
+    In case of multiple streams (different lens) available on device, device sends them all in separate video streams.
+    When using this for example in vlc, use
+    ff_args={
+        "-map-video": "0:v:1",
+    } for the other stream, main is on 0:v:1
+    """
+
     def __init__(
         self,
         tapo,
@@ -24,7 +32,14 @@ class Streamer:
         analyzeDuration=0,
         includeAudio=False,
         mode="pipe",
-        ff_args={},
+        ff_args=None,
+        preview_params=None,
+        device_id=None,
+        channels=None,
+        streams=None,
+        resolutions=None,
+        audio=None,
+        ignore_limit=None,
     ):
         self.currentAction = "Idle"
         self.logFunction = logFunction
@@ -47,7 +62,51 @@ class Streamer:
         self.audio_rate = None
         self._ts_buffer = bytearray()
         self._audio_buffer = bytearray()
-        self.ff_args = ff_args
+        self.ff_args = ff_args or {}
+        self.preview_params = preview_params or {}
+        self.device_id = device_id
+        self.channels = channels
+        self.streams = streams
+        self.resolutions = resolutions
+        self.audio = audio
+        self.ignore_limit = ignore_limit
+
+    @staticmethod
+    def _normalize_list(value):
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        return [value]
+
+    def _build_preview_payload(self):
+        preview = {
+            "audio": ["default"],
+            "channels": [0],
+            "resolutions": [self.quality],
+        }
+
+        if self.audio is not None:
+            preview["audio"] = self._normalize_list(self.audio)
+        if self.channels is not None:
+            preview["channels"] = self._normalize_list(self.channels)
+        if self.streams is not None:
+            preview["streams"] = self._normalize_list(self.streams)
+        if self.resolutions is not None:
+            preview["resolutions"] = self._normalize_list(self.resolutions)
+        if self.device_id:
+            preview["deviceId"] = self.device_id
+        if self.ignore_limit is not None:
+            preview["ignore_limit"] = self.ignore_limit
+        if self.preview_params:
+            preview.update(self.preview_params)
+
+        return {
+            "type": "request",
+            "seq": 1,
+            "params": {
+                "preview": preview,
+                "method": "get",
+            },
+        }
 
     async def _init_audio_params(self):
         if not self.includeAudio:
@@ -111,6 +170,8 @@ class Streamer:
             ]
 
         pass_fds = ()
+        video_map = self.ff_args.get("-map-video", "0:v:0")
+        audio_map = self.ff_args.get("-map-audio", "1:a:0")
 
         if self.includeAudio:
             self.audio_r, self.audio_w = os.pipe()
@@ -123,9 +184,9 @@ class Streamer:
                 "-i",
                 f"/dev/fd/{self.audio_r}",
                 "-map",
-                "0:v:0",
+                video_map,
                 "-map",
-                "1:a:0",
+                audio_map,
                 "-c:v",
                 self.ff_args.get("-c:v", "copy"),
             ]
@@ -141,7 +202,7 @@ class Streamer:
                 self.ff_args.get("-b:a", "128k"),
             ]
         else:
-            cmd += ["-map", "0:v:0"]
+            cmd += ["-map", video_map]
             if "-vsync" in self.ff_args:
                 cmd += [
                     "-vsync",
@@ -213,20 +274,7 @@ class Streamer:
         self.currentAction = "Streaming"
 
         async with mediaSession:
-            payload = json.dumps(
-                {
-                    "type": "request",
-                    "seq": 1,
-                    "params": {
-                        "preview": {
-                            "audio": ["default"],
-                            "channels": [0],
-                            "resolutions": [self.quality],
-                        },
-                        "method": "get",
-                    },
-                }
-            )
+            payload = json.dumps(self._build_preview_payload())
 
             async for resp in mediaSession.transceive(payload):
                 if not self.running:
