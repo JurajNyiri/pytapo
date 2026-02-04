@@ -1822,6 +1822,49 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
+    def __buildChnAwareConfig(
+        self,
+        root_key: str,
+        chn_id: list = None,
+        item_key: str = "detection",
+        per_channel_key: str = "detection_chn",
+        chn_id_key: str = "chn_id",
+        extra_fields: dict = None,
+        per_channel_extra_fields: dict = None,
+    ):
+        def add_fields(target: dict, fields: dict):
+            if not fields:
+                return
+            target.update(fields)
+
+        if chn_id:
+            data = {
+                root_key: {
+                    chn_id_key: chn_id,
+                    per_channel_key: {str(chn): {} for chn in chn_id},
+                }
+            }
+            add_fields(data[root_key], extra_fields)
+            for chn in chn_id:
+                add_fields(
+                    data[root_key][per_channel_key][str(chn)],
+                    per_channel_extra_fields,
+                )
+            return data
+
+        data = {root_key: {item_key: {}}}
+        add_fields(data[root_key], extra_fields)
+        add_fields(data[root_key][item_key], per_channel_extra_fields)
+        return data
+
+    def __selectDetectionKey(
+        self,
+        chn_id: list = None,
+        detection_key: str = "detection",
+        per_channel_key: str = "detection_chn",
+    ):
+        return per_channel_key if chn_id else detection_key
+
     def getMotionDetection(self):
         return self.executeFunction(
             "getDetectionConfig",
@@ -1852,20 +1895,25 @@ class Tapo:
             ]
         return self.executeFunction("setDetectionConfig", data)
 
-    def getPersonDetection(self):
-        return self.executeFunction(
-            "getPersonDetectionConfig",
-            {"people_detection": {"name": ["detection"]}},
-        )["people_detection"]["detection"]
+    def getPersonDetection(self, chn_id: list = None):
+        params = {"people_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["people_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getPersonDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        return data["people_detection"][key]
 
-    def setPersonDetection(self, enabled, sensitivity=False):
-        data = {
-            "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
-        }
-        if sensitivity:
-            data["people_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
+    def setPersonDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "people_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setPersonDetectionConfig", data)
 
     def getVehicleDetection(self):
@@ -1884,11 +1932,13 @@ class Tapo:
             )
         return self.executeFunction("setVehicleDetectionConfig", data)
 
-    def getPetDetection(self):
-        return self.executeFunction(
-            "getPetDetectionConfig",
-            {"pet_detection": {"name": ["detection"]}},
-        )["pet_detection"]["detection"]
+    def getPetDetection(self, chn_id: list = None):
+        params = {"pet_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["pet_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getPetDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        return data["pet_detection"][key]
 
     def getPackageDetection(self):
         return self.executeFunction(
@@ -1896,13 +1946,17 @@ class Tapo:
             {"package_detection": {"name": ["detection"]}},
         )["package_detection"]["detection"]
 
-    def setPetDetection(self, enabled, sensitivity=False):
-        data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
-        if sensitivity:
-            data["pet_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
-
+    def setPetDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "pet_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setPetDetectionConfig", data)
 
     def setPackageDetection(self, enabled, sensitivity=False):
@@ -2155,38 +2209,50 @@ class Tapo:
     def setLensDistortionCorrection(self, enable):
         return self.__setImageSwitch("ldc", "on" if enable else "off")
 
-    def getDayNightMode(self) -> str:
-        if self.childID:
-            rawValue = self.getNightVisionModeConfig()["image"]["switch"][
-                "night_vision_mode"
-            ]
-            if rawValue == "inf_night_vision":
+    def getDayNightMode(self, chn_id: list = None):
+        def to_day_night_mode(raw_value: str) -> str:
+            if raw_value == "inf_night_vision":
                 return "on"
-            elif rawValue == "wtl_night_vision":
+            elif raw_value == "wtl_night_vision":
                 return "off"
-            elif rawValue == "md_night_vision":
+            elif raw_value == "md_night_vision":
                 return "auto"
-        else:
-            return self.__getImageCommon("inf_type")
+            else:
+                return raw_value
 
-    def setDayNightMode(self, mode):
+        if self.childID:
+            data = self.getNightVisionModeConfig(chn_id)
+            if chn_id:
+                return {
+                    str(chn): to_day_night_mode(
+                        data["image"]["switch_chn"][str(chn)]["night_vision_mode"]
+                    )
+                    for chn in chn_id
+                }
+            rawValue = data["image"]["switch"]["night_vision_mode"]
+            return to_day_night_mode(rawValue)
+        else:
+            return self.__getImageCommon("inf_type", chn_id=chn_id)
+
+    def setDayNightMode(self, mode, chn_id: list = None):
         allowed_modes = ["off", "on", "auto"]
         if mode not in allowed_modes:
             raise Exception("Day night mode must be one of {}".format(allowed_modes))
         if self.childID:
-            if mode == "on":
-                return self.setNightVisionModeConfig("inf_night_vision")
-            elif mode == "off":
-                return self.setNightVisionModeConfig("wtl_night_vision")
-            elif mode == "auto":
-                return self.setNightVisionModeConfig("md_night_vision")
+            mode_map = {
+                "on": "inf_night_vision",
+                "off": "wtl_night_vision",
+                "auto": "md_night_vision",
+            }
+            return self.setNightVisionModeConfig(mode_map[mode], chn_id=chn_id)
         else:
-            return self.__setImageCommon("inf_type", mode)
+            return self.__setImageCommon("inf_type", mode, chn_id=chn_id)
 
-    def getNightVisionModeConfig(self):
-        return self.executeFunction(
-            "getNightVisionModeConfig", {"image": {"name": "switch"}}
-        )
+    def getNightVisionModeConfig(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        return self.executeFunction("getNightVisionModeConfig", params)
 
     def getNightVisionCapability(self):
         return self.executeFunction(
@@ -2194,11 +2260,16 @@ class Tapo:
             {"image_capability": {"name": ["supplement_lamp"]}},
         )
 
-    def setNightVisionModeConfig(self, mode):
-        return self.executeFunction(
-            "setNightVisionModeConfig",
-            {"image": {"switch": {"night_vision_mode": mode}}},
+    def setNightVisionModeConfig(self, mode, chn_id: list = None):
+        per_channel_extra_fields = {"night_vision_mode": mode}
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
         )
+        return self.executeFunction("setNightVisionModeConfig", data)
 
     def getImageFlipVertical(self):
         if self.childID:
@@ -2226,21 +2297,47 @@ class Tapo:
 
     # Common
 
-    def __getImageCommon(self, field: str) -> str:
-        data = self.executeFunction(
-            "getLightFrequencyInfo", {"image": {"name": "common"}}
-        )
-        if "common" not in data["image"]:
+    def __getImageCommon(self, field: str, chn_id: list = None):
+        params = {"image": {"name": "common"}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getLightFrequencyInfo", params)
+        image = data.get("image", {})
+        common = image.get("common")
+        common_chn = image.get("common_chn")
+
+        if chn_id:
+            if common_chn:
+                return {
+                    str(chn): common_chn[str(chn)][field]
+                    for chn in chn_id
+                    if str(chn) in common_chn
+                }
+            if common and field in common:
+                return {str(chn): common[field] for chn in chn_id}
             raise Exception("__getImageCommon is not supported by this camera")
-        fields = data["image"]["common"]
+
+        if common is None and common_chn:
+            first_key = next(iter(common_chn))
+            fields = common_chn[first_key]
+        elif common is None:
+            raise Exception("__getImageCommon is not supported by this camera")
+        else:
+            fields = common
         if field not in fields:
             raise Exception("Field {} is not supported by this camera".format(field))
         return fields[field]
 
-    def __setImageCommon(self, field: str, value: str):
-        return self.executeFunction(
-            "setLightFrequencyInfo", {"image": {"common": {field: value}}}
+    def __setImageCommon(self, field: str, value: str, chn_id: list = None):
+        per_channel_extra_fields = {field: value}
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="common",
+            per_channel_key="common_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
         )
+        return self.executeFunction("setLightFrequencyInfo", data)
 
     def getLightFrequencyMode(self) -> str:
         return self.__getImageCommon("light_freq_mode")
