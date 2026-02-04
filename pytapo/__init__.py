@@ -2647,6 +2647,14 @@ class Tapo:
                 "params": {
                     "requests": [
                         {
+                            "method": "getLinecrossingDetectionConfig",
+                            "params": {
+                                "linecrossing_detection": {
+                                    "name": ["detection", "arming_schedule"]
+                                }
+                            },
+                        },
+                        {
                             "method": "getDualCamCapability",
                             "params": {"image_capability": {"name": ["dualCam"]}},
                         },
