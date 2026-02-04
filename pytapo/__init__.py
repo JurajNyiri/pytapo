@@ -375,8 +375,11 @@ class Tapo:
                 if retry is False:
                     self.debugLog("Ensure authenticated failed, retrying. Error was:")
                     self.debugLog(err)
+                    self.debugLog("Resetting kasa and retrying request.")
+                    await self._close_kasa_device()
                     return await self.ensureAuthenticated(True)
                 else:
+                    await self._close_kasa_device()
                     raise err
             if self.dev is None:
                 raise Exception("Device not found via python-kasa")
