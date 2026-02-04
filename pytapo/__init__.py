@@ -1532,19 +1532,52 @@ class Tapo:
             {"smart_track": {"name": "smart_track_info"}},
         )
 
-    def getWhitelampConfig(self):
-        return self.executeFunction(
-            "getWhitelampConfig",
-            {"image": {"name": "switch"}},
-        )
+    def getWhitelampConfig(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getWhitelampConfig", params)
+        image = data.get("image", {})
+        switch_chn = image.get("switch_chn")
+        switch = image.get("switch")
 
-    def setWhitelampConfig(self, forceTime=False, intensityLevel=False):
-        params = {"image": {"switch": {}}}
+        if not chn_id:
+            if switch:
+                return switch
+            if switch_chn:
+                if len(switch_chn) == 1:
+                    return next(iter(switch_chn.values()))
+                return switch_chn
+            return data
+
+        if switch_chn:
+            result = {
+                str(chn): switch_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in switch_chn
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+
+        if switch:
+            return switch
+        return data
+
+    def setWhitelampConfig(
+        self, forceTime=False, intensityLevel=False, chn_id: list = None
+    ):
+        per_channel_extra_fields = {}
         if forceTime is not False:
-            params["image"]["switch"]["wtl_force_time"] = str(forceTime)
+            per_channel_extra_fields["wtl_force_time"] = str(forceTime)
         if intensityLevel is not False:
-            params["image"]["switch"]["wtl_intensity_level"] = str(intensityLevel)
+            per_channel_extra_fields["wtl_intensity_level"] = str(intensityLevel)
 
+        params = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction(
             "setWhitelampConfig",
             params,
@@ -1904,9 +1937,9 @@ class Tapo:
             if self.childID and "digital_sensitivity" not in base_fields:
                 currentData = self.getMotionDetection(chn_id)
                 for chn in chn_id:
-                    per_channel_extra_fields_by_chn[str(chn)][
-                        "digital_sensitivity"
-                    ] = currentData[str(chn)]["digital_sensitivity"]
+                    per_channel_extra_fields_by_chn[str(chn)]["digital_sensitivity"] = (
+                        currentData[str(chn)]["digital_sensitivity"]
+                    )
             data = self.__buildChnAwareConfig(
                 "motion_detection",
                 chn_id=chn_id,
@@ -1918,9 +1951,10 @@ class Tapo:
 
         data = {"motion_detection": {"motion_det": dict(base_fields)}}
         # child devices always need digital_sensitivity setting
-        if self.childID and "digital_sensitivity" not in data["motion_detection"][
-            "motion_det"
-        ]:
+        if (
+            self.childID
+            and "digital_sensitivity" not in data["motion_detection"]["motion_det"]
+        ):
             currentData = self.getMotionDetection()
             data["motion_detection"]["motion_det"]["digital_sensitivity"] = currentData[
                 "digital_sensitivity"
