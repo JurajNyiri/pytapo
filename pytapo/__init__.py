@@ -7,6 +7,8 @@ import requests
 import asyncio
 import logging
 import uuid
+import ssl
+from contextlib import suppress
 
 from kasa.transports import KlapTransportV2, KlapTransport
 from kasa.exceptions import (
@@ -51,7 +53,7 @@ class Tapo:
 
     def warnLog(self, msg):
         if self.printWarnInformation is True:
-            print(msg)
+            print(f"WARNING: {msg}")
         elif callable(self.printWarnInformation):
             self.printWarnInformation(msg)
 
@@ -110,6 +112,10 @@ class Tapo:
         # python-kasa device handle
         self.dev = None
         self._loop = None
+        self._kasa_ssl_fallback = False
+        self._kasa_ssl_fallback_context = None
+        self._kasa_ssl_default_context = None
+        self._kasa_ssl_probe_done = False
 
         self.klapTransport = None
         self.user = user
@@ -253,6 +259,220 @@ class Tapo:
         else:
             self.debugLog("kasa connection_type: <unavailable>")
 
+    def _iter_exception_chain(self, err):
+        seen = set()
+        while err is not None and id(err) not in seen:
+            yield err
+            seen.add(id(err))
+            err = getattr(err, "__cause__", None) or getattr(err, "__context__", None)
+
+    def _is_kasa_ssl_handshake_failure(self, err):
+        for ex in self._iter_exception_chain(err):
+            msg = str(ex).lower()
+            if "sslv3_alert_handshake_failure" in msg or "handshake failure" in msg:
+                return True
+            if isinstance(ex, ssl.SSLError):
+                reason = getattr(ex, "reason", None)
+                if reason and "handshake_failure" in str(reason).lower():
+                    return True
+        return False
+
+    def _create_kasa_default_ssl_context(self):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        with suppress(Exception):
+            from kasa.transports.sslaestransport import SslAesTransport
+
+            context.set_ciphers(SslAesTransport.CIPHERS)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
+
+    def _get_kasa_default_ssl_context(self):
+        if self._kasa_ssl_default_context is None:
+            self._kasa_ssl_default_context = self._create_kasa_default_ssl_context()
+        return self._kasa_ssl_default_context
+
+    def _create_kasa_unsecure_ssl_context(self):
+        self.debugLog("_create_kasa_unsecure_ssl_context called")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        with suppress(Exception):
+            context.minimum_version = ssl.TLSVersion.TLSv1
+        with suppress(Exception):
+            context.options |= ssl.OP_LEGACY_SERVER_CONNECT
+        with suppress(Exception):
+            context.set_ciphers("ALL:@SECLEVEL=0")
+        return context
+
+    def _format_tls_version(self, version):
+        if version is None:
+            return "unknown"
+        tls_version_type = getattr(ssl, "TLSVersion", None)
+        if tls_version_type and isinstance(version, tls_version_type):
+            return version.name
+        return str(version)
+
+    def _format_verify_mode(self, mode):
+        if mode == ssl.CERT_NONE:
+            return "CERT_NONE"
+        if mode == ssl.CERT_OPTIONAL:
+            return "CERT_OPTIONAL"
+        if mode == ssl.CERT_REQUIRED:
+            return "CERT_REQUIRED"
+        return str(mode)
+
+    def _ssl_context_ciphers(self, context):
+        if context is None:
+            return []
+        ciphers = []
+        with suppress(Exception):
+            ciphers = [
+                cipher.get("name")
+                for cipher in context.get_ciphers()
+                if cipher.get("name")
+            ]
+        return ciphers
+
+    def _ssl_context_summary(self, context, label):
+        if context is None:
+            return f"{label} ssl context: <none>"
+        ciphers = self._ssl_context_ciphers(context)
+        min_version = self._format_tls_version(
+            getattr(context, "minimum_version", None)
+        )
+        max_version = self._format_tls_version(
+            getattr(context, "maximum_version", None)
+        )
+        return (
+            f"{label} ssl context: openssl={ssl.OPENSSL_VERSION}, "
+            f"tls_min={min_version}, tls_max={max_version}, "
+            f"check_hostname={getattr(context, 'check_hostname', None)}, "
+            f"verify_mode={self._format_verify_mode(getattr(context, 'verify_mode', None))}, "
+            f"cipher_count={len(ciphers)}, ciphers={ciphers}"
+        )
+
+    async def _probe_tls_details(self, context, label, timeout=3):
+        if context is None:
+            return (f"Device TLS probe via {label}: context=<none>", None)
+        writer = None
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(
+                    self.host,
+                    self.controlPort,
+                    ssl=context,
+                ),
+                timeout=timeout,
+            )
+            ssl_obj = writer.get_extra_info("ssl_object") if writer else None
+            cipher = ssl_obj.cipher() if ssl_obj else None
+            cipher_name = cipher[0] if cipher else None
+            tls_version = ssl_obj.version() if ssl_obj else None
+            alpn = ssl_obj.selected_alpn_protocol() if ssl_obj else None
+            cert = ssl_obj.getpeercert() if ssl_obj else None
+            cert_subject = cert.get("subject") if cert else None
+            cert_issuer = cert.get("issuer") if cert else None
+            cert_not_before = cert.get("notBefore") if cert else None
+            cert_not_after = cert.get("notAfter") if cert else None
+            der = ssl_obj.getpeercert(binary_form=True) if ssl_obj else None
+            cert_fingerprint = hashlib.sha256(der).hexdigest() if der else None
+            return (
+                f"Device TLS probe via {label}: tls_version={tls_version}, "
+                f"cipher={cipher}, alpn={alpn}, "
+                f"cert_subject={cert_subject}, cert_issuer={cert_issuer}, "
+                f"cert_not_before={cert_not_before}, cert_not_after={cert_not_after}, "
+                f"cert_sha256={cert_fingerprint}"
+            ), cipher_name
+        except Exception as err:
+            return (f"Device TLS probe via {label} failed: {err}", None)
+        finally:
+            if writer is not None:
+                writer.close()
+                with suppress(Exception):
+                    await writer.wait_closed()
+
+    async def _log_kasa_ssl_details(self, err, phase, context=None):
+        if self._kasa_ssl_probe_done:
+            return
+        if not (
+            self.printWarnInformation is True or callable(self.printWarnInformation)
+        ):
+            return
+        self._kasa_ssl_probe_done = True
+        try:
+            self.warnLog(f"kasa ssl details ({phase}): {err}")
+            base_context = context or self._get_kasa_default_ssl_context()
+            default_ciphers = self._ssl_context_ciphers(base_context)
+            self.warnLog(self._ssl_context_summary(base_context, "default"))
+            default_probe_msg, default_cipher = await self._probe_tls_details(
+                base_context, "default"
+            )
+            self.warnLog(default_probe_msg)
+            fallback_context = self._get_kasa_ssl_fallback_context()
+            self.warnLog(self._ssl_context_summary(fallback_context, "unsecure"))
+            fallback_probe_msg, fallback_cipher = await self._probe_tls_details(
+                fallback_context, "unsecure"
+            )
+            self.warnLog(fallback_probe_msg)
+            required_cipher = fallback_cipher or default_cipher
+            if required_cipher and required_cipher not in default_ciphers:
+                self.warnLog(
+                    f"Please report this issue to maintainers of python-kasa at https://github.com/python-kasa/python-kasa/issues/new so that the required cipher {required_cipher} can be added. The cipher most likely needs to be added to /transports/sslaestransport.py."
+                )
+            else:
+                self.warnLog(
+                    f"Please report this issue to maintainers of pytapo at https://github.com/JurajNyiri/pytapo/issues/new since the required cipher {required_cipher} is inside of the default context but the request still failed."
+                )
+            self.warnLog(
+                "Integration will continue to work and accept any cipher on the device, but will output this warning message."
+            )
+        except Exception:
+            pass
+
+    def _get_kasa_ssl_fallback_context(self):
+        if self._kasa_ssl_fallback_context is None:
+            self._kasa_ssl_fallback_context = self._create_kasa_unsecure_ssl_context()
+        return self._kasa_ssl_fallback_context
+
+    def _apply_kasa_ssl_fallback_to_transport(self):
+        self.debugLog("_apply_kasa_ssl_fallback_to_transport called")
+        transport = getattr(getattr(self.dev, "protocol", None), "_transport", None)
+        if not transport:
+            self.debugLog("Failed to apply ssl fallback, transport does not exist.")
+            return False
+        try:
+            transport._ssl_context = self._get_kasa_ssl_fallback_context()
+            self.debugLog("SSL context applied.")
+            return True
+        except Exception as err:
+            self.warnLog(f"Failed to apply SSL context: {err}")
+            return False
+
+    async def _kasa_connect_with_ssl_fallback(self, config):
+        try:
+            return await Device.connect(config=config)
+        except Exception as err:
+            if self._is_kasa_ssl_handshake_failure(err) and not self._kasa_ssl_fallback:
+                self.warnLog(
+                    f"Creating unsecure SSL context because of unexpected encryption error on direct connect: {err}"
+                )
+                await self._log_kasa_ssl_details(err, "direct connect")
+                self._kasa_ssl_fallback = True
+                from kasa.transports.sslaestransport import SslAesTransport
+
+                original_create = SslAesTransport._create_ssl_context
+
+                def _unsecure_create_ssl_context(_transport_self):
+                    return self._get_kasa_ssl_fallback_context()
+
+                SslAesTransport._create_ssl_context = _unsecure_create_ssl_context
+                try:
+                    return await Device.connect(config=config)
+                finally:
+                    SslAesTransport._create_ssl_context = original_create
+            raise
+
     async def ensureAuthenticated(self, retry=False):
         if self.isKLAP:
             if self.klapTransport is None:
@@ -337,7 +557,7 @@ class Tapo:
                                 credentials=creds,
                                 connection_type=conn_params,
                             )
-                            return await Device.connect(config=config)
+                            return await self._kasa_connect_with_ssl_fallback(config)
                         except AuthenticationError as err:
                             raise err
                         except DeviceError as err:
@@ -387,6 +607,8 @@ class Tapo:
                 f"kasa device: host={self.host} proto={type(self.dev.protocol).__name__}"
             )
             self._log_kasa_connection_info()
+            if self._kasa_ssl_fallback:
+                self._apply_kasa_ssl_fallback_to_transport()
         return True
 
     async def _kasa_send(self, request, retry=0):
@@ -480,6 +702,18 @@ class Tapo:
             raise
         except Exception as err:
             self.debugLog(f"kasa query failed: {err}")
+            if self._is_kasa_ssl_handshake_failure(err):
+                if not self._kasa_ssl_fallback:
+                    self.warnLog(
+                        f"Creating unsecure SSL context because of unexpected encryption error: {err}"
+                    )
+                    await self._log_kasa_ssl_details(
+                        err,
+                        "query",
+                        context=getattr(proto._transport, "_ssl_context", None),
+                    )
+                self._kasa_ssl_fallback = True
+                self._apply_kasa_ssl_fallback_to_transport()
             if retry < MAX_LOGIN_RETRIES:
                 self.debugLog("Resetting transport and retrying request.")
                 reset = getattr(proto._transport, "reset", None)
