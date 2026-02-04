@@ -2014,6 +2014,40 @@ class Tapo:
         result = data["pet_detection"][key]
         return self.__unwrapSingleChn(chn_id, result)
 
+    def getLinecrossingDetection(self, chn_id: list = None):
+        params = {"linecrossing_detection": {"name": ["detection", "arming_schedule"]}}
+        if chn_id:
+            params["linecrossing_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getLinecrossingDetectionConfig", params)
+        linecross = data.get("linecrossing_detection", {})
+        if not chn_id:
+            return linecross
+
+        detection_chn = linecross.get("detection_chn")
+        if detection_chn is not None:
+            result = {
+                str(chn): detection_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in detection_chn
+            }
+            detection = self.__unwrapSingleChn(chn_id, result)
+        else:
+            detection = linecross.get("detection")
+
+        return {
+            "detection": detection,
+            "arming_schedule": linecross.get("arming_schedule"),
+        }
+
+    def setLinecrossingDetection(self, enabled, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"}
+        data = self.__buildChnAwareConfig(
+            "linecrossing_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
+        return self.executeFunction("setLinecrossingDetectionConfig", data)
+
     def getPackageDetection(self):
         return self.executeFunction(
             "getPackageDetectionConfig",
