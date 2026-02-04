@@ -2885,7 +2885,7 @@ class Tapo:
 
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
-    def getMost(self, omit_methods=[]):
+    def getMost(self, omit_methods=[], chn_id: list = None):
         if self.deviceType == "SMART.TAPOCHIME":
             requestData = {
                 "method": "multipleRequest",
@@ -3037,7 +3037,7 @@ class Tapo:
                         },
                         {
                             "method": "getTamperDetectionConfig",
-                            "params": {"tamper_detection": {"name": "tamper_det"}},
+                            "params": {"tamper_detection": {"name": ["tamper_det"]}},
                         },
                         {
                             "method": "getLensMaskConfig",
@@ -3103,7 +3103,7 @@ class Tapo:
                         {"method": "getSirenStatus", "params": {"siren": {}}},
                         {
                             "method": "getLightFrequencyInfo",
-                            "params": {"image": {"name": "common"}},
+                            "params": {"image": {"name": ["common"]}},
                         },
                         {
                             "method": "getLightFrequencyCapability",
@@ -3119,7 +3119,7 @@ class Tapo:
                         },
                         {
                             "method": "getNightVisionModeConfig",
-                            "params": {"image": {"name": "switch"}},
+                            "params": {"image": {"name": ["switch"]}},
                         },
                         {
                             "method": "getWhitelampStatus",
@@ -3127,7 +3127,7 @@ class Tapo:
                         },
                         {
                             "method": "getWhitelampConfig",
-                            "params": {"image": {"name": "switch"}},
+                            "params": {"image": {"name": ["switch"]}},
                         },
                         {
                             "method": "getMsgPushConfig",
@@ -3236,6 +3236,24 @@ class Tapo:
                     ]
                 },
             }
+            if chn_id:
+                method_chn_roots = {
+                    "getLinecrossingDetectionConfig": "linecrossing_detection",
+                    "getDetectionConfig": "motion_detection",
+                    "getPersonDetectionConfig": "people_detection",
+                    "getVehicleDetectionConfig": "vehicle_detection",
+                    "getPetDetectionConfig": "pet_detection",
+                    "getTamperDetectionConfig": "tamper_detection",
+                    "getNightVisionModeConfig": "image",
+                    "getWhitelampConfig": "image",
+                    "getLightFrequencyInfo": "image",
+                }
+                for request in requestData["params"]["requests"]:
+                    root_key = method_chn_roots.get(request.get("method"))
+                    if not root_key:
+                        continue
+                    params = request.setdefault("params", {})
+                    params.setdefault(root_key, {})["chn_id"] = chn_id
         if len(omit_methods) != 0:
             filtered_requests = [
                 request
@@ -3293,6 +3311,68 @@ class Tapo:
                     raise Exception(
                         f"Method {result['method']} has been returned more times than expected. Response: {results}"
                     )
+
+        if chn_id:
+            method_normalization = {
+                "getLinecrossingDetectionConfig": (
+                    "linecrossing_detection",
+                    "detection_chn",
+                    "detection",
+                ),
+                "getDetectionConfig": (
+                    "motion_detection",
+                    "motion_det_chn",
+                    "motion_det",
+                ),
+                "getPersonDetectionConfig": (
+                    "people_detection",
+                    "detection_chn",
+                    "detection",
+                ),
+                "getVehicleDetectionConfig": (
+                    "vehicle_detection",
+                    "detection_chn",
+                    "detection",
+                ),
+                "getPetDetectionConfig": (
+                    "pet_detection",
+                    "detection_chn",
+                    "detection",
+                ),
+                "getTamperDetectionConfig": (
+                    "tamper_detection",
+                    "tamper_det_chn",
+                    "tamper_det",
+                ),
+                "getNightVisionModeConfig": ("image", "switch_chn", "switch"),
+                "getWhitelampConfig": ("image", "switch_chn", "switch"),
+                "getLightFrequencyInfo": ("image", "common_chn", "common"),
+            }
+            for method, (
+                root_key,
+                per_chn_key,
+                single_key,
+            ) in method_normalization.items():
+                if method not in returnData:
+                    continue
+                for entry in returnData[method]:
+                    if not entry:
+                        continue
+                    root = entry.get(root_key)
+                    if not isinstance(root, dict):
+                        continue
+                    per_chn = root.get(per_chn_key)
+                    if not isinstance(per_chn, dict):
+                        continue
+                    normalized = (
+                        self.__unwrapSingleChn(chn_id, per_chn)
+                        if len(chn_id) == 1
+                        else per_chn
+                    )
+                    if normalized is None:
+                        continue
+                    root[single_key] = normalized
+                    del root[per_chn_key]
 
         if "getPresetConfig" in returnData and len(returnData["getPresetConfig"]) == 1:
             if returnData["getPresetConfig"][0]:
