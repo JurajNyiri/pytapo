@@ -1831,6 +1831,7 @@ class Tapo:
         chn_id_key: str = "chn_id",
         extra_fields: dict = None,
         per_channel_extra_fields: dict = None,
+        per_channel_extra_fields_by_chn: dict = None,
     ):
         def add_fields(target: dict, fields: dict):
             if not fields:
@@ -1846,9 +1847,14 @@ class Tapo:
             }
             add_fields(data[root_key], extra_fields)
             for chn in chn_id:
+                fields = (
+                    per_channel_extra_fields_by_chn.get(str(chn))
+                    if per_channel_extra_fields_by_chn
+                    else per_channel_extra_fields
+                )
                 add_fields(
                     data[root_key][per_channel_key][str(chn)],
-                    per_channel_extra_fields,
+                    fields,
                 )
             return data
 
@@ -1865,30 +1871,50 @@ class Tapo:
     ):
         return per_channel_key if chn_id else detection_key
 
-    def getMotionDetection(self):
-        return self.executeFunction(
-            "getDetectionConfig",
-            {"motion_detection": {"name": ["motion_det"]}},
-        )["motion_detection"]["motion_det"]
+    def getMotionDetection(self, chn_id: list = None):
+        params = {"motion_detection": {"name": ["motion_det"]}}
+        if chn_id:
+            params["motion_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getDetectionConfig", params)
+        key = self.__selectDetectionKey(
+            chn_id, detection_key="motion_det", per_channel_key="motion_det_chn"
+        )
+        return data["motion_detection"][key]
 
-    def setMotionDetection(self, enabled=None, sensitivity=False):
-        data = {
-            "motion_detection": {"motion_det": {}},
-        }
+    def setMotionDetection(self, enabled=None, sensitivity=False, chn_id: list = None):
+        base_fields = {}
         if enabled is not None:
-            data["motion_detection"]["motion_det"]["enabled"] = (
-                "on" if enabled else "off"
+            base_fields["enabled"] = "on" if enabled else "off"
+        if sensitivity:
+            base_fields["digital_sensitivity"] = self.__getSensitivityNumber(
+                sensitivity
             )
 
-        if sensitivity:
-            data["motion_detection"]["motion_det"]["digital_sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
+        if chn_id:
+            per_channel_extra_fields_by_chn = {
+                str(chn): dict(base_fields) for chn in chn_id
+            }
+            # child devices always need digital_sensitivity setting
+            if self.childID and "digital_sensitivity" not in base_fields:
+                currentData = self.getMotionDetection(chn_id)
+                for chn in chn_id:
+                    per_channel_extra_fields_by_chn[str(chn)][
+                        "digital_sensitivity"
+                    ] = currentData[str(chn)]["digital_sensitivity"]
+            data = self.__buildChnAwareConfig(
+                "motion_detection",
+                chn_id=chn_id,
+                item_key="motion_det",
+                per_channel_key="motion_det_chn",
+                per_channel_extra_fields_by_chn=per_channel_extra_fields_by_chn,
             )
+            return self.executeFunction("setDetectionConfig", data)
+
+        data = {"motion_detection": {"motion_det": dict(base_fields)}}
         # child devices always need digital_sensitivity setting
-        if (
-            self.childID
-            and "digital_sensitivity" not in data["motion_detection"]["motion_det"]
-        ):
+        if self.childID and "digital_sensitivity" not in data["motion_detection"][
+            "motion_det"
+        ]:
             currentData = self.getMotionDetection()
             data["motion_detection"]["motion_det"]["digital_sensitivity"] = currentData[
                 "digital_sensitivity"
