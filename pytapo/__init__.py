@@ -488,7 +488,7 @@ class Tapo:
                     await reset()
                 else:
                     self.debugLog("Recreating connection.")
-                    self.close()
+                    await self._close_kasa_device()
                 return await self._kasa_send(request, retry + 1)
             await self._close_kasa_device()
             raise
