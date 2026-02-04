@@ -2112,6 +2112,19 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
+    def __getSensitivityLabel(self, sensitivity):
+        if isinstance(sensitivity, str):
+            if sensitivity == "normal":
+                return "medium"
+            if sensitivity in ["low", "medium", "high"]:
+                return sensitivity
+        value = int(self.__getSensitivityNumber(sensitivity))
+        if value <= 20:
+            return "low"
+        elif value <= 50:
+            return "medium"
+        return "high"
+
     def __unwrapSingleChn(self, chn_id: list, data_by_chn: dict):
         if chn_id and len(chn_id) == 1:
             return data_by_chn.get(str(chn_id[0]))
@@ -2185,6 +2198,7 @@ class Tapo:
             base_fields["digital_sensitivity"] = self.__getSensitivityNumber(
                 sensitivity
             )
+            base_fields["sensitivity"] = self.__getSensitivityLabel(sensitivity)
 
         if chn_id:
             per_channel_extra_fields_by_chn = {
@@ -2194,9 +2208,20 @@ class Tapo:
             if self.childID and "digital_sensitivity" not in base_fields:
                 currentData = self.getMotionDetection(chn_id)
                 for chn in chn_id:
+                    chn_key = str(chn)
                     per_channel_extra_fields_by_chn[str(chn)]["digital_sensitivity"] = (
-                        currentData[str(chn)]["digital_sensitivity"]
+                        currentData[chn_key]["digital_sensitivity"]
                     )
+                    if "sensitivity" in currentData[chn_key]:
+                        per_channel_extra_fields_by_chn[chn_key]["sensitivity"] = (
+                            currentData[chn_key]["sensitivity"]
+                        )
+                    else:
+                        per_channel_extra_fields_by_chn[chn_key]["sensitivity"] = (
+                            self.__getSensitivityLabel(
+                                currentData[chn_key]["digital_sensitivity"]
+                            )
+                        )
             data = self.__buildChnAwareConfig(
                 "motion_detection",
                 chn_id=chn_id,
@@ -2216,6 +2241,14 @@ class Tapo:
             data["motion_detection"]["motion_det"]["digital_sensitivity"] = currentData[
                 "digital_sensitivity"
             ]
+            if "sensitivity" in currentData:
+                data["motion_detection"]["motion_det"]["sensitivity"] = currentData[
+                    "sensitivity"
+                ]
+            else:
+                data["motion_detection"]["motion_det"]["sensitivity"] = (
+                    self.__getSensitivityLabel(currentData["digital_sensitivity"])
+                )
         return self.executeFunction("setDetectionConfig", data)
 
     def getPersonDetection(self, chn_id: list = None):
