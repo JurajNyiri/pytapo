@@ -49,6 +49,12 @@ class Tapo:
         elif callable(self.printDebugInformation):
             self.printDebugInformation(msg)
 
+    def warnLog(self, msg):
+        if self.printWarnInformation is True:
+            print(msg)
+        elif callable(self.printWarnInformation):
+            self.printWarnInformation(msg)
+
     def getControlHost(self):
         return f"{self.host}:{self.controlPort}"
 
@@ -70,12 +76,14 @@ class Tapo:
         KLAPVersion=None,
         hass=None,
         playerID=None,
+        printWarnInformation=True,
     ):
         logger = logging.getLogger("kasa.transports.klaptransport")
         logger.addFilter(SuppressPythonKasaLogs())
 
         self.redactConfidentialInformation = redactConfidentialInformation
         self.printDebugInformation = printDebugInformation
+        self.printWarnInformation = printWarnInformation
         self.host = host
         if hass is not None:
             self.hass = hass
@@ -297,6 +305,9 @@ class Tapo:
                 self.debugLog(
                     "kasa discover_single timed out, trying Device.connect..."
                 )
+                self.warnLog(
+                    f"Failed to automatically discover details of device {self.host}. Attempting to connect directly by trying all authentication methods."
+                )
                 for encrypt_type in DeviceEncryptionType:
                     if encrypt_type is DeviceEncryptionType.Klap:
                         continue
@@ -349,8 +360,10 @@ class Tapo:
                 try:
                     self.dev = await try_direct_connect()
                 except AuthenticationError as err:
+                    self.debugLog(err)
                     raise Exception("Invalid authentication data") from err
                 except Exception as direct_err:
+                    self.debugLog(direct_err)
                     if "Temporary Suspension" in str(direct_err):
                         raise direct_err
                     raise Exception(
@@ -358,6 +371,7 @@ class Tapo:
                         f"{str(err)} (direct connect failed: {direct_err})"
                     ) from direct_err
             except Exception as err:
+                self.debugLog(err)
                 if retry is False:
                     self.debugLog("Ensure authenticated failed, retrying. Error was:")
                     self.debugLog(err)
