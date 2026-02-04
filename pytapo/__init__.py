@@ -1822,6 +1822,11 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
+    def __unwrapSingleChn(self, chn_id: list, data_by_chn: dict):
+        if chn_id and len(chn_id) == 1:
+            return data_by_chn.get(str(chn_id[0]))
+        return data_by_chn
+
     def __buildChnAwareConfig(
         self,
         root_key: str,
@@ -1879,7 +1884,8 @@ class Tapo:
         key = self.__selectDetectionKey(
             chn_id, detection_key="motion_det", per_channel_key="motion_det_chn"
         )
-        return data["motion_detection"][key]
+        result = data["motion_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
     def setMotionDetection(self, enabled=None, sensitivity=False, chn_id: list = None):
         base_fields = {}
@@ -1927,7 +1933,8 @@ class Tapo:
             params["people_detection"]["chn_id"] = chn_id
         data = self.executeFunction("getPersonDetectionConfig", params)
         key = self.__selectDetectionKey(chn_id)
-        return data["people_detection"][key]
+        result = data["people_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
     def setPersonDetection(self, enabled, sensitivity=False, chn_id: list = None):
         per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
@@ -1964,7 +1971,8 @@ class Tapo:
             params["pet_detection"]["chn_id"] = chn_id
         data = self.executeFunction("getPetDetectionConfig", params)
         key = self.__selectDetectionKey(chn_id)
-        return data["pet_detection"][key]
+        result = data["pet_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
     def getPackageDetection(self):
         return self.executeFunction(
@@ -2249,12 +2257,13 @@ class Tapo:
         if self.childID:
             data = self.getNightVisionModeConfig(chn_id)
             if chn_id:
-                return {
+                result = {
                     str(chn): to_day_night_mode(
                         data["image"]["switch_chn"][str(chn)]["night_vision_mode"]
                     )
                     for chn in chn_id
                 }
+                return self.__unwrapSingleChn(chn_id, result)
             rawValue = data["image"]["switch"]["night_vision_mode"]
             return to_day_night_mode(rawValue)
         else:
@@ -2278,7 +2287,15 @@ class Tapo:
         params = {"image": {"name": ["switch"]}}
         if chn_id:
             params["image"]["chn_id"] = chn_id
-        return self.executeFunction("getNightVisionModeConfig", params)
+        data = self.executeFunction("getNightVisionModeConfig", params)
+        if chn_id:
+            result = {
+                str(chn): data["image"]["switch_chn"][str(chn)]
+                for chn in chn_id
+                if str(chn) in data["image"].get("switch_chn", {})
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+        return data
 
     def getNightVisionCapability(self):
         return self.executeFunction(
@@ -2334,13 +2351,15 @@ class Tapo:
 
         if chn_id:
             if common_chn:
-                return {
+                result = {
                     str(chn): common_chn[str(chn)][field]
                     for chn in chn_id
                     if str(chn) in common_chn
                 }
+                return self.__unwrapSingleChn(chn_id, result)
             if common and field in common:
-                return {str(chn): common[field] for chn in chn_id}
+                result = {str(chn): common[field] for chn in chn_id}
+                return self.__unwrapSingleChn(chn_id, result)
             raise Exception("__getImageCommon is not supported by this camera")
 
         if common is None and common_chn:
