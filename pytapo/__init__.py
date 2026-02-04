@@ -1949,20 +1949,26 @@ class Tapo:
         )
         return self.executeFunction("setPersonDetectionConfig", data)
 
-    def getVehicleDetection(self):
-        return self.executeFunction(
-            "getVehicleDetectionConfig",
-            {"vehicle_detection": {"name": ["detection"]}},
-        )["vehicle_detection"]["detection"]
+    def getVehicleDetection(self, chn_id: list = None):
+        params = {"vehicle_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["vehicle_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getVehicleDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        result = data["vehicle_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setVehicleDetection(self, enabled, sensitivity=False):
-        data = {
-            "vehicle_detection": {"detection": {"enabled": "on" if enabled else "off"}}
-        }
-        if sensitivity:
-            data["vehicle_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
+    def setVehicleDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "vehicle_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setVehicleDetectionConfig", data)
 
     def getPetDetection(self, chn_id: list = None):
