@@ -109,7 +109,6 @@ class Tapo:
 
         # python-kasa device handle
         self.dev = None
-        self._kasa_ready = False
         self._loop = None
 
         self.klapTransport = None
@@ -361,6 +360,7 @@ class Tapo:
                     self.dev = await try_direct_connect()
                 except AuthenticationError as err:
                     self.debugLog(err)
+                    await self._close_kasa_device()
                     raise Exception("Invalid authentication data") from err
                 except Exception as direct_err:
                     self.debugLog(direct_err)
@@ -383,31 +383,12 @@ class Tapo:
             self.debugLog(
                 f"kasa device: host={self.host} proto={type(self.dev.protocol).__name__}"
             )
-        if not self._kasa_ready:
-            try:
-                self.debugLog("kasa update: starting initial state fetch")
-                self._log_kasa_connection_info()
-                await self.dev.update()
-                self._kasa_ready = True
-            except AuthenticationError as err:
-                self.debugLog(f"kasa update failed (auth): {err}")
-                await self._close_kasa_device()
-                raise Exception("Invalid authentication data") from err
-            except DeviceError as err:
-                code = getattr(err, "error_code", None)
-                self.debugLog(f"kasa update failed (device error): {err}")
-                await self._close_kasa_device()
-                if code == SmartErrorCode.DEVICE_BLOCKED:
-                    raise Exception(f"Temporary Suspension: {str(err)}") from err
-                raise
-            except Exception as err:
-                self.debugLog(f"kasa update failed: {err}")
-                await self._close_kasa_device()
-                raise
+            self._log_kasa_connection_info()
         return True
 
     async def _kasa_send(self, request, retry=0):
         """Send a smart request via kasa protocol.query (with format translation)."""
+        self.debugLog(f"_kasa_send called, retry: {retry}")
         await self.ensureAuthenticated()
         self.debugLog("Converting request:")
         self.debugLog(request)
@@ -455,21 +436,8 @@ class Tapo:
         self.debugLog("Sending query...")
         try:
             result = await proto.query(kasa_request)
-        except DeviceError as err:
-            code = getattr(err, "error_code", None)
-            self.debugLog(f"Received DeviceError, code: {code}")
-
-            if code == SmartErrorCode.INTERNAL_UNKNOWN_ERROR:
-                if isinstance(raw_response, dict) and "error_code" in raw_response:
-                    self.debugLog(
-                        f"Captured raw device error: {raw_response.get('error_code')}"
-                    )
-                    return raw_response
-            if code == SmartErrorCode.DEVICE_BLOCKED:
-                raise Exception(f"Temporary Suspension: {str(err)}") from err
-            raise
-        except Exception as err:
-            self.debugLog(f"Received error: {err}")
+        except AuthenticationError as err:
+            self.debugLog(f"kasa query failed (auth): {err}")
             if retry < MAX_LOGIN_RETRIES:
                 self.debugLog("Resetting transport and retrying request.")
                 reset = getattr(proto._transport, "reset", None)
@@ -480,6 +448,35 @@ class Tapo:
                     self.debugLog("Recreating connection.")
                     self.close()
                 return await self._kasa_send(request, retry + 1)
+            await self._close_kasa_device()
+            raise Exception("Invalid authentication data") from err
+        except DeviceError as err:
+            code = getattr(err, "error_code", None)
+            self.debugLog(f"kasa query failed (DeviceError), code: {code}, err: {err}")
+
+            if code == SmartErrorCode.INTERNAL_UNKNOWN_ERROR:
+                if isinstance(raw_response, dict) and "error_code" in raw_response:
+                    self.debugLog(
+                        f"Captured raw device error: {raw_response.get('error_code')}"
+                    )
+                    return raw_response
+            await self._close_kasa_device()
+            if code == SmartErrorCode.DEVICE_BLOCKED:
+                raise Exception(f"Temporary Suspension: {str(err)}") from err
+            raise
+        except Exception as err:
+            self.debugLog(f"kasa query failed: {err}")
+            if retry < MAX_LOGIN_RETRIES:
+                self.debugLog("Resetting transport and retrying request.")
+                reset = getattr(proto._transport, "reset", None)
+                if reset is not None:
+                    self.debugLog("Requesting reset.")
+                    await reset()
+                else:
+                    self.debugLog("Recreating connection.")
+                    self.close()
+                return await self._kasa_send(request, retry + 1)
+            await self._close_kasa_device()
             raise
         finally:
             proto._transport.send = original_send
@@ -607,7 +604,6 @@ class Tapo:
         except Exception:
             pass
         self.dev = None
-        self._kasa_ready = False
 
     def executeAsyncExecutorJob(self, job, *args):
         if self.hass is None:
