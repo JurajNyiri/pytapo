@@ -3274,7 +3274,7 @@ class Tapo:
                 # response, where camera returns invalid json and incorrect number of responses (1)
                 # containing all the others. When getAudioConfig is not requested in this function
                 # it returns everything as expected.
-                return self.getMost(["getAudioConfig"])
+                return self.getMost(["getAudioConfig"], chn_id)
             else:
                 raise Exception(f"Unexpected camera response: {results}")
 
