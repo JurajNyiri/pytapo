@@ -2181,23 +2181,33 @@ class Tapo:
 
         return self.executeFunction("setGlassDetectionConfig", data)
 
-    def getTamperDetection(self):
-        return self.executeFunction(
-            "getTamperDetectionConfig",
-            {"tamper_detection": {"name": "tamper_det"}},
-        )["tamper_detection"]["tamper_det"]
+    def getTamperDetection(self, chn_id: list = None):
+        params = {"tamper_detection": {"name": ["tamper_det"]}}
+        if chn_id:
+            params["tamper_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getTamperDetectionConfig", params)
+        key = self.__selectDetectionKey(
+            chn_id, detection_key="tamper_det", per_channel_key="tamper_det_chn"
+        )
+        result = data["tamper_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setTamperDetection(self, enabled, sensitivity=False):
-        data = {
-            "tamper_detection": {"tamper_det": {"enabled": "on" if enabled else "off"}}
-        }
+    def setTamperDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"}
         if sensitivity:
             if sensitivity not in ["high", "normal", "low"]:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
             if sensitivity == "normal":
                 sensitivity = "medium"
-            data["tamper_detection"]["tamper_det"]["sensitivity"] = sensitivity
+            per_channel_extra_fields["sensitivity"] = sensitivity
 
+        data = self.__buildChnAwareConfig(
+            "tamper_detection",
+            chn_id=chn_id,
+            item_key="tamper_det",
+            per_channel_key="tamper_det_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setTamperDetectionConfig", data)
 
     def getBabyCryDetection(self):
