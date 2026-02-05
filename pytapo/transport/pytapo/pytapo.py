@@ -10,7 +10,6 @@ from Crypto.Util.Padding import pad, unpad
 from .TlsAdapter import TlsAdapter
 from ...media_stream._utils import generate_nonce
 from .const import (
-    MULTI_REQUEST_BATCH_SIZE,
     RETRY_BACKOFF_SECONDS,
     RETRYABLE_ERROR_CODES,
     AUTH_ERROR_CODES,
@@ -28,7 +27,7 @@ class pyTapo:
         retryStok=True,
         hass=None,
         cloudPassword="",
-        reuseSession=False,
+        reuseSession=True,
         redactConfidentialInformation=True,
     ):
         self.host = host
@@ -53,7 +52,7 @@ class pyTapo:
             "Accept": "application/json",
             "Accept-Encoding": "gzip, deflate",
             "User-Agent": "Tapo CameraClient Android",
-            "Connection": "close",
+            "Connection": "keep-alive",
             "requestByApp": "true",
             "Content-Type": "application/json; charset=UTF-8",
         }
@@ -67,86 +66,10 @@ class pyTapo:
         self.session = False
         self.isSecureConnectionCached = None
 
-    def _get_multi_request_entries(self, request):
-        if not isinstance(request, dict):
-            return None
-        if request.get("method") != "multipleRequest":
-            return None
-        params = request.get("params")
-        if not isinstance(params, dict):
-            return None
-        requests = params.get("requests")
-        if not isinstance(requests, list):
-            return None
-        return requests
-
-    async def _send_multi_request_in_batches(self, request, requests, retry):
-        self.debugLog(
-            f"Splitting multipleRequest into batches of {MULTI_REQUEST_BATCH_SIZE}"
-        )
-        combined_response = None
-        step = MULTI_REQUEST_BATCH_SIZE
-        total_requests = len(requests)
-        total_batches = (total_requests + step - 1) // step
-        for i in range(0, len(requests), step):
-            batch_requests = requests[i : i + step]
-            batch_num = (i // step) + 1
-            self.debugLog(
-                f"Sending multipleRequest batch {batch_num}/{total_batches} with {len(batch_requests)} requests"
-            )
-            batch_request = dict(request)
-            batch_params = dict(request.get("params") or {})
-            batch_params["requests"] = batch_requests
-            batch_request["params"] = batch_params
-
-            response = await self.send(batch_request, retry)
-            if not self._responseIsOK(None, response):
-                self.debugLog(
-                    f"multipleRequest batch {batch_num}/{total_batches} returned error response, aborting"
-                )
-                return response
-
-            responses = response.get("result", {}).get("responses")
-            if not isinstance(responses, list):
-                self.debugLog(
-                    f"multipleRequest batch {batch_num}/{total_batches} missing responses list, aborting"
-                )
-                return response
-            responses = list(responses)
-
-            if combined_response is None:
-                combined_response = response
-                if isinstance(combined_response.get("result"), dict):
-                    combined_response["result"]["responses"] = []
-                else:
-                    combined_response["result"] = {"responses": []}
-                self.debugLog("Initialized combined multipleRequest response")
-            self.debugLog(
-                f"Appending {len(responses)} responses from batch {batch_num}/{total_batches}"
-            )
-            combined_response["result"]["responses"].extend(responses)
-
-        if combined_response is not None:
-            total_responses = len(
-                combined_response.get("result", {}).get("responses", [])
-            )
-            self.debugLog(
-                f"Combined multipleRequest response has {total_responses} responses"
-            )
-        return combined_response
-
     async def send(self, request, retry=0):
         self.debugLog(f"send called, retry: {retry}")
         self.debugLog("Request:")
         self.debugLog(request)
-        multi_requests = self._get_multi_request_entries(request)
-        if (
-            multi_requests is not None
-            and len(multi_requests) > MULTI_REQUEST_BATCH_SIZE
-        ):
-            return await self._send_multi_request_in_batches(
-                request, multi_requests, retry
-            )
         await self.authenticate()
         authValid = True
         url = self._getHostURL()

@@ -26,7 +26,7 @@ class Tapo:
         cloudPassword="",
         superSecretKey="",
         childID=None,
-        reuseSession=False,
+        reuseSession=True,
         printDebugInformation=False,
         controlPort=443,
         retryStok=True,
