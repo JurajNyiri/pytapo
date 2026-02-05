@@ -83,7 +83,6 @@ class Tapo:
         logger = logging.getLogger("kasa.transports.klaptransport")
         logger.addFilter(SuppressPythonKasaLogs())
 
-        self.redactConfidentialInformation = redactConfidentialInformation
         self.printDebugInformation = printDebugInformation
         self.printWarnInformation = printWarnInformation
         self.host = host
@@ -125,8 +124,6 @@ class Tapo:
         self.userID = False
         self.childID = childID
         self.timeCorrection = False
-        self.reuseSession = reuseSession
-        self.isSecureConnectionCached = None
         if streamPort is None:
             self.streamPort = 8800
         else:
@@ -141,14 +138,6 @@ class Tapo:
             "requestByApp": "true",
             "Content-Type": "application/json; charset=UTF-8",
         }
-        self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
-        self.hashedSha256Password = (
-            hashlib.sha256(password.encode("utf8")).hexdigest().upper()
-        )
-        self.hashedCloudPassword = (
-            hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
-        )
-        self.session = False
 
         self.basicInfo = self.getBasicInfo()
         if "type" in self.basicInfo:
@@ -473,6 +462,14 @@ class Tapo:
                     SslAesTransport._create_ssl_context = original_create
             raise
 
+    async def _close_kasa_device(self):
+        try:
+            if self.dev and getattr(self.dev, "protocol", None):
+                await self.dev.protocol.close()
+        except Exception:
+            pass
+        self.dev = None
+
     async def ensureAuthenticated(self, retry=False):
         if self.isKLAP:
             if self.klapTransport is None:
@@ -774,14 +771,6 @@ class Tapo:
                 return EncryptionMethod.MD5
         return EncryptionMethod.SHA256
 
-    def getHashedPassword(self):
-        if self.passwordEncryptionMethod == EncryptionMethod.MD5:
-            return self.hashedPassword
-        elif self.passwordEncryptionMethod == EncryptionMethod.SHA256:
-            return self.hashedSha256Password
-        else:
-            raise Exception("Failure detecting hashing algorithm.")
-
     def responseIsOK(self, data=None):
         try:
             if "error_code" not in data or data["error_code"] == 0:
@@ -843,14 +832,6 @@ class Tapo:
 
     def close(self):
         return self.executeAsyncExecutorJob(self._close_kasa_device)
-
-    async def _close_kasa_device(self):
-        try:
-            if self.dev and getattr(self.dev, "protocol", None):
-                await self.dev.protocol.close()
-        except Exception:
-            pass
-        self.dev = None
 
     def executeAsyncExecutorJob(self, job, *args):
         if self.hass is None:
