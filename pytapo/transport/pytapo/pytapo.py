@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import requests
 import json
 import hashlib
@@ -8,13 +9,15 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from .TlsAdapter import TlsAdapter
 from ...media_stream._utils import generate_nonce
-
-# todo: add method to start fresh
-# todo: use the method to start fresh on various error codes, -40401 and others
+from .const import (
+    MULTI_REQUEST_BATCH_SIZE,
+    RETRY_BACKOFF_SECONDS,
+    RETRYABLE_ERROR_CODES,
+    AUTH_ERROR_CODES,
+)
 
 
 class pyTapo:
-    MULTI_REQUEST_BATCH_SIZE = 5
 
     def __init__(
         self,
@@ -79,10 +82,10 @@ class pyTapo:
 
     async def _send_multi_request_in_batches(self, request, requests, retry):
         self.debugLog(
-            f"Splitting multipleRequest into batches of {self.MULTI_REQUEST_BATCH_SIZE}"
+            f"Splitting multipleRequest into batches of {MULTI_REQUEST_BATCH_SIZE}"
         )
         combined_response = None
-        step = self.MULTI_REQUEST_BATCH_SIZE
+        step = MULTI_REQUEST_BATCH_SIZE
         total_requests = len(requests)
         total_batches = (total_requests + step - 1) // step
         for i in range(0, len(requests), step):
@@ -103,6 +106,14 @@ class pyTapo:
                 )
                 return response
 
+            responses = response.get("result", {}).get("responses")
+            if not isinstance(responses, list):
+                self.debugLog(
+                    f"multipleRequest batch {batch_num}/{total_batches} missing responses list, aborting"
+                )
+                return response
+            responses = list(responses)
+
             if combined_response is None:
                 combined_response = response
                 if isinstance(combined_response.get("result"), dict):
@@ -110,13 +121,6 @@ class pyTapo:
                 else:
                     combined_response["result"] = {"responses": []}
                 self.debugLog("Initialized combined multipleRequest response")
-
-            responses = response.get("result", {}).get("responses")
-            if not isinstance(responses, list):
-                self.debugLog(
-                    f"multipleRequest batch {batch_num}/{total_batches} missing responses list, aborting"
-                )
-                return response
             self.debugLog(
                 f"Appending {len(responses)} responses from batch {batch_num}/{total_batches}"
             )
@@ -135,18 +139,19 @@ class pyTapo:
         self.debugLog(f"send called, retry: {retry}")
         self.debugLog("Request:")
         self.debugLog(request)
-        await self.authenticate()
         multi_requests = self._get_multi_request_entries(request)
         if (
             multi_requests is not None
-            and len(multi_requests) > self.MULTI_REQUEST_BATCH_SIZE
+            and len(multi_requests) > MULTI_REQUEST_BATCH_SIZE
         ):
             return await self._send_multi_request_in_batches(
                 request, multi_requests, retry
             )
+        await self.authenticate()
         authValid = True
         url = self._getHostURL()
 
+        fullRequest = request
         if self.seq is not None and self._isSecureConnection():
             fullRequest = {
                 "method": "securePassthrough",
@@ -167,16 +172,25 @@ class pyTapo:
                     )
                 else:
                     raise err
+            if not authValid:
+                return await self._retry_or_return(
+                    request, retry, "Auth invalid on getTag", None
+                )
             self.seq += 1
 
-        res = self._request(
-            "POST",
-            url,
-            data=json.dumps(fullRequest),
-            headers=self.headers,
-            verify=False,
-        )
-        responseData = res.json()
+        try:
+            res = self._request(
+                "POST",
+                url,
+                data=json.dumps(fullRequest),
+                headers=self.headers,
+                verify=False,
+            )
+            responseData = res.json()
+        except requests.RequestException as err:
+            return await self._retry_on_exception(request, retry, err)
+        except ValueError as err:
+            return await self._retry_on_exception(request, retry, err)
         if (
             self._isSecureConnection()
             and "result" in responseData
@@ -192,11 +206,24 @@ class pyTapo:
                     or str(err) == "PKCS#7 padding is incorrect."
                 ):
                     self.debugLog(f"{str(err)} Reauthenticating.")
-                    authValid = False  # todo handle this properly
+                    authValid = False
+                    responseJSON = responseData
                 else:
                     raise err
         else:
-            responseJSON = res.json()
+            responseJSON = responseData
+
+        if not authValid:
+            return await self._retry_or_return(
+                request, retry, "Auth invalid during decrypt", responseJSON
+            )
+        if self._has_error_code(responseJSON, RETRYABLE_ERROR_CODES):
+            return await self._retry_or_return(
+                request, retry, "Retryable error code detected", responseJSON
+            )
+        if self._has_error_code(responseJSON, AUTH_ERROR_CODES):
+            self.debugLog("Authentication error code detected, clearing session.")
+            await self._clearSession()
 
         self.debugLog(f"Raw response: {responseJSON}")
 
@@ -213,9 +240,78 @@ class pyTapo:
     def getEncryptionMethod(self):
         return self.passwordEncryptionMethod
 
-    # not needed
     async def close(self):
-        pass
+        await self._clearSession()
+
+    async def _clearSession(self):
+        self.debugLog("Clearing session state...")
+        if self.session not in (False, None):
+            try:
+                self.session.close()
+            except Exception as err:
+                self.debugLog(f"Failed to close session: {err}")
+        self.session = False
+        self.stok = False
+        self.seq = None
+        self.lsk = None
+        self.ivb = None
+        self.cnonce = None
+        self.passwordEncryptionMethod = None
+        self.isSecureConnectionCached = None
+        self.headers.pop("Seq", None)
+        self.headers.pop("Tapo_tag", None)
+
+    def _normalize_error_code(self, error_code):
+        try:
+            return int(error_code)
+        except Exception:
+            return None
+
+    def _iter_error_codes(self, response):
+        if not isinstance(response, dict):
+            return
+        code = self._normalize_error_code(response.get("error_code"))
+        if code is not None:
+            yield code
+        responses = response.get("result", {}).get("responses")
+        if isinstance(responses, list):
+            for item in responses:
+                if not isinstance(item, dict):
+                    continue
+                code = self._normalize_error_code(item.get("error_code"))
+                if code is not None:
+                    yield code
+                response_data = item.get("result", {}).get("response_data")
+                if isinstance(response_data, dict):
+                    code = self._normalize_error_code(response_data.get("error_code"))
+                    if code is not None:
+                        yield code
+
+    def _has_error_code(self, response, error_codes):
+        return any(code in error_codes for code in self._iter_error_codes(response))
+
+    async def _retry_or_return(self, request, retry, reason, response):
+        if retry >= MAX_LOGIN_RETRIES:
+            self.debugLog(
+                f"{reason}, giving up after {retry}/{MAX_LOGIN_RETRIES} retries."
+            )
+            return response
+        self.debugLog(
+            f"{reason}, clearing session and retrying: {retry + 1}/{MAX_LOGIN_RETRIES}"
+        )
+        await self._clearSession()
+        await asyncio.sleep(RETRY_BACKOFF_SECONDS)
+        return await self.send(request, retry + 1)
+
+    async def _retry_on_exception(self, request, retry, err):
+        if retry >= MAX_LOGIN_RETRIES:
+            raise err
+        self.debugLog(
+            f"Request failed ({err}), clearing session and retrying: {retry + 1}/{MAX_LOGIN_RETRIES}"
+        )
+        await self._clearSession()
+        await asyncio.sleep(RETRY_BACKOFF_SECONDS)
+        return await self.send(request, retry + 1)
 
     def _encryptRequest(self, request):
         cipher = AES.new(self.lsk, AES.MODE_CBC, self.ivb)
