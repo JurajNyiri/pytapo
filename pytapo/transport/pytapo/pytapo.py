@@ -12,7 +12,6 @@ from ...media_stream._utils import generate_nonce
 # todo: split multirequest into multiple batches
 # todo: add method to start fresh
 # todo: use the method to start fresh on various error codes
-# todo: automatic detection of encryption cipher that is not supported similar to kasa transport class
 
 
 class pyTapo:
