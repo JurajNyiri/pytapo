@@ -502,36 +502,6 @@ class Kasa:
             )
         return SmartDevice(host=config.host, config=config, protocol=protocol)
 
-    async def _kasa_connect_with_ssl_fallback(self, config):
-        try:
-            return await Device.connect(config=config)
-        except Exception as err:
-            if self._is_kasa_stop_iteration(err):
-                self.warnLog(
-                    "python-kasa device update failed with StopIteration; "
-                    "continuing without initial update."
-                )
-                return await self._kasa_connect_without_update(config)
-            if self._is_kasa_ssl_handshake_failure(err) and not self._kasa_ssl_fallback:
-                self.warnLog(
-                    f"Creating unsecure SSL context because of unexpected encryption error on direct connect: {err}"
-                )
-                await self._log_kasa_ssl_details(err, "direct connect")
-                self._kasa_ssl_fallback = True
-                from kasa.transports.sslaestransport import SslAesTransport
-
-                original_create = SslAesTransport._create_ssl_context
-
-                def _unsecure_create_ssl_context(_transport_self):
-                    return self._get_kasa_ssl_fallback_context()
-
-                SslAesTransport._create_ssl_context = _unsecure_create_ssl_context
-                try:
-                    return await Device.connect(config=config)
-                finally:
-                    SslAesTransport._create_ssl_context = original_create
-            raise
-
     async def close(self):
         try:
             if self.dev and getattr(self.dev, "protocol", None):
