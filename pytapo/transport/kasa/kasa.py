@@ -1,6 +1,5 @@
 import logging
 import ssl
-import asyncio
 from contextlib import suppress
 from ...const import EncryptionMethod, MAX_LOGIN_RETRIES
 from kasa import Device, DeviceConfig, DeviceError, Discover, Credentials

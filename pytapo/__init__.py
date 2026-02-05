@@ -1,30 +1,20 @@
 #
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
-import hashlib
 import json
 import requests
 import asyncio
 import logging
 import uuid
-import ssl
-from contextlib import suppress
 from .transport.transport import Transport
 from .logger import Logger
 
 from kasa.transports import KlapTransportV2, KlapTransport
 from kasa.exceptions import (
     AuthenticationError,
-    SmartErrorCode,
-    TimeoutError as KasaTimeoutError,
 )
-from kasa import DeviceConfig, DeviceError, Discover
+from kasa import DeviceConfig
 from kasa import Credentials
-from kasa.deviceconfig import (
-    DeviceConnectionParameters,
-    DeviceEncryptionType,
-    DeviceFamily,
-)
 
 from datetime import datetime, timedelta
 from warnings import warn
