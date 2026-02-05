@@ -217,11 +217,11 @@ class pyTapo:
             return await self._retry_or_return(
                 request, retry, "Auth invalid during decrypt", responseJSON
             )
-        if self._has_error_code(responseJSON, RETRYABLE_ERROR_CODES):
+        if self._has_top_error_code(responseJSON, RETRYABLE_ERROR_CODES):
             return await self._retry_or_return(
                 request, retry, "Retryable error code detected", responseJSON
             )
-        if self._has_error_code(responseJSON, AUTH_ERROR_CODES):
+        if self._has_top_error_code(responseJSON, AUTH_ERROR_CODES):
             self.debugLog("Authentication error code detected, clearing session.")
             await self._clearSession()
 
@@ -267,28 +267,11 @@ class pyTapo:
         except Exception:
             return None
 
-    def _iter_error_codes(self, response):
+    def _has_top_error_code(self, response, error_codes):
         if not isinstance(response, dict):
-            return
+            return False
         code = self._normalize_error_code(response.get("error_code"))
-        if code is not None:
-            yield code
-        responses = response.get("result", {}).get("responses")
-        if isinstance(responses, list):
-            for item in responses:
-                if not isinstance(item, dict):
-                    continue
-                code = self._normalize_error_code(item.get("error_code"))
-                if code is not None:
-                    yield code
-                response_data = item.get("result", {}).get("response_data")
-                if isinstance(response_data, dict):
-                    code = self._normalize_error_code(response_data.get("error_code"))
-                    if code is not None:
-                        yield code
-
-    def _has_error_code(self, response, error_codes):
-        return any(code in error_codes for code in self._iter_error_codes(response))
+        return code in error_codes if code is not None else False
 
     async def _retry_or_return(self, request, retry, reason, response):
         if retry >= MAX_LOGIN_RETRIES:
@@ -296,6 +279,7 @@ class pyTapo:
                 f"{reason}, giving up after {retry}/{MAX_LOGIN_RETRIES} retries."
             )
             return response
+        self.debugLog(f"Response: {response}")
         self.debugLog(
             f"{reason}, clearing session and retrying: {retry + 1}/{MAX_LOGIN_RETRIES}"
         )
