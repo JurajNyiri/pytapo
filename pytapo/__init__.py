@@ -3,10 +3,10 @@
 #
 import json
 import requests
-import asyncio
 import uuid
 from .transport.transport import Transport
 from .logger import Logger
+from .asyncHandler import AsyncHandler
 
 from datetime import datetime, timedelta
 from warnings import warn
@@ -42,9 +42,7 @@ class Tapo:
     ):
 
         self.logger = Logger(printDebugInformation, printWarnInformation)
-
-        # todo: remove me
-        self._loop = None
+        self.asyncHandler = AsyncHandler(hass)
 
         self.host = host
         if hass is not None:
@@ -202,24 +200,10 @@ class Tapo:
             )
 
     def close(self):
-        return self.executeAsyncExecutorJob(self.transport.close)
-
-    # todo: move me to my own class
-    def executeAsyncExecutorJob(self, job, *args):
-        if self.hass is None:
-            # reuse a dedicated loop so kasa aiohttp sessions stay alive between calls
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(self._loop)
-                return self._loop.run_until_complete(job(*args))
-            finally:
-                asyncio.set_event_loop(None)
-        else:
-            return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
+        return self.asyncHandler.executeAsyncExecutorJob(self.transport.close)
 
     def performRequest(self, requestData, loginRetryCount=0):
-        self.executeAsyncExecutorJob(self.transport.authenticate)
+        self.asyncHandler.executeAsyncExecutorJob(self.transport.authenticate)
         if self.childID:
             fullRequest = {
                 "method": "multipleRequest",
@@ -241,7 +225,7 @@ class Tapo:
             fullRequest = requestData
 
         if self.isKLAP:
-            responseJSON = self.executeAsyncExecutorJob(
+            responseJSON = self.asyncHandler.executeAsyncExecutorJob(
                 self.transport.send, fullRequest
             )
             if (
@@ -257,7 +241,7 @@ class Tapo:
                         )
                     )
         else:
-            responseJSON = self.executeAsyncExecutorJob(
+            responseJSON = self.asyncHandler.executeAsyncExecutorJob(
                 self.transport.send, fullRequest
             )
         if not self.responseIsOK(responseJSON):
