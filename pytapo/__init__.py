@@ -4,36 +4,16 @@
 import json
 import requests
 import asyncio
-import logging
 import uuid
 from .transport.transport import Transport
 from .logger import Logger
 
-from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import (
-    AuthenticationError,
-)
-from kasa import DeviceConfig
-from kasa import Credentials
-
 from datetime import datetime, timedelta
 from warnings import warn
 
-from .const import ERROR_CODES, MAX_LOGIN_RETRIES, EncryptionMethod
+from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 from .media_stream._utils import StreamType
-
-LOGGER = logging.getLogger("pytapo")
-
-
-# Supress Error messages, we handle them internally and log if necessary
-class SuppressPythonKasaLogs(logging.Filter):
-    def filter(self, record):
-        return (
-            "Response status is 403" not in record.getMessage()
-            and "Server disconnected" not in record.getMessage()
-            and "Response status is 400, Request was" not in record.getMessage()
-        )
 
 
 class Tapo:
@@ -62,13 +42,6 @@ class Tapo:
     ):
 
         self.logger = Logger(printDebugInformation, printWarnInformation)
-        self.transport = Transport(
-            host=host,
-            controlPort=controlPort,
-            user=user,
-            password=password,
-            logger=self.logger,
-        )
 
         # todo: remove me
         self._loop = None
@@ -95,6 +68,23 @@ class Tapo:
             self.playerID = str(uuid.uuid4())
         else:
             self.playerID = playerID
+
+        if self.isKLAP:
+            transport_method = "klap"
+        else:
+            transport_method = "kasa"
+
+        self.logger.debugLog(f"Transport method determined: {transport_method}")
+
+        self.transport = Transport(
+            host=host,
+            controlPort=controlPort,
+            user=user,
+            password=password,
+            logger=self.logger,
+            method=transport_method,
+            KLAPVersion=self.KLAPVersion,
+        )
 
         self.klapTransport = None
         self.user = user
@@ -138,99 +128,18 @@ class Tapo:
         return "{host}:{streamPort}".format(host=self.host, streamPort=self.streamPort)
 
     def _isKLAP(self, timeout=2):
+        self.logger.debugLog("_isKLAP: Finding out whether device is KLAP...")
         try:
             url = f"http://{self.host}:{self.controlPort}"
             response = requests.get(url, timeout=timeout)
-            return "200 OK" in response.text
-        except requests.RequestException:
+            result = "200 OK" in response.text
+            self.logger.debugLog(f"_isKLAP: Device is KLAP result: {result}")
+            return result
+        except requests.RequestException as err:
+            self.logger.debugLog(f"_isKLAP: Device is not KLAP: {err}")
             return False
 
-    async def initiateKlapTransport(self, version=1):
-        try:
-            if self.klapTransport is None:
-                creds = Credentials(self.user, self.password)
-                config = DeviceConfig(
-                    self.host, port_override=self.controlPort, credentials=creds
-                )
-                if version == 1:
-                    transport = KlapTransport(config=config)
-                elif version == 2:
-                    transport = KlapTransportV2(config=config)
-                await transport.perform_handshake()
-                self.klapTransport = transport
-                return self.klapTransport
-        finally:
-            await transport.close()
-
-    async def sendKlapRequest(self, request, retry=0):
-        try:
-            if self.klapTransport is None:
-                await self.ensureAuthenticated()
-            response = await self.klapTransport.send(json.dumps(request))
-            return response
-        except Exception as err:
-            if (
-                "Response status is 403, Request was" in str(err)
-                or "Response status is 400, Request was" in str(err)
-                or "Server disconnected" in str(err)
-            ):
-                raise Exception("PyTapo KLAP Error #6: " + str(err))
-
-            self.logger.debugLog("Retrying request... Error: " + str(err))
-            if retry < 5:
-                await self.ensureAuthenticated()
-                return await self.sendKlapRequest(request, retry + 1)
-            else:
-                raise Exception("PyTapo KLAP Error #1: " + str(err))
-        finally:
-            if self.klapTransport is not None:
-                await self.klapTransport.close()
-
-    async def ensureAuthenticated(self, retry=False):
-        if self.isKLAP:
-            if self.klapTransport is None:
-                if self.KLAPVersion is None:
-                    try:
-                        await self.initiateKlapTransport(1)
-                        self.KLAPVersion = 1
-                    except AuthenticationError:
-                        try:
-                            await self.initiateKlapTransport(2)
-                            self.KLAPVersion = 2
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #2: " + str(err))
-                    except Exception as err:
-                        raise Exception("PyTapo KLAP Error #3: " + str(err))
-                else:
-                    if self.KLAPVersion == 1:
-                        try:
-                            await self.initiateKlapTransport(1)
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #4: " + str(err))
-                    elif self.KLAPVersion == 2:
-                        try:
-                            await self.initiateKlapTransport(2)
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #5: " + str(err))
-            return True
-
-        await self.transport.authenticate()
-
     def getEncryptionMethod(self):
-        """
-        Pick the password digest method for media/auth based on connection details.
-        - KLAP devices use SHA256.
-        - For python-kasa devices, prefer SHA256 when login_version >=2, else MD5.
-        Defaults to SHA256 if unknown.
-        """
-        if self.isKLAP:
-            return EncryptionMethod.SHA256
         return self.transport.getEncryptionMethod()
 
     def responseIsOK(self, data=None):
@@ -310,7 +219,7 @@ class Tapo:
             return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
 
     def performRequest(self, requestData, loginRetryCount=0):
-        self.executeAsyncExecutorJob(self.ensureAuthenticated)
+        self.executeAsyncExecutorJob(self.transport.authenticate)
         if self.childID:
             fullRequest = {
                 "method": "multipleRequest",
@@ -333,7 +242,7 @@ class Tapo:
 
         if self.isKLAP:
             responseJSON = self.executeAsyncExecutorJob(
-                self.sendKlapRequest, fullRequest
+                self.transport.send, fullRequest
             )
             if (
                 "result" in responseJSON

@@ -1,13 +1,17 @@
 import ssl
 import asyncio
 import hashlib
+import inspect
 from .kasa.kasa import Kasa
+from .klap.klap import Klap
 from .const import TRANSPORT_METHODS
 from ..logger import Logger
 from contextlib import suppress
+from typing import Any
 
 
-class Transport(Kasa):
+class Transport(Kasa, Klap):
+
     def __init__(
         self,
         host: str,
@@ -16,6 +20,7 @@ class Transport(Kasa):
         password: str,
         logger: Logger,
         method="kasa",
+        **kwargs: Any,
     ):
         if method not in TRANSPORT_METHODS:
             raise Exception(f"Incorrect transport method: {method}.")
@@ -24,9 +29,14 @@ class Transport(Kasa):
         self.host = host
         self.controlPort = controlPort
 
-        if self.method == "kasa":
-            self.transport = Kasa
-            self.transport.__init__(self, host, controlPort, user, password)
+        backend_cls = {"kasa": Kasa, "klap": Klap}[self.method]
+        self.transport = backend_cls
+
+        # keep only kwargs that backend __init__ accepts
+        sig = inspect.signature(backend_cls.__init__)
+        allowed = {k: v for k, v in kwargs.items() if k in sig.parameters}
+
+        backend_cls.__init__(self, host, controlPort, user, password, **allowed)
 
     async def authenticate(self, retry=False):
         return await self.transport.authenticate(self, retry)
@@ -34,17 +44,17 @@ class Transport(Kasa):
     async def send(self, request, retry=0):
         return await self.transport.send(self, request, retry)
 
-    def debugLog(self, msg):
-        self.logger.debugLog(msg)
-
-    def warnLog(self, msg):
-        self.logger.warnLog(msg)
-
     def getEncryptionMethod(self):
         self.transport.getEncryptionMethod(self)
 
     async def close(self):
         await self.transport.close(self)
+
+    def debugLog(self, msg):
+        self.logger.debugLog(msg)
+
+    def warnLog(self, msg):
+        self.logger.warnLog(msg)
 
     def _ssl_context_ciphers(self, context):
         if context is None:

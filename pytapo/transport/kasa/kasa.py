@@ -27,7 +27,6 @@ class SuppressPythonKasaLogs(logging.Filter):
 
 
 class Kasa:
-
     def __init__(self, host: str, controlPort: int, user: str, password: str):
         logger = logging.getLogger("kasa.transports.klaptransport")
         logger.addFilter(SuppressPythonKasaLogs())
