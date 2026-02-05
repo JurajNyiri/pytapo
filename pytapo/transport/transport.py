@@ -24,7 +24,6 @@ class Transport(Kasa):
         self.host = host
         self.controlPort = controlPort
 
-        # todo change this so that Kasa is kept in self context and all the functions below use it automatically
         if self.method == "kasa":
             self.transport = Kasa
             self.transport.__init__(self, host, controlPort, user, password)
