@@ -318,13 +318,16 @@ class Tapo:
         )  # pragma: no cover
 
     def getChildDevices(self):
-        childDevices = self.performRequest(
-            {
-                "method": "getChildDeviceList",
-                "params": {"childControl": {"start_index": 0}},
-            }
+        return self.executeFunction(
+            "getChildDeviceList",
+            {"childControl": {"start_index": 0}},
         )
-        return childDevices["result"]["child_device_list"]
+
+    def getChildDeviceComponentList(self):
+        return self.executeFunction(
+            "getChildDeviceComponentList",
+            {"childControl": {"start_index": 0}},
+        )
 
     def getTimeCorrection(self):
         if self.timeCorrection is False:

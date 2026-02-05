@@ -132,6 +132,12 @@ class Kasa:
             raise
         except Exception as err:
             self.debugLog(f"kasa query failed: {err}")
+            # todo: this might be sometimes needed on stopiteration error but was solved by using executeFunction instead for a call
+            # if self._is_kasa_stop_iteration(err) and isinstance(raw_response, dict):
+            #    self.debugLog(
+            #        f"Caught kasa error {err}, and raw response is available. Returning."
+            #    )
+            #    return raw_response
             if self._is_kasa_ssl_handshake_failure(err):
                 if not self._kasa_ssl_fallback:
                     self.warnLog(
