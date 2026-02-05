@@ -2645,6 +2645,14 @@ class Tapo:
             requestData["params"]["requests"] = filtered_requests
 
         results = self.performRequest(requestData)
+        try:
+            responses_len = len(results.get("result", {}).get("responses", []))
+            requested_len = len(requestData["params"]["requests"])
+            self.logger.debugLog(
+                f"getMost: requested {requested_len} responses, received {responses_len}"
+            )
+        except Exception:
+            pass
 
         # handle malformed / unexpected response from camera
         if len(requestData["params"]["requests"]) != len(
