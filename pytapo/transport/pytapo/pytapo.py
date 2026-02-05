@@ -17,6 +17,8 @@ from .const import (
     AUTH_ERROR_CODES,
 )
 
+# Todo: retry timeout errors?
+
 
 class pyTapo:
 

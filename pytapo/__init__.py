@@ -1333,21 +1333,17 @@ class Tapo:
 
     def getUserID(self, forceReload=False):
         if not self.userID or forceReload is True:
-            response = self.userID = self.performRequest(
-                {
-                    "method": "multipleRequest",
-                    "params": {
-                        "requests": [
-                            {
-                                "method": "getUserID",
-                                "params": {"system": {"get_user_id": "null"}},
-                            }
-                        ]
-                    },
-                }
-            )["result"]["responses"][0]["result"]
+            response = self.userID = self.executeFunction(
+                "getUserID", {"system": {"get_user_id": "null"}}
+            )
+
             if "error_code" not in response or response["error_code"] == 0:
-                self.userID = response["user_id"]
+                if "user_id" in response:
+                    self.userID = response["user_id"]
+                else:
+                    raise Exception(
+                        "Failed to retrieve user ID, device responded with no value:"
+                    )
             else:
                 if "error_code" in response and response["error_code"] == -71101:
                     self.userID = self.getUserID()
@@ -1437,6 +1433,8 @@ class Tapo:
             if ERROR_CODES["-71103"] in str(err):
                 self.getUserID(True)
                 return self.getRecordings(date, start_index, end_index)
+            else:
+                raise err
 
     # does not work for child devices, function discovery needed
     def getCommonImage(self):
