@@ -442,7 +442,7 @@ class Tapo:
         from kasa.device_factory import get_protocol
         from kasa.smart import SmartDevice
 
-        protocol = get_protocol(config=config)
+        protocol = get_protocol(config=config, strict=True)
         if protocol is None:
             raise Exception(
                 f"Unsupported device for {config.host}: "
@@ -535,6 +535,7 @@ class Tapo:
                             f"https={conn_params.https} "
                             f"device_family={conn_params.device_family}"
                         )
+                        dev = None
                         try:
                             config = DeviceConfig(
                                 host=self.host,
@@ -543,12 +544,63 @@ class Tapo:
                                 credentials=creds,
                                 connection_type=conn_params,
                             )
-                            return await self._kasa_connect_without_update(config)
+                            dev = await self._kasa_connect_without_update(config)
+                            try:
+                                await dev.protocol.query(
+                                    {
+                                        "getDeviceInfo": {
+                                            "device_info": {"name": ["basic_info"]}
+                                        }
+                                    }
+                                )
+                                return dev
+                            except Exception as probe_err:
+                                if (
+                                    self._is_kasa_ssl_handshake_failure(probe_err)
+                                    and not self._kasa_ssl_fallback
+                                ):
+                                    self.warnLog(
+                                        "Creating unsecure SSL context because of "
+                                        f"unexpected encryption error on direct connect probe: {probe_err}"
+                                    )
+                                    await self._log_kasa_ssl_details(
+                                        probe_err,
+                                        "direct connect probe",
+                                        context=getattr(
+                                            dev.protocol._transport, "_ssl_context", None
+                                        ),
+                                    )
+                                    self._kasa_ssl_fallback = True
+                                    try:
+                                        dev.protocol._transport._ssl_context = (
+                                            self._get_kasa_ssl_fallback_context()
+                                        )
+                                    except Exception as apply_err:
+                                        self.warnLog(
+                                            f"Failed to apply SSL context: {apply_err}"
+                                        )
+                                    await dev.protocol.query(
+                                        {
+                                            "getDeviceInfo": {
+                                                "device_info": {"name": ["basic_info"]}
+                                            }
+                                        }
+                                    )
+                                    return dev
+                                raise
                         except AuthenticationError as err:
+                            if dev is not None:
+                                with suppress(Exception):
+                                    await dev.protocol.close()
                             raise err
                         except DeviceError as err:
+                            if dev is not None:
+                                with suppress(Exception):
+                                    await dev.protocol.close()
                             code = getattr(err, "error_code", None)
-                            self.debugLog(f"kasa update failed (device error): {err}")
+                            self.debugLog(
+                                f"kasa direct connect probe failed (device error): {err}"
+                            )
                             await self._close_kasa_device()
                             if code == SmartErrorCode.DEVICE_BLOCKED:
                                 raise Exception(
@@ -556,6 +608,9 @@ class Tapo:
                                 ) from err
                             raise
                         except Exception as err:
+                            if dev is not None:
+                                with suppress(Exception):
+                                    await dev.protocol.close()
                             self.debugLog(err)
                             last_err = err
                     if last_err is not None:
