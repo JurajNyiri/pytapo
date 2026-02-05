@@ -266,6 +266,14 @@ class Tapo:
                     return True
         return False
 
+    def _is_kasa_stop_iteration(self, err):
+        for ex in self._iter_exception_chain(err):
+            if isinstance(ex, StopIteration):
+                return True
+            if isinstance(ex, RuntimeError) and "StopIteration" in str(ex):
+                return True
+        return False
+
     def _create_kasa_default_ssl_context(self):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         with suppress(Exception):
@@ -438,10 +446,35 @@ class Tapo:
             self.warnLog(f"Failed to apply SSL context: {err}")
             return False
 
+    async def _kasa_connect_without_update(self, config):
+        from kasa.device_factory import get_device_class_from_family, get_protocol
+        from kasa.smart import SmartDevice
+
+        protocol = get_protocol(config=config)
+        if protocol is None:
+            raise Exception(
+                f"Unsupported device for {config.host}: "
+                f"{config.connection_type.device_family.value}"
+            )
+        device_class = get_device_class_from_family(
+            config.connection_type.device_family.value,
+            https=config.connection_type.https,
+        )
+        if device_class is None:
+            self.debugLog("DEVICE CLASS IS NONE")
+            device_class = SmartDevice
+        return device_class(host=config.host, config=config, protocol=protocol)
+
     async def _kasa_connect_with_ssl_fallback(self, config):
         try:
             return await Device.connect(config=config)
         except Exception as err:
+            if self._is_kasa_stop_iteration(err):
+                self.warnLog(
+                    "python-kasa device update failed with StopIteration; "
+                    "continuing without initial update."
+                )
+                return await self._kasa_connect_without_update(config)
             if self._is_kasa_ssl_handshake_failure(err) and not self._kasa_ssl_fallback:
                 self.warnLog(
                     f"Creating unsecure SSL context because of unexpected encryption error on direct connect: {err}"
@@ -508,13 +541,30 @@ class Tapo:
             self.debugLog("Creating new Kasa-Tapo instance...")
             creds = Credentials(self.user, self.password)
 
-            direct_connection_options = [
-                DeviceConnectionParameters(
-                    DeviceFamily.SmartIpCamera,
-                    DeviceEncryptionType.Aes,
-                    https=True,
-                )
+            direct_connection_options = []
+            # TODO: This might not be needed as _kasa_connect_without_update handles failure
+            direct_connection_families = [
+                DeviceFamily.SmartIpCamera,
+                DeviceFamily.SmartTapoHub,
+                DeviceFamily.SmartTapoDoorbell,
             ]
+            seen_options = set()
+
+            def add_direct_option(device_family, encrypt_type, https):
+                key = (device_family, encrypt_type, https)
+                if key in seen_options:
+                    return
+                seen_options.add(key)
+                direct_connection_options.append(
+                    DeviceConnectionParameters(
+                        device_family,
+                        encrypt_type,
+                        https=https,
+                    )
+                )
+
+            for family in direct_connection_families:
+                add_direct_option(family, DeviceEncryptionType.Aes, https=True)
             try:
                 self.dev = await Discover.discover_single(self.host, credentials=creds)
             except KasaTimeoutError as err:
@@ -524,19 +574,17 @@ class Tapo:
                 self.warnLog(
                     f"Failed to automatically discover details of device {self.host}. Attempting to connect directly by trying all authentication methods."
                 )
-                for encrypt_type in DeviceEncryptionType:
-                    if encrypt_type is DeviceEncryptionType.Klap:
-                        continue
-                    for https in (True, False):
-                        if encrypt_type is DeviceEncryptionType.Aes and https is True:
+                for family in direct_connection_families:
+                    for encrypt_type in DeviceEncryptionType:
+                        if encrypt_type is DeviceEncryptionType.Klap:
                             continue
-                        direct_connection_options.append(
-                            DeviceConnectionParameters(
-                                DeviceFamily.SmartIpCamera,
-                                encrypt_type,
-                                https=https,
-                            )
-                        )
+                        for https in (True, False):
+                            if (
+                                encrypt_type is DeviceEncryptionType.Aes
+                                and https is True
+                            ):
+                                continue
+                            add_direct_option(family, encrypt_type, https)
 
                 async def try_direct_connect():
                     last_err = None
@@ -544,7 +592,8 @@ class Tapo:
                         self.debugLog(
                             "kasa direct connect attempt: "
                             f"encrypt={conn_params.encryption_type.value} "
-                            f"https={conn_params.https}"
+                            f"https={conn_params.https} "
+                            f"device_family={conn_params.device_family}"
                         )
                         try:
                             config = DeviceConfig(
