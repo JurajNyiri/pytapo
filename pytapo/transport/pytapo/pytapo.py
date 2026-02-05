@@ -1,5 +1,6 @@
 import base64
 import asyncio
+import time
 import requests
 import json
 import hashlib
@@ -177,7 +178,7 @@ class pyTapo:
     async def close(self):
         await self._clearSession()
 
-    async def _clearSession(self):
+    def _clearSessionSync(self):
         self.debugLog("Clearing session state...")
         if self.session not in (False, None):
             try:
@@ -194,6 +195,9 @@ class pyTapo:
         self.isSecureConnectionCached = None
         self.headers.pop("Seq", None)
         self.headers.pop("Tapo_tag", None)
+
+    async def _clearSession(self):
+        self._clearSessionSync()
 
     def _normalize_error_code(self, error_code):
         try:
@@ -461,32 +465,43 @@ class pyTapo:
 
     def _refreshStok(self, loginRetryCount=0):
         self.debugLog("Refreshing stok...")
-        self.cnonce = generate_nonce(8).decode().upper()
-        url = "https://{host}".format(host=self._getControlHost())
-        if self._isSecureConnection():
-            self.debugLog("Connection is secure.")
-            data = {
-                "method": "login",
-                "params": {
-                    "cnonce": self.cnonce,
-                    "encrypt_type": "3",
-                    "username": self.user,
-                },
-            }
-        else:
-            self.debugLog("Connection is insecure.")
-            data = {
-                "method": "login",
-                "params": {
-                    "hashed": True,
-                    "password": self.hashedPassword,
-                    "username": self.user,
-                },
-            }
-        res = self._request(
-            "POST", url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        self.debugLog("Status code: " + str(res.status_code))
+        try:
+            self.cnonce = generate_nonce(8).decode().upper()
+            url = "https://{host}".format(host=self._getControlHost())
+            if self._isSecureConnection():
+                self.debugLog("Connection is secure.")
+                data = {
+                    "method": "login",
+                    "params": {
+                        "cnonce": self.cnonce,
+                        "encrypt_type": "3",
+                        "username": self.user,
+                    },
+                }
+            else:
+                self.debugLog("Connection is insecure.")
+                data = {
+                    "method": "login",
+                    "params": {
+                        "hashed": True,
+                        "password": self.hashedPassword,
+                        "username": self.user,
+                    },
+                }
+            res = self._request(
+                "POST", url, data=json.dumps(data), headers=self.headers, verify=False
+            )
+            self.debugLog("Status code: " + str(res.status_code))
+        except (requests.RequestException, ValueError) as err:
+            if loginRetryCount < MAX_LOGIN_RETRIES:
+                loginRetryCount += 1
+                self.debugLog(
+                    f"Request failed ({err}), retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
+                )
+                self._clearSessionSync()
+                time.sleep(RETRY_BACKOFF_SECONDS)
+                return self._refreshStok(loginRetryCount)
+            raise err
 
         if res.status_code == 401:
             try:
@@ -500,7 +515,18 @@ class pyTapo:
                 else:
                     pass
 
-        responseData = res.json()
+        try:
+            responseData = res.json()
+        except ValueError as err:
+            if loginRetryCount < MAX_LOGIN_RETRIES:
+                loginRetryCount += 1
+                self.debugLog(
+                    f"Invalid JSON response ({err}), retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
+                )
+                self._clearSessionSync()
+                time.sleep(RETRY_BACKOFF_SECONDS)
+                return self._refreshStok(loginRetryCount)
+            raise err
         if self._isSecureConnection():
             self.debugLog("Processing secure response.")
             if (
@@ -537,14 +563,25 @@ class pyTapo:
                             "username": self.user,
                         },
                     }
-                    res = self._request(
-                        "POST",
-                        url,
-                        data=json.dumps(data),
-                        headers=self.headers,
-                        verify=False,
-                    )
-                    responseData = res.json()
+                    try:
+                        res = self._request(
+                            "POST",
+                            url,
+                            data=json.dumps(data),
+                            headers=self.headers,
+                            verify=False,
+                        )
+                        responseData = res.json()
+                    except (requests.RequestException, ValueError) as err:
+                        if loginRetryCount < MAX_LOGIN_RETRIES:
+                            loginRetryCount += 1
+                            self.debugLog(
+                                f"Request failed ({err}), retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
+                            )
+                            self._clearSessionSync()
+                            time.sleep(RETRY_BACKOFF_SECONDS)
+                            return self._refreshStok(loginRetryCount)
+                        raise err
                     if (
                         "result" in responseData
                         and "start_seq" in responseData["result"]
@@ -610,19 +647,26 @@ class pyTapo:
             self.debugLog("Saving stok.")
             self.stok = res.json()["result"]["stok"]
             return self.stok
-        if (
-            self.retryStok
-            and ("error_code" in responseData and responseData["error_code"] == -40413)
-            and loginRetryCount < MAX_LOGIN_RETRIES
-        ):
-            loginRetryCount += 1
-            self.debugLog(
-                f"Unexpected response, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
-            )
-            return self._refreshStok(loginRetryCount)
-        else:
-            self.debugLog("Unexpected response, raising Exception.")
-            raise Exception("Invalid authentication data")
+        error_code = (
+            responseData.get("error_code") if isinstance(responseData, dict) else None
+        )
+        if self.retryStok and loginRetryCount < MAX_LOGIN_RETRIES:
+            if error_code in RETRYABLE_ERROR_CODES or (
+                error_code is not None
+                and error_code not in AUTH_ERROR_CODES
+                and error_code != -40411
+            ):
+                loginRetryCount += 1
+                self.warnLog(
+                    f"Unexpected response ({error_code}), retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
+                )
+                self._clearSessionSync()
+                time.sleep(RETRY_BACKOFF_SECONDS)
+                return self._refreshStok(loginRetryCount)
+        self.warnLog(
+            f"Unexpected response ({error_code}), raising Exception: {responseData}"
+        )
+        raise Exception("Invalid authentication data")
 
     def _getHostURL(self):
         return "https://{host}/stok={stok}/ds".format(
