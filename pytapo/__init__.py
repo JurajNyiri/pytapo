@@ -70,7 +70,7 @@ class Tapo:
             if self.isKLAP:
                 transport_method = "klap"
             else:
-                transport_method = "kasa"
+                transport_method = "pytapo"
         else:
             transport_method = transportMethod
 
@@ -86,6 +86,7 @@ class Tapo:
             KLAPVersion=self.KLAPVersion,
             retryStok=retryStok,
             hass=hass,
+            asyncHandler=self.asyncHandler,
             cloudPassword=cloudPassword,
             reuseSession=reuseSession,
             redactConfidentialInformation=redactConfidentialInformation,

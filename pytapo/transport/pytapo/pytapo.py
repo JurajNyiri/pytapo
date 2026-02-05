@@ -9,6 +9,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from .TlsAdapter import TlsAdapter
 from ...media_stream._utils import generate_nonce
+from ...asyncHandler import AsyncHandler
 from .const import (
     RETRY_BACKOFF_SECONDS,
     RETRYABLE_ERROR_CODES,
@@ -24,6 +25,7 @@ class pyTapo:
         controlPort: int,
         user: str,
         password: str,
+        asyncHandler: AsyncHandler,
         retryStok=True,
         hass=None,
         cloudPassword="",
@@ -36,6 +38,7 @@ class pyTapo:
         self.password = password
         self.retryStok = retryStok
         self.hass = hass
+        self.asyncHandler = asyncHandler
         self.passwordEncryptionMethod = None
         self.seq = None
         self.lsk = None
@@ -73,9 +76,10 @@ class pyTapo:
         await self.authenticate()
         authValid = True
         url = self._getHostURL()
+        secure_connection = await self._isSecureConnectionAsync()
 
         fullRequest = request
-        if self.seq is not None and self._isSecureConnection():
+        if self.seq is not None and secure_connection:
             fullRequest = {
                 "method": "securePassthrough",
                 "params": {
@@ -102,7 +106,7 @@ class pyTapo:
             self.seq += 1
 
         try:
-            res = self._request(
+            res = await self._requestAsync(
                 "POST",
                 url,
                 data=json.dumps(fullRequest),
@@ -115,7 +119,7 @@ class pyTapo:
         except ValueError as err:
             return await self._retry_on_exception(request, retry, err)
         if (
-            self._isSecureConnection()
+            secure_connection
             and "result" in responseData
             and "response" in responseData["result"]
         ):
@@ -152,12 +156,19 @@ class pyTapo:
 
         return responseJSON
 
+    async def _requestAsync(self, method, url, **kwargs):
+        return await self._run_blocking(self._request, method, url, **kwargs)
+
+    async def _run_blocking(self, func, *args, **kwargs):
+        if self.asyncHandler is None or self.asyncHandler.hass is None:
+            return func(*args, **kwargs)
+        return await self.asyncHandler.hass.async_add_executor_job(
+            lambda: func(*args, **kwargs)
+        )
+
     async def authenticate(self, retry=False):
         if not self.stok:
-            if self.hass is None:
-                return self._refreshStok()
-            else:
-                await self.hass.async_add_executor_job(self._refreshStok)
+            await self._run_blocking(self._refreshStok)
         return True
 
     def getEncryptionMethod(self):
@@ -338,6 +349,11 @@ class pyTapo:
             response.close()
             session.close()
         return response
+
+    async def _isSecureConnectionAsync(self):
+        if self.isSecureConnectionCached is not None:
+            return self.isSecureConnectionCached
+        return await self._run_blocking(self._isSecureConnection)
 
     def _isSecureConnection(self):
         self.debugLog("_isSecureConnection called")
