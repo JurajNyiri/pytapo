@@ -46,7 +46,7 @@ class Transport(Kasa, Klap, pyTapo):
         return await self.transport.send(self, request, retry)
 
     def getEncryptionMethod(self):
-        self.transport.getEncryptionMethod(self)
+        return self.transport.getEncryptionMethod(self)
 
     async def close(self):
         await self.transport.close(self)
