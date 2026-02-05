@@ -1,1 +1,1 @@
-TRANSPORT_METHODS = ["kasa", "klap"]
+TRANSPORT_METHODS = ["kasa", "klap", "pytapo"]

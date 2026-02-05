@@ -4,13 +4,14 @@ import hashlib
 import inspect
 from .kasa.kasa import Kasa
 from .klap.klap import Klap
+from .pytapo.pytapo import pyTapo
 from .const import TRANSPORT_METHODS
 from ..logger import Logger
 from contextlib import suppress
 from typing import Any
 
 
-class Transport(Kasa, Klap):
+class Transport(Kasa, Klap, pyTapo):
 
     def __init__(
         self,
@@ -29,7 +30,7 @@ class Transport(Kasa, Klap):
         self.host = host
         self.controlPort = controlPort
 
-        backend_cls = {"kasa": Kasa, "klap": Klap}[self.method]
+        backend_cls = {"kasa": Kasa, "klap": Klap, "pytapo": pyTapo}[self.method]
         self.transport = backend_cls
 
         # keep only kwargs that backend __init__ accepts

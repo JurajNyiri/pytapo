@@ -17,8 +17,6 @@ from .media_stream._utils import StreamType
 
 
 class Tapo:
-    def getControlHost(self):
-        return f"{self.host}:{self.controlPort}"
 
     def __init__(
         self,
@@ -39,6 +37,7 @@ class Tapo:
         hass=None,
         playerID=None,
         printWarnInformation=True,
+        transportMethod=None,
     ):
 
         self.logger = Logger(printDebugInformation, printWarnInformation)
@@ -67,10 +66,13 @@ class Tapo:
         else:
             self.playerID = playerID
 
-        if self.isKLAP:
-            transport_method = "klap"
+        if transportMethod is None:
+            if self.isKLAP:
+                transport_method = "klap"
+            else:
+                transport_method = "kasa"
         else:
-            transport_method = "kasa"
+            transport_method = transportMethod
 
         self.logger.debugLog(f"Transport method determined: {transport_method}")
 
@@ -82,6 +84,11 @@ class Tapo:
             logger=self.logger,
             method=transport_method,
             KLAPVersion=self.KLAPVersion,
+            retryStok=retryStok,
+            hass=hass,
+            cloudPassword=cloudPassword,
+            reuseSession=reuseSession,
+            redactConfidentialInformation=redactConfidentialInformation,
         )
 
         self.klapTransport = None
