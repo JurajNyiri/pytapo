@@ -657,13 +657,13 @@ class pyTapo:
                 and error_code != -40411
             ):
                 loginRetryCount += 1
-                self.warnLog(
+                self.debugLog(
                     f"Unexpected response ({error_code}), retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
                 )
                 self._clearSessionSync()
                 time.sleep(RETRY_BACKOFF_SECONDS)
                 return self._refreshStok(loginRetryCount)
-        self.warnLog(
+        self.debugLog(
             f"Unexpected response ({error_code}), raising Exception: {responseData}"
         )
         raise Exception("Invalid authentication data")
