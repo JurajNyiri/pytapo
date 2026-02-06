@@ -170,11 +170,11 @@ class Downloader:
                             else:
                                 resp = await stream.__anext__()
                         except StopAsyncIteration:
-                            self.tapo.debugLog("Received end of stream.")
+                            self.tapo.logger.debugLog("Received end of stream.")
                             break
                         except asyncio.TimeoutError:
                             # Camera stopped responding mid-download; break out so we can retry.
-                            self.tapo.debugLog(
+                            self.tapo.logger.debugLog(
                                 "Timed out waiting for recording data, retrying."
                             )
                             break
@@ -233,7 +233,7 @@ class Downloader:
                                     and "status" in json_data["params"]
                                     and json_data["params"]["status"] == "finished"
                                 ):
-                                    self.tapo.debugLog(
+                                    self.tapo.logger.debugLog(
                                         "Received json notification about finished stream."
                                     )
                                     downloadedFull = True
@@ -248,7 +248,7 @@ class Downloader:
                                     downloading = False
                                     break
                             except JSONDecodeError:
-                                self.tapo.debugLog(
+                                self.tapo.logger.debugLog(
                                     "Unable to parse JSON sent from device"
                                 )
                     if downloading:
