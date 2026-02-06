@@ -71,93 +71,101 @@ class pyTapo:
         )
         self.session = False
         self.isSecureConnectionCached = None
+        self._send_lock = None
+        self._send_lock_loop = None
+        self._send_lock_owner = None
+        self._send_lock_depth = 0
 
     async def send(self, request, retry=0):
         self.debugLog(f"send called, retry: {retry}")
         self.debugLog("Request:")
         self.debugLog(request)
-        await self.authenticate()
-        authValid = True
-        url = self._getHostURL()
-        secure_connection = await self._isSecureConnectionAsync()
+        await self._acquire_send_lock()
+        try:
+            await self.authenticate()
+            authValid = True
+            url = self._getHostURL()
+            secure_connection = await self._isSecureConnectionAsync()
 
-        fullRequest = request
-        if self.seq is not None and secure_connection:
-            fullRequest = {
-                "method": "securePassthrough",
-                "params": {
-                    "request": base64.b64encode(
-                        self._encryptRequest(json.dumps(request).encode("utf-8"))
-                    ).decode("utf8")
-                },
-            }
-            self.headers["Seq"] = str(self.seq)
-            try:
-                self.headers["Tapo_tag"] = self._getTag(fullRequest)
-            except Exception as err:
-                if str(err) == "Failure detecting hashing algorithm.":
-                    authValid = False
-                    self.debugLog(
-                        "Failure detecting hashing algorithm on getTag, reauthenticating."
+            fullRequest = request
+            if self.seq is not None and secure_connection:
+                fullRequest = {
+                    "method": "securePassthrough",
+                    "params": {
+                        "request": base64.b64encode(
+                            self._encryptRequest(json.dumps(request).encode("utf-8"))
+                        ).decode("utf8")
+                    },
+                }
+                self.headers["Seq"] = str(self.seq)
+                try:
+                    self.headers["Tapo_tag"] = self._getTag(fullRequest)
+                except Exception as err:
+                    if str(err) == "Failure detecting hashing algorithm.":
+                        authValid = False
+                        self.debugLog(
+                            "Failure detecting hashing algorithm on getTag, reauthenticating."
+                        )
+                    else:
+                        raise err
+                if not authValid:
+                    return await self._retry_or_return(
+                        request, retry, "Auth invalid on getTag", None
                     )
-                else:
-                    raise err
+                self.seq += 1
+
+            try:
+                res = await self._requestAsync(
+                    "POST",
+                    url,
+                    data=json.dumps(fullRequest),
+                    headers=self.headers,
+                    verify=False,
+                )
+                responseData = res.json()
+            except requests.RequestException as err:
+                return await self._retry_on_exception(request, retry, err)
+            except ValueError as err:
+                return await self._retry_on_exception(request, retry, err)
+            if (
+                secure_connection
+                and "result" in responseData
+                and "response" in responseData["result"]
+            ):
+                encryptedResponse = responseData["result"]["response"]
+                encryptedResponse = base64.b64decode(responseData["result"]["response"])
+                try:
+                    responseJSON = json.loads(self._decryptResponse(encryptedResponse))
+                except Exception as err:
+                    if (
+                        str(err) == "Padding is incorrect."
+                        or str(err) == "PKCS#7 padding is incorrect."
+                    ):
+                        self.debugLog(f"{str(err)} Reauthenticating.")
+                        authValid = False
+                        responseJSON = responseData
+                    else:
+                        raise err
+            else:
+                responseJSON = responseData
+
             if not authValid:
                 return await self._retry_or_return(
-                    request, retry, "Auth invalid on getTag", None
+                    request, retry, "Auth invalid during decrypt", responseJSON
                 )
-            self.seq += 1
+            if self._has_top_error_code(responseJSON, RETRYABLE_ERROR_CODES):
+                return await self._retry_or_return(
+                    request, retry, "Retryable error code detected", responseJSON
+                )
+            if self._has_top_error_code(responseJSON, AUTH_ERROR_CODES):
+                self.debugLog("Authentication error code detected, clearing session.")
+                await self._clearSession()
 
-        try:
-            res = await self._requestAsync(
-                "POST",
-                url,
-                data=json.dumps(fullRequest),
-                headers=self.headers,
-                verify=False,
-            )
-            responseData = res.json()
-        except requests.RequestException as err:
-            return await self._retry_on_exception(request, retry, err)
-        except ValueError as err:
-            return await self._retry_on_exception(request, retry, err)
-        if (
-            secure_connection
-            and "result" in responseData
-            and "response" in responseData["result"]
-        ):
-            encryptedResponse = responseData["result"]["response"]
-            encryptedResponse = base64.b64decode(responseData["result"]["response"])
-            try:
-                responseJSON = json.loads(self._decryptResponse(encryptedResponse))
-            except Exception as err:
-                if (
-                    str(err) == "Padding is incorrect."
-                    or str(err) == "PKCS#7 padding is incorrect."
-                ):
-                    self.debugLog(f"{str(err)} Reauthenticating.")
-                    authValid = False
-                    responseJSON = responseData
-                else:
-                    raise err
-        else:
-            responseJSON = responseData
+            self.debugLog(f"Raw response: {responseJSON}")
 
-        if not authValid:
-            return await self._retry_or_return(
-                request, retry, "Auth invalid during decrypt", responseJSON
-            )
-        if self._has_top_error_code(responseJSON, RETRYABLE_ERROR_CODES):
-            return await self._retry_or_return(
-                request, retry, "Retryable error code detected", responseJSON
-            )
-        if self._has_top_error_code(responseJSON, AUTH_ERROR_CODES):
-            self.debugLog("Authentication error code detected, clearing session.")
-            await self._clearSession()
-
-        self.debugLog(f"Raw response: {responseJSON}")
-
-        return responseJSON
+            return responseJSON
+        finally:
+            await self._release_send_lock()
 
     async def _requestAsync(self, method, url, **kwargs):
         return await self._run_blocking(self._request, method, url, **kwargs)
@@ -170,9 +178,13 @@ class pyTapo:
         )
 
     async def authenticate(self, retry=False):
-        if not self.stok:
-            await self._run_blocking(self._refreshStok)
-        return True
+        await self._acquire_send_lock()
+        try:
+            if not self.stok:
+                await self._run_blocking(self._refreshStok)
+            return True
+        finally:
+            await self._release_send_lock()
 
     def getEncryptionMethod(self):
         return self.passwordEncryptionMethod
@@ -206,6 +218,44 @@ class pyTapo:
             return int(error_code)
         except Exception:
             return None
+
+    def _ensure_send_lock(self):
+        loop = asyncio.get_running_loop()
+        if self._send_lock is None or self._send_lock_loop != loop:
+            self._send_lock = asyncio.Lock()
+            self._send_lock_loop = loop
+            self._send_lock_owner = None
+            self._send_lock_depth = 0
+        return self._send_lock
+
+    async def _acquire_send_lock(self):
+        lock = self._ensure_send_lock()
+        task = asyncio.current_task()
+        if self._send_lock_owner == task or (
+            task is None and self._send_lock_owner is None and self._send_lock_depth > 0
+        ):
+            self._send_lock_depth += 1
+            return
+        await lock.acquire()
+        self._send_lock_owner = task
+        self._send_lock_depth = 1
+
+    async def _release_send_lock(self):
+        task = asyncio.current_task()
+        if not (
+            self._send_lock_owner == task
+            or (
+                task is None
+                and self._send_lock_owner is None
+                and self._send_lock_depth > 0
+            )
+        ):
+            return
+        self._send_lock_depth -= 1
+        if self._send_lock_depth <= 0:
+            self._send_lock_owner = None
+            if self._send_lock is not None:
+                self._send_lock.release()
 
     def _has_top_error_code(self, response, error_codes):
         if not isinstance(response, dict):
