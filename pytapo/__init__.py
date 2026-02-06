@@ -1546,7 +1546,8 @@ class Tapo:
             base_fields["digital_sensitivity"] = self.__getSensitivityNumber(
                 sensitivity
             )
-            base_fields["sensitivity"] = self.__getSensitivityLabel(sensitivity)
+            if isinstance(sensitivity, str):
+                base_fields["sensitivity"] = self.__getSensitivityLabel(sensitivity)
 
         if chn_id:
             per_channel_extra_fields_by_chn = {
@@ -2106,9 +2107,11 @@ class Tapo:
         )
         return self.executeFunction("setLightFrequencyInfo", data)
 
+    # no need for chn_id, because setting it only works on chn_id 1, when setter called on 2, nothing happens, when on 1, both adjusted
     def getLightFrequencyMode(self) -> str:
         return self.__getImageCommon("light_freq_mode")
 
+    # no need for chn_id, because setting it only works on chn_id 1, when setter called on 2, nothing happens, when on 1, both adjusted
     def setLightFrequencyMode(self, mode):
         # todo: auto does not work on some child cameras?
         allowed_modes = ["auto", "50", "60"]
@@ -2426,7 +2429,12 @@ class Tapo:
                         },
                         {
                             "method": "getLdc",
-                            "params": {"image": {"name": ["switch", "common"]}},
+                            "params": {"image": {"name": ["switch"]}},
+                        },
+                        # needs to be duplicated twice, once for switch, once for common for chnID to work properly
+                        {
+                            "method": "getLdc",
+                            "params": {"image": {"name": ["common"]}},
                         },
                         {
                             "method": "getLastAlarmInfo",
@@ -2628,6 +2636,7 @@ class Tapo:
                     "getNightVisionModeConfig": "image",
                     "getWhitelampConfig": "image",
                     "getLightFrequencyInfo": "image",
+                    "getLdc": "image",
                 }
                 for request in requestData["params"]["requests"]:
                     root_key = method_chn_roots.get(request.get("method"))
@@ -2703,65 +2712,54 @@ class Tapo:
 
         if chn_id:
             method_normalization = {
-                "getLinecrossingDetectionConfig": (
-                    "linecrossing_detection",
-                    "detection_chn",
-                    "detection",
-                ),
-                "getDetectionConfig": (
-                    "motion_detection",
-                    "motion_det_chn",
-                    "motion_det",
-                ),
-                "getPersonDetectionConfig": (
-                    "people_detection",
-                    "detection_chn",
-                    "detection",
-                ),
-                "getVehicleDetectionConfig": (
-                    "vehicle_detection",
-                    "detection_chn",
-                    "detection",
-                ),
-                "getPetDetectionConfig": (
-                    "pet_detection",
-                    "detection_chn",
-                    "detection",
-                ),
-                "getTamperDetectionConfig": (
-                    "tamper_detection",
-                    "tamper_det_chn",
-                    "tamper_det",
-                ),
-                "getNightVisionModeConfig": ("image", "switch_chn", "switch"),
-                "getWhitelampConfig": ("image", "switch_chn", "switch"),
-                "getLightFrequencyInfo": ("image", "common_chn", "common"),
+                "getLinecrossingDetectionConfig": [
+                    ("linecrossing_detection", "detection_chn", "detection")
+                ],
+                "getDetectionConfig": [
+                    ("motion_detection", "motion_det_chn", "motion_det")
+                ],
+                "getPersonDetectionConfig": [
+                    ("people_detection", "detection_chn", "detection")
+                ],
+                "getVehicleDetectionConfig": [
+                    ("vehicle_detection", "detection_chn", "detection")
+                ],
+                "getPetDetectionConfig": [
+                    ("pet_detection", "detection_chn", "detection")
+                ],
+                "getTamperDetectionConfig": [
+                    ("tamper_detection", "tamper_det_chn", "tamper_det")
+                ],
+                "getNightVisionModeConfig": [("image", "switch_chn", "switch")],
+                "getWhitelampConfig": [("image", "switch_chn", "switch")],
+                "getLightFrequencyInfo": [("image", "common_chn", "common")],
+                "getLdc": [
+                    ("image", "switch_chn", "switch"),
+                    ("image", "common_chn", "common"),
+                ],
             }
-            for method, (
-                root_key,
-                per_chn_key,
-                single_key,
-            ) in method_normalization.items():
+            for method, mappings in method_normalization.items():
                 if method not in returnData:
                     continue
                 for entry in returnData[method]:
                     if not entry:
                         continue
-                    root = entry.get(root_key)
-                    if not isinstance(root, dict):
-                        continue
-                    per_chn = root.get(per_chn_key)
-                    if not isinstance(per_chn, dict):
-                        continue
-                    normalized = (
-                        self.__unwrapSingleChn(chn_id, per_chn)
-                        if len(chn_id) == 1
-                        else per_chn
-                    )
-                    if normalized is None:
-                        continue
-                    root[single_key] = normalized
-                    del root[per_chn_key]
+                    for root_key, per_chn_key, single_key in mappings:
+                        root = entry.get(root_key)
+                        if not isinstance(root, dict):
+                            continue
+                        per_chn = root.get(per_chn_key)
+                        if not isinstance(per_chn, dict):
+                            continue
+                        normalized = (
+                            self.__unwrapSingleChn(chn_id, per_chn)
+                            if len(chn_id) == 1
+                            else per_chn
+                        )
+                        if normalized is None:
+                            continue
+                        root[single_key] = normalized
+                        del root[per_chn_key]
 
         if "getPresetConfig" in returnData and len(returnData["getPresetConfig"]) == 1:
             if returnData["getPresetConfig"][0]:
