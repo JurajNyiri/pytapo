@@ -856,11 +856,24 @@ class Tapo:
             {"auto_upgrade": {"common": params}},
         )
 
-    def getRotationStatus(self):
-        return self.executeFunction(
-            "getRotationStatus",
-            {"image": {"name": ["switch"]}},
-        )
+    def getRotationStatus(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getRotationStatus", params)
+        if not chn_id:
+            return data
+
+        image = data.get("image", {})
+        switch_chn = image.get("switch_chn")
+        if isinstance(switch_chn, dict):
+            result = {
+                str(chn): switch_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in switch_chn
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+        return data
 
     def getLED(self):
         return self.executeFunction(
@@ -1478,6 +1491,11 @@ class Tapo:
             return data_by_chn.get(str(chn_id[0]))
         return data_by_chn
 
+    def __compareOrNone(self, value, expected):
+        if value is None:
+            return None
+        return value == expected
+
     def __buildChnAwareConfig(
         self,
         root_key: str,
@@ -1950,21 +1968,47 @@ class Tapo:
 
     # Switches
 
-    def __getImageSwitch(self, switch: str) -> str:
-        data = self.executeFunction("getLdc", {"image": {"name": ["switch"]}})
-        switches = data["image"]["switch"]
+    def __getImageSwitch(self, switch: str, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getLdc", params)
+        image = data.get("image", {})
+        if chn_id:
+            switch_chn = image.get("switch_chn")
+            if isinstance(switch_chn, dict):
+                result = {
+                    str(chn): switch_chn[str(chn)].get(switch)
+                    for chn in chn_id
+                    if str(chn) in switch_chn
+                }
+                return self.__unwrapSingleChn(chn_id, result)
+        switches = image.get("switch", {})
         if switch not in switches:
             raise Exception("Switch {} is not supported by this camera".format(switch))
         return switches[switch]
 
-    def __setImageSwitch(self, switch: str, value: str):
-        return self.executeFunction("setLdc", {"image": {"switch": {switch: value}}})
+    def __setImageSwitch(self, switch: str, value: str, chn_id: list = None):
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields={switch: value},
+        )
+        return self.executeFunction("setLdc", data)
 
-    def getLensDistortionCorrection(self):
-        return self.__getImageSwitch("ldc") == "on"
+    def getLensDistortionCorrection(self, chn_id: list = None):
+        value = self.__getImageSwitch("ldc", chn_id=chn_id)
+        if chn_id and isinstance(value, dict):
+            return {
+                key: self.__compareOrNone(val, "on")
+                for key, val in value.items()
+            }
+        return self.__compareOrNone(value, "on")
 
-    def setLensDistortionCorrection(self, enable):
-        return self.__setImageSwitch("ldc", "on" if enable else "off")
+    def setLensDistortionCorrection(self, enable, chn_id: list = None):
+        return self.__setImageSwitch("ldc", "on" if enable else "off", chn_id=chn_id)
 
     def getDayNightMode(self, chn_id: list = None):
         def to_day_night_mode(raw_value: str) -> str:
@@ -2037,29 +2081,60 @@ class Tapo:
         )
         return self.executeFunction("setNightVisionModeConfig", data)
 
-    def getImageFlipVertical(self):
+    def getImageFlipVertical(self, chn_id: list = None):
         if self.childID:
-            return self.getRotationStatus()["image"]["switch"]["flip_type"] == "center"
+            data = self.getRotationStatus(chn_id)
+            if chn_id:
+                if isinstance(data, dict) and "flip_type" in data:
+                    return self.__compareOrNone(data["flip_type"], "center")
+                if isinstance(data, dict):
+                    return {
+                        key: self.__compareOrNone(val.get("flip_type"), "center")
+                        for key, val in data.items()
+                        if isinstance(val, dict)
+                    }
+                return data
+            return data["image"]["switch"]["flip_type"] == "center"
         else:
-            return self.__getImageSwitch("flip_type") == "center"
+            value = self.__getImageSwitch("flip_type", chn_id=chn_id)
+            if chn_id and isinstance(value, dict):
+                return {
+                    key: self.__compareOrNone(val, "center")
+                    for key, val in value.items()
+                }
+            return self.__compareOrNone(value, "center")
 
-    def setImageFlipVertical(self, enable):
+    def setImageFlipVertical(self, enable, chn_id: list = None):
         if self.childID:
-            return self.setRotationStatus("center" if enable else "off")
+            return self.setRotationStatus("center" if enable else "off", chn_id=chn_id)
         else:
-            return self.__setImageSwitch("flip_type", "center" if enable else "off")
+            return self.__setImageSwitch(
+                "flip_type", "center" if enable else "off", chn_id=chn_id
+            )
 
-    def setRotationStatus(self, flip_type):
-        return self.executeFunction(
-            "setRotationStatus",
-            {"image": {"switch": {"flip_type": flip_type}}},
+    def setRotationStatus(self, flip_type, chn_id: list = None):
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields={"flip_type": flip_type},
         )
+        return self.executeFunction("setRotationStatus", data)
 
-    def getForceWhitelampState(self) -> bool:
-        return self.__getImageSwitch("force_wtl_state") == "on"
+    def getForceWhitelampState(self, chn_id: list = None) -> bool:
+        value = self.__getImageSwitch("force_wtl_state", chn_id=chn_id)
+        if chn_id and isinstance(value, dict):
+            return {
+                key: self.__compareOrNone(val, "on")
+                for key, val in value.items()
+            }
+        return self.__compareOrNone(value, "on")
 
-    def setForceWhitelampState(self, enable: bool):
-        return self.__setImageSwitch("force_wtl_state", "on" if enable else "off")
+    def setForceWhitelampState(self, enable: bool, chn_id: list = None):
+        return self.__setImageSwitch(
+            "force_wtl_state", "on" if enable else "off", chn_id=chn_id
+        )
 
     # Common
 
