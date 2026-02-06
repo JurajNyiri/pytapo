@@ -1,47 +1,22 @@
 #
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
-import hashlib
 import json
 import requests
-import asyncio
-import logging
 import uuid
-
-from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import AuthenticationError, SMART_RETRYABLE_ERRORS, SmartErrorCode
-from kasa import DeviceConfig, DeviceError, Discover
-from kasa import Credentials
+from .transport.transport import Transport
+from .logger import Logger
+from .asyncHandler import AsyncHandler
 
 from datetime import datetime, timedelta
 from warnings import warn
 
-from .const import ERROR_CODES, MAX_LOGIN_RETRIES, EncryptionMethod
+from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
 from .media_stream._utils import StreamType
 
-LOGGER = logging.getLogger("pytapo")
-
-
-# Supress Error messages, we handle them internally and log if necessary
-class SuppressPythonKasaLogs(logging.Filter):
-    def filter(self, record):
-        return (
-            "Response status is 403" not in record.getMessage()
-            and "Server disconnected" not in record.getMessage()
-            and "Response status is 400, Request was" not in record.getMessage()
-        )
-
 
 class Tapo:
-    def debugLog(self, msg):
-        if self.printDebugInformation is True:
-            print(msg)
-        elif callable(self.printDebugInformation):
-            self.printDebugInformation(msg)
-
-    def getControlHost(self):
-        return f"{self.host}:{self.controlPort}"
 
     def __init__(
         self,
@@ -51,7 +26,7 @@ class Tapo:
         cloudPassword="",
         superSecretKey="",
         childID=None,
-        reuseSession=False,
+        reuseSession=True,
         printDebugInformation=False,
         controlPort=443,
         retryStok=True,
@@ -61,12 +36,13 @@ class Tapo:
         KLAPVersion=None,
         hass=None,
         playerID=None,
+        printWarnInformation=True,
+        transportMethod=None,
     ):
-        logger = logging.getLogger("kasa.transports.klaptransport")
-        logger.addFilter(SuppressPythonKasaLogs())
 
-        self.redactConfidentialInformation = redactConfidentialInformation
-        self.printDebugInformation = printDebugInformation
+        self.logger = Logger(printDebugInformation, printWarnInformation)
+        self.asyncHandler = AsyncHandler(hass)
+
         self.host = host
         if hass is not None:
             self.hass = hass
@@ -90,10 +66,31 @@ class Tapo:
         else:
             self.playerID = playerID
 
-        # python-kasa device handle
-        self.dev = None
-        self._kasa_ready = False
-        self._loop = None
+        if transportMethod is None:
+            if self.isKLAP:
+                transport_method = "klap"
+            else:
+                transport_method = "pytapo"
+        else:
+            transport_method = transportMethod
+
+        self.logger.debugLog(f"Transport method determined: {transport_method}")
+
+        self.transport = Transport(
+            host=host,
+            controlPort=controlPort,
+            user=user,
+            password=password,
+            logger=self.logger,
+            method=transport_method,
+            KLAPVersion=self.KLAPVersion,
+            retryStok=retryStok,
+            hass=hass,
+            asyncHandler=self.asyncHandler,
+            cloudPassword=cloudPassword,
+            reuseSession=reuseSession,
+            redactConfidentialInformation=redactConfidentialInformation,
+        )
 
         self.klapTransport = None
         self.user = user
@@ -103,30 +100,10 @@ class Tapo:
         self.userID = False
         self.childID = childID
         self.timeCorrection = False
-        self.reuseSession = reuseSession
-        self.isSecureConnectionCached = None
         if streamPort is None:
             self.streamPort = 8800
         else:
             self.streamPort = streamPort
-        self.headers = {
-            "Host": self.getControlHost(),
-            "Referer": "https://{host}".format(host=self.getControlHost()),
-            "Accept": "application/json",
-            "Accept-Encoding": "gzip, deflate",
-            "User-Agent": "Tapo CameraClient Android",
-            "Connection": "close",
-            "requestByApp": "true",
-            "Content-Type": "application/json; charset=UTF-8",
-        }
-        self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
-        self.hashedSha256Password = (
-            hashlib.sha256(password.encode("utf8")).hexdigest().upper()
-        )
-        self.hashedCloudPassword = (
-            hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
-        )
-        self.session = False
 
         self.basicInfo = self.getBasicInfo()
         if "type" in self.basicInfo:
@@ -157,295 +134,19 @@ class Tapo:
         return "{host}:{streamPort}".format(host=self.host, streamPort=self.streamPort)
 
     def _isKLAP(self, timeout=2):
+        self.logger.debugLog("_isKLAP: Finding out whether device is KLAP...")
         try:
             url = f"http://{self.host}:{self.controlPort}"
             response = requests.get(url, timeout=timeout)
-            return "200 OK" in response.text
-        except requests.RequestException:
+            result = "200 OK" in response.text
+            self.logger.debugLog(f"_isKLAP: Device is KLAP result: {result}")
+            return result
+        except requests.RequestException as err:
+            self.logger.debugLog(f"_isKLAP: Device is not KLAP: {err}")
             return False
 
-    async def initiateKlapTransport(self, version=1):
-        try:
-            if self.klapTransport is None:
-                creds = Credentials(self.user, self.password)
-                config = DeviceConfig(
-                    self.host, port_override=self.controlPort, credentials=creds
-                )
-                if version == 1:
-                    transport = KlapTransport(config=config)
-                elif version == 2:
-                    transport = KlapTransportV2(config=config)
-                await transport.perform_handshake()
-                self.klapTransport = transport
-                return self.klapTransport
-        finally:
-            await transport.close()
-
-    async def sendKlapRequest(self, request, retry=0):
-        try:
-            if self.klapTransport is None:
-                await self.ensureAuthenticated()
-            response = await self.klapTransport.send(json.dumps(request))
-            return response
-        except Exception as err:
-            if (
-                "Response status is 403, Request was" in str(err)
-                or "Response status is 400, Request was" in str(err)
-                or "Server disconnected" in str(err)
-            ):
-                raise Exception("PyTapo KLAP Error #6: " + str(err))
-
-            self.debugLog("Retrying request... Error: " + str(err))
-            if retry < 5:
-                await self.ensureAuthenticated()
-                return await self.sendKlapRequest(request, retry + 1)
-            else:
-                raise Exception("PyTapo KLAP Error #1: " + str(err))
-        finally:
-            if self.klapTransport is not None:
-                await self.klapTransport.close()
-
-    def _log_kasa_connection_info(self):
-        ct = getattr(getattr(self.dev, "config", None), "connection_type", None)
-        transport = getattr(self.dev, "protocol", None)
-        transport_impl = getattr(transport, "_transport", None)
-
-        device_info = {
-            "alias": getattr(self.dev, "alias", None),
-            "model": getattr(self.dev, "model", None),
-            "mac": getattr(self.dev, "mac", None),
-        }
-        hw_info = getattr(self.dev, "hw_info", {}) or {}
-        device_info["fw"] = hw_info.get("sw_ver") or hw_info.get("fw_ver")
-
-        self.debugLog(f"kasa device: {device_info}")
-        self.debugLog(f"kasa chosen encryption: {self.getEncryptionMethod()}")
-
-        if ct:
-            fields = {
-                "device_family": getattr(ct, "device_family", None),
-                "encryption_type": getattr(ct, "encryption_type", None),
-                "https": getattr(ct, "https", None),
-                "login_version": getattr(ct, "login_version", None),
-                "http_port": getattr(ct, "http_port", None),
-            }
-            self.debugLog(
-                f"kasa connection_type: {fields}, "
-                f"protocol={type(transport).__name__}, "
-                f"transport={type(transport_impl).__name__ if transport_impl else None}"
-            )
-        else:
-            self.debugLog("kasa connection_type: <unavailable>")
-
-    async def ensureAuthenticated(self, retry=False):
-        if self.isKLAP:
-            if self.klapTransport is None:
-                if self.KLAPVersion is None:
-                    try:
-                        await self.initiateKlapTransport(1)
-                        self.KLAPVersion = 1
-                    except AuthenticationError:
-                        try:
-                            await self.initiateKlapTransport(2)
-                            self.KLAPVersion = 2
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #2: " + str(err))
-                    except Exception as err:
-                        raise Exception("PyTapo KLAP Error #3: " + str(err))
-                else:
-                    if self.KLAPVersion == 1:
-                        try:
-                            await self.initiateKlapTransport(1)
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #4: " + str(err))
-                    elif self.KLAPVersion == 2:
-                        try:
-                            await self.initiateKlapTransport(2)
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #5: " + str(err))
-            return True
-
-        if self.dev is None:
-            self.debugLog("Creating new Kasa-Tapo instance...")
-            creds = Credentials(self.user, self.password)
-            try:
-                self.dev = await Discover.discover_single(self.host, credentials=creds)
-            except TimeoutError as err:
-                raise Exception(
-                    f"Failed to establish a new connection: {str(err)}"
-                ) from err
-            except Exception as err:
-                if retry is False:
-                    self.debugLog("Ensure authenticated failed, retrying. Error was:")
-                    self.debugLog(err)
-                    return await self.ensureAuthenticated(True)
-                else:
-                    raise err
-            if self.dev is None:
-                raise Exception("Device not found via python-kasa Discover")
-            self.debugLog(
-                f"kasa discover_single: host={self.host} proto={type(self.dev.protocol).__name__}"
-            )
-        if not self._kasa_ready:
-            try:
-                self.debugLog("kasa update: starting initial state fetch")
-                self._log_kasa_connection_info()
-                await self.dev.update()
-                self._kasa_ready = True
-            except AuthenticationError as err:
-                self.debugLog(f"kasa update failed (auth): {err}")
-                await self._close_kasa_device()
-                raise Exception("Invalid authentication data") from err
-            except DeviceError as err:
-                code = getattr(err, "error_code", None)
-                self.debugLog(f"kasa update failed (device error): {err}")
-                await self._close_kasa_device()
-                if code == SmartErrorCode.DEVICE_BLOCKED:
-                    raise Exception(f"Temporary Suspension: {str(err)}") from err
-                raise
-            except Exception as err:
-                self.debugLog(f"kasa update failed: {err}")
-                await self._close_kasa_device()
-                raise
-        return True
-
-    async def _kasa_send(self, request, retry=0):
-        """Send a smart request via kasa protocol.query (with format translation)."""
-        await self.ensureAuthenticated()
-        self.debugLog("Converting request:")
-        self.debugLog(request)
-
-        proto = self.dev.protocol
-        kasa_request = request
-        request_method = None
-        raw_response = None
-
-        if isinstance(request, dict) and "method" in request:
-            request_method = request.get("method")
-            if request_method == "multipleRequest":
-                params = request.get("params") or {}
-                kasa_request = {"multipleRequest": params}
-            elif request_method in {"get", "set", "do"}:
-                payload = {k: v for k, v in request.items() if k != "method"}
-                if "params" in payload and len(payload) == 1:
-                    payload = payload["params"]
-                kasa_request = {request_method: payload}
-            else:
-                if "params" in request and len(request) == 2:
-                    kasa_request = {request_method: request["params"]}
-                else:
-                    payload = {k: v for k, v in request.items() if k != "method"}
-                    kasa_request = (
-                        {request_method: payload} if payload else request_method
-                    )
-
-        self.debugLog("Converted query:")
-        self.debugLog(kasa_request)
-
-        original_send = proto._transport.send
-
-        self.debugLog("Overriding proto._transport.send...")
-
-        # Capture original error codes
-        async def send_wrapper(payload):
-            nonlocal raw_response
-            raw_response = await original_send(payload)
-            self.debugLog(f"Raw response: {raw_response}")
-            return raw_response
-
-        proto._transport.send = send_wrapper
-
-        self.debugLog("Sending query...")
-        try:
-            result = await proto.query(kasa_request)
-        except DeviceError as err:
-            code = getattr(err, "error_code", None)
-            self.debugLog(f"Received DeviceError, code: {code}")
-
-            if code == SmartErrorCode.INTERNAL_UNKNOWN_ERROR:
-                if isinstance(raw_response, dict) and "error_code" in raw_response:
-                    self.debugLog(
-                        f"Captured raw device error: {raw_response.get('error_code')}"
-                    )
-                    return raw_response
-            if code == SmartErrorCode.DEVICE_BLOCKED:
-                raise Exception(f"Temporary Suspension: {str(err)}") from err
-            raise
-        except Exception as err:
-            self.debugLog(f"Received error: {err}")
-            if retry < MAX_LOGIN_RETRIES:
-                self.debugLog("Resetting transport and retrying request.")
-                reset = getattr(proto._transport, "reset", None)
-                if reset is not None:
-                    self.debugLog("Requesting reset.")
-                    await reset()
-                else:
-                    self.debugLog("Recreating connection.")
-                    self.close()
-                return await self._kasa_send(request, retry + 1)
-            raise
-        finally:
-            proto._transport.send = original_send
-
-        converted = result
-        if request_method == "multipleRequest":
-            multi_result = (
-                result.get("multipleRequest") if isinstance(result, dict) else None
-            )
-            if multi_result is not None:
-                converted = {"error_code": 0, "result": multi_result}
-        elif request_method in {"get", "set", "do"}:
-            if request_method == "set":
-                converted = {"error_code": 0}
-            elif request_method == "get":
-                data = result.get("get", {}) if isinstance(result, dict) else {}
-                if isinstance(data, dict):
-                    converted = {"error_code": 0, **data}
-                else:
-                    converted = {"error_code": 0}
-            else:
-                data = result.get("do", {}) if isinstance(result, dict) else {}
-                if isinstance(data, dict):
-                    converted = (
-                        data if "error_code" in data else {"error_code": 0, **data}
-                    )
-                else:
-                    converted = {"error_code": 0}
-        elif isinstance(result, dict) and request_method and request_method in result:
-            converted = {"error_code": 0, "result": result[request_method]}
-
-        self.debugLog(f"Result: {converted}")
-        return converted
-
     def getEncryptionMethod(self):
-        """
-        Pick the password digest method for media/auth based on connection details.
-        - KLAP devices use SHA256.
-        - For python-kasa devices, prefer SHA256 when login_version >=2, else MD5.
-        Defaults to SHA256 if unknown.
-        """
-        if self.isKLAP:
-            return EncryptionMethod.SHA256
-        if self.dev and getattr(self.dev, "config", None):
-            ct = getattr(self.dev.config, "connection_type", None)
-            login_version = getattr(ct, "login_version", None) if ct else None
-            if login_version is not None and login_version < 2:
-                return EncryptionMethod.MD5
-        return EncryptionMethod.SHA256
-
-    def getHashedPassword(self):
-        if self.passwordEncryptionMethod == EncryptionMethod.MD5:
-            return self.hashedPassword
-        elif self.passwordEncryptionMethod == EncryptionMethod.SHA256:
-            return self.hashedSha256Password
-        else:
-            raise Exception("Failure detecting hashing algorithm.")
+        return self.transport.getEncryptionMethod()
 
     def responseIsOK(self, data=None):
         try:
@@ -507,32 +208,10 @@ class Tapo:
             )
 
     def close(self):
-        return self.executeAsyncExecutorJob(self._close_kasa_device)
-
-    async def _close_kasa_device(self):
-        try:
-            if self.dev and getattr(self.dev, "protocol", None):
-                await self.dev.protocol.close()
-        except Exception:
-            pass
-        self.dev = None
-        self._kasa_ready = False
-
-    def executeAsyncExecutorJob(self, job, *args):
-        if self.hass is None:
-            # reuse a dedicated loop so kasa aiohttp sessions stay alive between calls
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(self._loop)
-                return self._loop.run_until_complete(job(*args))
-            finally:
-                asyncio.set_event_loop(None)
-        else:
-            return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
+        return self.asyncHandler.executeAsyncExecutorJob(self.transport.close)
 
     def performRequest(self, requestData, loginRetryCount=0):
-        self.executeAsyncExecutorJob(self.ensureAuthenticated)
+        self.asyncHandler.executeAsyncExecutorJob(self.transport.authenticate)
         if self.childID:
             fullRequest = {
                 "method": "multipleRequest",
@@ -554,8 +233,8 @@ class Tapo:
             fullRequest = requestData
 
         if self.isKLAP:
-            responseJSON = self.executeAsyncExecutorJob(
-                self.sendKlapRequest, fullRequest
+            responseJSON = self.asyncHandler.executeAsyncExecutorJob(
+                self.transport.send, fullRequest
             )
             if (
                 "result" in responseJSON
@@ -570,7 +249,9 @@ class Tapo:
                         )
                     )
         else:
-            responseJSON = self.executeAsyncExecutorJob(self._kasa_send, fullRequest)
+            responseJSON = self.asyncHandler.executeAsyncExecutorJob(
+                self.transport.send, fullRequest
+            )
         if not self.responseIsOK(responseJSON):
             #  -40401: Invalid Stok
             if (
@@ -645,13 +326,16 @@ class Tapo:
         )  # pragma: no cover
 
     def getChildDevices(self):
-        childDevices = self.performRequest(
-            {
-                "method": "getChildDeviceList",
-                "params": {"childControl": {"start_index": 0}},
-            }
+        return self.executeFunction(
+            "getChildDeviceList",
+            {"childControl": {"start_index": 0}},
         )
-        return childDevices["result"]["child_device_list"]
+
+    def getChildDeviceComponentList(self):
+        return self.executeFunction(
+            "getChildDeviceComponentList",
+            {"childControl": {"start_index": 0}},
+        )
 
     def getTimeCorrection(self):
         if self.timeCorrection is False:
@@ -723,7 +407,19 @@ class Tapo:
     def getVideoCapability(self):
         return self.executeFunction(
             "getVideoCapability",
-            {"video_capability": {"name": "main"}},
+            {"video_capability": {"name": ["main", "minor"]}},
+        )
+
+    def getDualCamCapability(self):
+        return self.executeFunction(
+            "getDualCamCapability",
+            {"image_capability": {"name": ["dualCam"]}},
+        )
+
+    def getAllChnInfo(self):
+        return self.executeFunction(
+            "getAllChnInfo",
+            {"system": {"table": "chn_info"}},
         )
 
     # returns empty response for child devices
@@ -1160,11 +856,24 @@ class Tapo:
             {"auto_upgrade": {"common": params}},
         )
 
-    def getRotationStatus(self):
-        return self.executeFunction(
-            "getRotationStatus",
-            {"image": {"name": ["switch"]}},
-        )
+    def getRotationStatus(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getRotationStatus", params)
+        if not chn_id:
+            return data
+
+        image = data.get("image", {})
+        switch_chn = image.get("switch_chn")
+        if isinstance(switch_chn, dict):
+            result = {
+                str(chn): switch_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in switch_chn
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+        return data
 
     def getLED(self):
         return self.executeFunction(
@@ -1443,19 +1152,52 @@ class Tapo:
             {"smart_track": {"name": "smart_track_info"}},
         )
 
-    def getWhitelampConfig(self):
-        return self.executeFunction(
-            "getWhitelampConfig",
-            {"image": {"name": "switch"}},
-        )
+    def getWhitelampConfig(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getWhitelampConfig", params)
+        image = data.get("image", {})
+        switch_chn = image.get("switch_chn")
+        switch = image.get("switch")
 
-    def setWhitelampConfig(self, forceTime=False, intensityLevel=False):
-        params = {"image": {"switch": {}}}
+        if not chn_id:
+            if switch:
+                return switch
+            if switch_chn:
+                if len(switch_chn) == 1:
+                    return next(iter(switch_chn.values()))
+                return switch_chn
+            return data
+
+        if switch_chn:
+            result = {
+                str(chn): switch_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in switch_chn
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+
+        if switch:
+            return switch
+        return data
+
+    def setWhitelampConfig(
+        self, forceTime=False, intensityLevel=False, chn_id: list = None
+    ):
+        per_channel_extra_fields = {}
         if forceTime is not False:
-            params["image"]["switch"]["wtl_force_time"] = str(forceTime)
+            per_channel_extra_fields["wtl_force_time"] = str(forceTime)
         if intensityLevel is not False:
-            params["image"]["switch"]["wtl_intensity_level"] = str(intensityLevel)
+            per_channel_extra_fields["wtl_intensity_level"] = str(intensityLevel)
 
+        params = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction(
             "setWhitelampConfig",
             params,
@@ -1604,21 +1346,17 @@ class Tapo:
 
     def getUserID(self, forceReload=False):
         if not self.userID or forceReload is True:
-            response = self.userID = self.performRequest(
-                {
-                    "method": "multipleRequest",
-                    "params": {
-                        "requests": [
-                            {
-                                "method": "getUserID",
-                                "params": {"system": {"get_user_id": "null"}},
-                            }
-                        ]
-                    },
-                }
-            )["result"]["responses"][0]["result"]
+            response = self.userID = self.executeFunction(
+                "getUserID", {"system": {"get_user_id": "null"}}
+            )
+
             if "error_code" not in response or response["error_code"] == 0:
-                self.userID = response["user_id"]
+                if "user_id" in response:
+                    self.userID = response["user_id"]
+                else:
+                    raise Exception(
+                        "Failed to retrieve user ID, device responded with no value:"
+                    )
             else:
                 if "error_code" in response and response["error_code"] == -71101:
                     self.userID = self.getUserID()
@@ -1708,6 +1446,8 @@ class Tapo:
             if ERROR_CODES["-71103"] in str(err):
                 self.getUserID(True)
                 return self.getRecordings(date, start_index, end_index)
+            else:
+                raise err
 
     # does not work for child devices, function discovery needed
     def getCommonImage(self):
@@ -1733,25 +1473,132 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
-    def getMotionDetection(self):
-        return self.executeFunction(
-            "getDetectionConfig",
-            {"motion_detection": {"name": ["motion_det"]}},
-        )["motion_detection"]["motion_det"]
+    def __getSensitivityLabel(self, sensitivity):
+        if isinstance(sensitivity, str):
+            if sensitivity == "normal":
+                return "medium"
+            if sensitivity in ["low", "medium", "high"]:
+                return sensitivity
+        value = int(self.__getSensitivityNumber(sensitivity))
+        if value <= 20:
+            return "low"
+        elif value <= 50:
+            return "medium"
+        return "high"
 
-    def setMotionDetection(self, enabled=None, sensitivity=False):
-        data = {
-            "motion_detection": {"motion_det": {}},
-        }
+    def __unwrapSingleChn(self, chn_id: list, data_by_chn: dict):
+        if chn_id and len(chn_id) == 1:
+            return data_by_chn.get(str(chn_id[0]))
+        return data_by_chn
+
+    def __compareOrNone(self, value, expected):
+        if value is None:
+            return None
+        return value == expected
+
+    def __buildChnAwareConfig(
+        self,
+        root_key: str,
+        chn_id: list = None,
+        item_key: str = "detection",
+        per_channel_key: str = "detection_chn",
+        chn_id_key: str = "chn_id",
+        extra_fields: dict = None,
+        per_channel_extra_fields: dict = None,
+        per_channel_extra_fields_by_chn: dict = None,
+    ):
+        def add_fields(target: dict, fields: dict):
+            if not fields:
+                return
+            target.update(fields)
+
+        if chn_id:
+            data = {
+                root_key: {
+                    chn_id_key: chn_id,
+                    per_channel_key: {str(chn): {} for chn in chn_id},
+                }
+            }
+            add_fields(data[root_key], extra_fields)
+            for chn in chn_id:
+                fields = (
+                    per_channel_extra_fields_by_chn.get(str(chn))
+                    if per_channel_extra_fields_by_chn
+                    else per_channel_extra_fields
+                )
+                add_fields(
+                    data[root_key][per_channel_key][str(chn)],
+                    fields,
+                )
+            return data
+
+        data = {root_key: {item_key: {}}}
+        add_fields(data[root_key], extra_fields)
+        add_fields(data[root_key][item_key], per_channel_extra_fields)
+        return data
+
+    def __selectDetectionKey(
+        self,
+        chn_id: list = None,
+        detection_key: str = "detection",
+        per_channel_key: str = "detection_chn",
+    ):
+        return per_channel_key if chn_id else detection_key
+
+    def getMotionDetection(self, chn_id: list = None):
+        params = {"motion_detection": {"name": ["motion_det"]}}
+        if chn_id:
+            params["motion_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getDetectionConfig", params)
+        key = self.__selectDetectionKey(
+            chn_id, detection_key="motion_det", per_channel_key="motion_det_chn"
+        )
+        result = data["motion_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
+
+    def setMotionDetection(self, enabled=None, sensitivity=False, chn_id: list = None):
+        base_fields = {}
         if enabled is not None:
-            data["motion_detection"]["motion_det"]["enabled"] = (
-                "on" if enabled else "off"
-            )
-
+            base_fields["enabled"] = "on" if enabled else "off"
         if sensitivity:
-            data["motion_detection"]["motion_det"]["digital_sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
+            base_fields["digital_sensitivity"] = self.__getSensitivityNumber(
+                sensitivity
             )
+            if isinstance(sensitivity, str):
+                base_fields["sensitivity"] = self.__getSensitivityLabel(sensitivity)
+
+        if chn_id:
+            per_channel_extra_fields_by_chn = {
+                str(chn): dict(base_fields) for chn in chn_id
+            }
+            # child devices always need digital_sensitivity setting
+            if self.childID and "digital_sensitivity" not in base_fields:
+                currentData = self.getMotionDetection(chn_id)
+                for chn in chn_id:
+                    chn_key = str(chn)
+                    per_channel_extra_fields_by_chn[str(chn)]["digital_sensitivity"] = (
+                        currentData[chn_key]["digital_sensitivity"]
+                    )
+                    if "sensitivity" in currentData[chn_key]:
+                        per_channel_extra_fields_by_chn[chn_key]["sensitivity"] = (
+                            currentData[chn_key]["sensitivity"]
+                        )
+                    else:
+                        per_channel_extra_fields_by_chn[chn_key]["sensitivity"] = (
+                            self.__getSensitivityLabel(
+                                currentData[chn_key]["digital_sensitivity"]
+                            )
+                        )
+            data = self.__buildChnAwareConfig(
+                "motion_detection",
+                chn_id=chn_id,
+                item_key="motion_det",
+                per_channel_key="motion_det_chn",
+                per_channel_extra_fields_by_chn=per_channel_extra_fields_by_chn,
+            )
+            return self.executeFunction("setDetectionConfig", data)
+
+        data = {"motion_detection": {"motion_det": dict(base_fields)}}
         # child devices always need digital_sensitivity setting
         if (
             self.childID
@@ -1761,45 +1608,102 @@ class Tapo:
             data["motion_detection"]["motion_det"]["digital_sensitivity"] = currentData[
                 "digital_sensitivity"
             ]
+            if "sensitivity" in currentData:
+                data["motion_detection"]["motion_det"]["sensitivity"] = currentData[
+                    "sensitivity"
+                ]
+            else:
+                data["motion_detection"]["motion_det"]["sensitivity"] = (
+                    self.__getSensitivityLabel(currentData["digital_sensitivity"])
+                )
         return self.executeFunction("setDetectionConfig", data)
 
-    def getPersonDetection(self):
-        return self.executeFunction(
-            "getPersonDetectionConfig",
-            {"people_detection": {"name": ["detection"]}},
-        )["people_detection"]["detection"]
+    def getPersonDetection(self, chn_id: list = None):
+        params = {"people_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["people_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getPersonDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        result = data["people_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setPersonDetection(self, enabled, sensitivity=False):
-        data = {
-            "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
-        }
-        if sensitivity:
-            data["people_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
+    def setPersonDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "people_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setPersonDetectionConfig", data)
 
-    def getVehicleDetection(self):
-        return self.executeFunction(
-            "getVehicleDetectionConfig",
-            {"vehicle_detection": {"name": ["detection"]}},
-        )["vehicle_detection"]["detection"]
+    def getVehicleDetection(self, chn_id: list = None):
+        params = {"vehicle_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["vehicle_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getVehicleDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        result = data["vehicle_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setVehicleDetection(self, enabled, sensitivity=False):
-        data = {
-            "vehicle_detection": {"detection": {"enabled": "on" if enabled else "off"}}
-        }
-        if sensitivity:
-            data["vehicle_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
+    def setVehicleDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "vehicle_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setVehicleDetectionConfig", data)
 
-    def getPetDetection(self):
-        return self.executeFunction(
-            "getPetDetectionConfig",
-            {"pet_detection": {"name": ["detection"]}},
-        )["pet_detection"]["detection"]
+    def getPetDetection(self, chn_id: list = None):
+        params = {"pet_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["pet_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getPetDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        result = data["pet_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
+
+    def getLinecrossingDetection(self, chn_id: list = None):
+        params = {"linecrossing_detection": {"name": ["detection", "arming_schedule"]}}
+        if chn_id:
+            params["linecrossing_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getLinecrossingDetectionConfig", params)
+        linecross = data.get("linecrossing_detection", {})
+        if not chn_id:
+            return linecross
+
+        detection_chn = linecross.get("detection_chn")
+        if detection_chn is not None:
+            result = {
+                str(chn): detection_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in detection_chn
+            }
+            detection = self.__unwrapSingleChn(chn_id, result)
+        else:
+            detection = linecross.get("detection")
+
+        return {
+            "detection": detection,
+            "arming_schedule": linecross.get("arming_schedule"),
+        }
+
+    def setLinecrossingDetection(self, enabled, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"}
+        data = self.__buildChnAwareConfig(
+            "linecrossing_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
+        return self.executeFunction("setLinecrossingDetectionConfig", data)
 
     def getPackageDetection(self):
         return self.executeFunction(
@@ -1807,13 +1711,17 @@ class Tapo:
             {"package_detection": {"name": ["detection"]}},
         )["package_detection"]["detection"]
 
-    def setPetDetection(self, enabled, sensitivity=False):
-        data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
-        if sensitivity:
-            data["pet_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
-
+    def setPetDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "pet_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setPetDetectionConfig", data)
 
     def setPackageDetection(self, enabled, sensitivity=False):
@@ -1916,23 +1824,33 @@ class Tapo:
 
         return self.executeFunction("setGlassDetectionConfig", data)
 
-    def getTamperDetection(self):
-        return self.executeFunction(
-            "getTamperDetectionConfig",
-            {"tamper_detection": {"name": "tamper_det"}},
-        )["tamper_detection"]["tamper_det"]
+    def getTamperDetection(self, chn_id: list = None):
+        params = {"tamper_detection": {"name": ["tamper_det"]}}
+        if chn_id:
+            params["tamper_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getTamperDetectionConfig", params)
+        key = self.__selectDetectionKey(
+            chn_id, detection_key="tamper_det", per_channel_key="tamper_det_chn"
+        )
+        result = data["tamper_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setTamperDetection(self, enabled, sensitivity=False):
-        data = {
-            "tamper_detection": {"tamper_det": {"enabled": "on" if enabled else "off"}}
-        }
+    def setTamperDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"}
         if sensitivity:
             if sensitivity not in ["high", "normal", "low"]:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
             if sensitivity == "normal":
                 sensitivity = "medium"
-            data["tamper_detection"]["tamper_det"]["sensitivity"] = sensitivity
+            per_channel_extra_fields["sensitivity"] = sensitivity
 
+        data = self.__buildChnAwareConfig(
+            "tamper_detection",
+            chn_id=chn_id,
+            item_key="tamper_det",
+            per_channel_key="tamper_det_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setTamperDetectionConfig", data)
 
     def getBabyCryDetection(self):
@@ -2050,54 +1968,101 @@ class Tapo:
 
     # Switches
 
-    def __getImageSwitch(self, switch: str) -> str:
-        data = self.executeFunction("getLdc", {"image": {"name": ["switch"]}})
-        switches = data["image"]["switch"]
+    def __getImageSwitch(self, switch: str, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getLdc", params)
+        image = data.get("image", {})
+        if chn_id:
+            switch_chn = image.get("switch_chn")
+            if isinstance(switch_chn, dict):
+                result = {
+                    str(chn): switch_chn[str(chn)].get(switch)
+                    for chn in chn_id
+                    if str(chn) in switch_chn
+                }
+                return self.__unwrapSingleChn(chn_id, result)
+        switches = image.get("switch", {})
         if switch not in switches:
             raise Exception("Switch {} is not supported by this camera".format(switch))
         return switches[switch]
 
-    def __setImageSwitch(self, switch: str, value: str):
-        return self.executeFunction("setLdc", {"image": {"switch": {switch: value}}})
+    def __setImageSwitch(self, switch: str, value: str, chn_id: list = None):
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields={switch: value},
+        )
+        return self.executeFunction("setLdc", data)
 
-    def getLensDistortionCorrection(self):
-        return self.__getImageSwitch("ldc") == "on"
+    def getLensDistortionCorrection(self, chn_id: list = None):
+        value = self.__getImageSwitch("ldc", chn_id=chn_id)
+        if chn_id and isinstance(value, dict):
+            return {
+                key: self.__compareOrNone(val, "on")
+                for key, val in value.items()
+            }
+        return self.__compareOrNone(value, "on")
 
-    def setLensDistortionCorrection(self, enable):
-        return self.__setImageSwitch("ldc", "on" if enable else "off")
+    def setLensDistortionCorrection(self, enable, chn_id: list = None):
+        return self.__setImageSwitch("ldc", "on" if enable else "off", chn_id=chn_id)
 
-    def getDayNightMode(self) -> str:
-        if self.childID:
-            rawValue = self.getNightVisionModeConfig()["image"]["switch"][
-                "night_vision_mode"
-            ]
-            if rawValue == "inf_night_vision":
+    def getDayNightMode(self, chn_id: list = None):
+        def to_day_night_mode(raw_value: str) -> str:
+            if raw_value == "inf_night_vision":
                 return "on"
-            elif rawValue == "wtl_night_vision":
+            elif raw_value == "wtl_night_vision":
                 return "off"
-            elif rawValue == "md_night_vision":
+            elif raw_value == "md_night_vision":
                 return "auto"
-        else:
-            return self.__getImageCommon("inf_type")
+            else:
+                return raw_value
 
-    def setDayNightMode(self, mode):
+        if self.childID:
+            data = self.getNightVisionModeConfig(chn_id)
+            if chn_id:
+                result = {
+                    str(chn): to_day_night_mode(
+                        data["image"]["switch_chn"][str(chn)]["night_vision_mode"]
+                    )
+                    for chn in chn_id
+                }
+                return self.__unwrapSingleChn(chn_id, result)
+            rawValue = data["image"]["switch"]["night_vision_mode"]
+            return to_day_night_mode(rawValue)
+        else:
+            return self.__getImageCommon("inf_type", chn_id=chn_id)
+
+    def setDayNightMode(self, mode, chn_id: list = None):
         allowed_modes = ["off", "on", "auto"]
         if mode not in allowed_modes:
             raise Exception("Day night mode must be one of {}".format(allowed_modes))
         if self.childID:
-            if mode == "on":
-                return self.setNightVisionModeConfig("inf_night_vision")
-            elif mode == "off":
-                return self.setNightVisionModeConfig("wtl_night_vision")
-            elif mode == "auto":
-                return self.setNightVisionModeConfig("md_night_vision")
+            mode_map = {
+                "on": "inf_night_vision",
+                "off": "wtl_night_vision",
+                "auto": "md_night_vision",
+            }
+            return self.setNightVisionModeConfig(mode_map[mode], chn_id=chn_id)
         else:
-            return self.__setImageCommon("inf_type", mode)
+            return self.__setImageCommon("inf_type", mode, chn_id=chn_id)
 
-    def getNightVisionModeConfig(self):
-        return self.executeFunction(
-            "getNightVisionModeConfig", {"image": {"name": "switch"}}
-        )
+    def getNightVisionModeConfig(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getNightVisionModeConfig", params)
+        if chn_id:
+            result = {
+                str(chn): data["image"]["switch_chn"][str(chn)]
+                for chn in chn_id
+                if str(chn) in data["image"].get("switch_chn", {})
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+        return data
 
     def getNightVisionCapability(self):
         return self.executeFunction(
@@ -2105,57 +2070,123 @@ class Tapo:
             {"image_capability": {"name": ["supplement_lamp"]}},
         )
 
-    def setNightVisionModeConfig(self, mode):
-        return self.executeFunction(
-            "setNightVisionModeConfig",
-            {"image": {"switch": {"night_vision_mode": mode}}},
+    def setNightVisionModeConfig(self, mode, chn_id: list = None):
+        per_channel_extra_fields = {"night_vision_mode": mode}
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
         )
+        return self.executeFunction("setNightVisionModeConfig", data)
 
-    def getImageFlipVertical(self):
+    def getImageFlipVertical(self, chn_id: list = None):
         if self.childID:
-            return self.getRotationStatus()["image"]["switch"]["flip_type"] == "center"
+            data = self.getRotationStatus(chn_id)
+            if chn_id:
+                if isinstance(data, dict) and "flip_type" in data:
+                    return self.__compareOrNone(data["flip_type"], "center")
+                if isinstance(data, dict):
+                    return {
+                        key: self.__compareOrNone(val.get("flip_type"), "center")
+                        for key, val in data.items()
+                        if isinstance(val, dict)
+                    }
+                return data
+            return data["image"]["switch"]["flip_type"] == "center"
         else:
-            return self.__getImageSwitch("flip_type") == "center"
+            value = self.__getImageSwitch("flip_type", chn_id=chn_id)
+            if chn_id and isinstance(value, dict):
+                return {
+                    key: self.__compareOrNone(val, "center")
+                    for key, val in value.items()
+                }
+            return self.__compareOrNone(value, "center")
 
-    def setImageFlipVertical(self, enable):
+    def setImageFlipVertical(self, enable, chn_id: list = None):
         if self.childID:
-            return self.setRotationStatus("center" if enable else "off")
+            return self.setRotationStatus("center" if enable else "off", chn_id=chn_id)
         else:
-            return self.__setImageSwitch("flip_type", "center" if enable else "off")
+            return self.__setImageSwitch(
+                "flip_type", "center" if enable else "off", chn_id=chn_id
+            )
 
-    def setRotationStatus(self, flip_type):
-        return self.executeFunction(
-            "setRotationStatus",
-            {"image": {"switch": {"flip_type": flip_type}}},
+    def setRotationStatus(self, flip_type, chn_id: list = None):
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields={"flip_type": flip_type},
         )
+        return self.executeFunction("setRotationStatus", data)
 
-    def getForceWhitelampState(self) -> bool:
-        return self.__getImageSwitch("force_wtl_state") == "on"
+    def getForceWhitelampState(self, chn_id: list = None) -> bool:
+        value = self.__getImageSwitch("force_wtl_state", chn_id=chn_id)
+        if chn_id and isinstance(value, dict):
+            return {
+                key: self.__compareOrNone(val, "on")
+                for key, val in value.items()
+            }
+        return self.__compareOrNone(value, "on")
 
-    def setForceWhitelampState(self, enable: bool):
-        return self.__setImageSwitch("force_wtl_state", "on" if enable else "off")
+    def setForceWhitelampState(self, enable: bool, chn_id: list = None):
+        return self.__setImageSwitch(
+            "force_wtl_state", "on" if enable else "off", chn_id=chn_id
+        )
 
     # Common
 
-    def __getImageCommon(self, field: str) -> str:
-        data = self.executeFunction(
-            "getLightFrequencyInfo", {"image": {"name": "common"}}
-        )
-        if "common" not in data["image"]:
+    def __getImageCommon(self, field: str, chn_id: list = None):
+        params = {"image": {"name": "common"}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getLightFrequencyInfo", params)
+        image = data.get("image", {})
+        common = image.get("common")
+        common_chn = image.get("common_chn")
+
+        if chn_id:
+            if common_chn:
+                result = {
+                    str(chn): common_chn[str(chn)][field]
+                    for chn in chn_id
+                    if str(chn) in common_chn
+                }
+                return self.__unwrapSingleChn(chn_id, result)
+            if common and field in common:
+                result = {str(chn): common[field] for chn in chn_id}
+                return self.__unwrapSingleChn(chn_id, result)
             raise Exception("__getImageCommon is not supported by this camera")
-        fields = data["image"]["common"]
+
+        if common is None and common_chn:
+            first_key = next(iter(common_chn))
+            fields = common_chn[first_key]
+        elif common is None:
+            raise Exception("__getImageCommon is not supported by this camera")
+        else:
+            fields = common
         if field not in fields:
             raise Exception("Field {} is not supported by this camera".format(field))
         return fields[field]
 
-    def __setImageCommon(self, field: str, value: str):
-        return self.executeFunction(
-            "setLightFrequencyInfo", {"image": {"common": {field: value}}}
+    def __setImageCommon(self, field: str, value: str, chn_id: list = None):
+        per_channel_extra_fields = {field: value}
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="common",
+            per_channel_key="common_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
         )
+        return self.executeFunction("setLightFrequencyInfo", data)
 
+    # no need for chn_id, because setting it only works on chn_id 1, when setter called on 2, nothing happens, when on 1, both adjusted
     def getLightFrequencyMode(self) -> str:
         return self.__getImageCommon("light_freq_mode")
 
+    # no need for chn_id, because setting it only works on chn_id 1, when setter called on 2, nothing happens, when on 1, both adjusted
     def setLightFrequencyMode(self, mode):
         # todo: auto does not work on some child cameras?
         allowed_modes = ["auto", "50", "60"]
@@ -2313,7 +2344,7 @@ class Tapo:
 
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
-    def getMost(self, omit_methods=[]):
+    def getMost(self, omit_methods=[], chn_id: list = None):
         if self.deviceType == "SMART.TAPOCHIME":
             requestData = {
                 "method": "multipleRequest",
@@ -2341,6 +2372,22 @@ class Tapo:
                 "method": "multipleRequest",
                 "params": {
                     "requests": [
+                        {
+                            "method": "getLinecrossingDetectionConfig",
+                            "params": {
+                                "linecrossing_detection": {
+                                    "name": ["detection", "arming_schedule"]
+                                }
+                            },
+                        },
+                        {
+                            "method": "getDualCamCapability",
+                            "params": {"image_capability": {"name": ["dualCam"]}},
+                        },
+                        {
+                            "method": "getAllChnInfo",
+                            "params": {"system": {"table": "chn_info"}},
+                        },
                         {
                             "method": "getDiagnoseMode",
                             "params": {"system": {"name": "sys"}},
@@ -2449,7 +2496,7 @@ class Tapo:
                         },
                         {
                             "method": "getTamperDetectionConfig",
-                            "params": {"tamper_detection": {"name": "tamper_det"}},
+                            "params": {"tamper_detection": {"name": ["tamper_det"]}},
                         },
                         {
                             "method": "getLensMaskConfig",
@@ -2457,7 +2504,12 @@ class Tapo:
                         },
                         {
                             "method": "getLdc",
-                            "params": {"image": {"name": ["switch", "common"]}},
+                            "params": {"image": {"name": ["switch"]}},
+                        },
+                        # needs to be duplicated twice, once for switch, once for common for chnID to work properly
+                        {
+                            "method": "getLdc",
+                            "params": {"image": {"name": ["common"]}},
                         },
                         {
                             "method": "getLastAlarmInfo",
@@ -2515,7 +2567,7 @@ class Tapo:
                         {"method": "getSirenStatus", "params": {"siren": {}}},
                         {
                             "method": "getLightFrequencyInfo",
-                            "params": {"image": {"name": "common"}},
+                            "params": {"image": {"name": ["common"]}},
                         },
                         {
                             "method": "getLightFrequencyCapability",
@@ -2531,7 +2583,7 @@ class Tapo:
                         },
                         {
                             "method": "getNightVisionModeConfig",
-                            "params": {"image": {"name": "switch"}},
+                            "params": {"image": {"name": ["switch"]}},
                         },
                         {
                             "method": "getWhitelampStatus",
@@ -2539,7 +2591,7 @@ class Tapo:
                         },
                         {
                             "method": "getWhitelampConfig",
-                            "params": {"image": {"name": "switch"}},
+                            "params": {"image": {"name": ["switch"]}},
                         },
                         {
                             "method": "getMsgPushConfig",
@@ -2577,7 +2629,7 @@ class Tapo:
                         },
                         {
                             "method": "getVideoCapability",
-                            "params": {"video_capability": {"name": "main"}},
+                            "params": {"video_capability": {"name": ["main", "minor"]}},
                         },
                         {
                             "method": "getQuickRespList",
@@ -2648,6 +2700,25 @@ class Tapo:
                     ]
                 },
             }
+            if chn_id:
+                method_chn_roots = {
+                    "getLinecrossingDetectionConfig": "linecrossing_detection",
+                    "getDetectionConfig": "motion_detection",
+                    "getPersonDetectionConfig": "people_detection",
+                    "getVehicleDetectionConfig": "vehicle_detection",
+                    "getPetDetectionConfig": "pet_detection",
+                    "getTamperDetectionConfig": "tamper_detection",
+                    "getNightVisionModeConfig": "image",
+                    "getWhitelampConfig": "image",
+                    "getLightFrequencyInfo": "image",
+                    "getLdc": "image",
+                }
+                for request in requestData["params"]["requests"]:
+                    root_key = method_chn_roots.get(request.get("method"))
+                    if not root_key:
+                        continue
+                    params = request.setdefault("params", {})
+                    params.setdefault(root_key, {})["chn_id"] = chn_id
         if len(omit_methods) != 0:
             filtered_requests = [
                 request
@@ -2657,6 +2728,14 @@ class Tapo:
             requestData["params"]["requests"] = filtered_requests
 
         results = self.performRequest(requestData)
+        try:
+            responses_len = len(results.get("result", {}).get("responses", []))
+            requested_len = len(requestData["params"]["requests"])
+            self.logger.debugLog(
+                f"getMost: requested {requested_len} responses, received {responses_len}"
+            )
+        except Exception:
+            pass
 
         # handle malformed / unexpected response from camera
         if len(requestData["params"]["requests"]) != len(
@@ -2668,7 +2747,7 @@ class Tapo:
                 # response, where camera returns invalid json and incorrect number of responses (1)
                 # containing all the others. When getAudioConfig is not requested in this function
                 # it returns everything as expected.
-                return self.getMost(["getAudioConfig"])
+                return self.getMost(["getAudioConfig"], chn_id)
             else:
                 raise Exception(f"Unexpected camera response: {results}")
 
@@ -2705,6 +2784,57 @@ class Tapo:
                     raise Exception(
                         f"Method {result['method']} has been returned more times than expected. Response: {results}"
                     )
+
+        if chn_id:
+            method_normalization = {
+                "getLinecrossingDetectionConfig": [
+                    ("linecrossing_detection", "detection_chn", "detection")
+                ],
+                "getDetectionConfig": [
+                    ("motion_detection", "motion_det_chn", "motion_det")
+                ],
+                "getPersonDetectionConfig": [
+                    ("people_detection", "detection_chn", "detection")
+                ],
+                "getVehicleDetectionConfig": [
+                    ("vehicle_detection", "detection_chn", "detection")
+                ],
+                "getPetDetectionConfig": [
+                    ("pet_detection", "detection_chn", "detection")
+                ],
+                "getTamperDetectionConfig": [
+                    ("tamper_detection", "tamper_det_chn", "tamper_det")
+                ],
+                "getNightVisionModeConfig": [("image", "switch_chn", "switch")],
+                "getWhitelampConfig": [("image", "switch_chn", "switch")],
+                "getLightFrequencyInfo": [("image", "common_chn", "common")],
+                "getLdc": [
+                    ("image", "switch_chn", "switch"),
+                    ("image", "common_chn", "common"),
+                ],
+            }
+            for method, mappings in method_normalization.items():
+                if method not in returnData:
+                    continue
+                for entry in returnData[method]:
+                    if not entry:
+                        continue
+                    for root_key, per_chn_key, single_key in mappings:
+                        root = entry.get(root_key)
+                        if not isinstance(root, dict):
+                            continue
+                        per_chn = root.get(per_chn_key)
+                        if not isinstance(per_chn, dict):
+                            continue
+                        normalized = (
+                            self.__unwrapSingleChn(chn_id, per_chn)
+                            if len(chn_id) == 1
+                            else per_chn
+                        )
+                        if normalized is None:
+                            continue
+                        root[single_key] = normalized
+                        del root[per_chn_key]
 
         if "getPresetConfig" in returnData and len(returnData["getPresetConfig"]) == 1:
             if returnData["getPresetConfig"][0]:

@@ -94,7 +94,7 @@ class HttpMediaSession:
             b"Connection": b"keep-alive",
             b"Content-Length": b"-1",
         }
-        if self.query_params_str:
+        if self.query_params_str and "playerId" in self.query_params:
             headers[b"X-Client-UUID"] = self.query_params["playerId"].encode()
         try:
             self._reader, self._writer = await asyncio.open_connection(
