@@ -1384,7 +1384,7 @@ class Tapo:
         return result["playback"]["search_results"]
 
     def getRecordingsUTC(
-        self, start_time, end_time, start_index=0, end_index=999999999
+        self, start_time, end_time, start_index=0, end_index=999999999, retry=False
     ):
         try:
             result = self.executeFunction(
@@ -1408,14 +1408,24 @@ class Tapo:
 
             return result["playback"]["search_video_results"]
         except Exception as err:
+            self.logger.debugLog(
+                f"Encountered error when getting recordings time {start_time} - {end_time}: {err}"
+            )
             # user ID expired, get a new one
-            if ERROR_CODES["-71103"] in str(err):
+            if retry is False and (
+                ERROR_CODES["-71103"] in str(err) or ERROR_CODES["-71105"] in str(err)
+            ):
+                self.logger.debugLog(
+                    f"Retrying getting recordings for time {start_time} - {end_time}..."
+                )
                 self.getUserID(True)
                 return self.getRecordingsUTC(
-                    start_time, end_time, start_index, end_index
+                    start_time, end_time, start_index, end_index, True
                 )
+            else:
+                raise err
 
-    def getRecordings(self, date, start_index=0, end_index=999999999):
+    def getRecordings(self, date, start_index=0, end_index=999999999, retry=False):
         if self.childID is not None:
             date_object = datetime.strptime(date, "%Y%m%d")
             start_time = int(date_object.timestamp())
@@ -1442,10 +1452,16 @@ class Tapo:
                 raise Exception("Video playback is not supported by this camera")
             return result["playback"]["search_video_results"]
         except Exception as err:
+            self.logger.debugLog(
+                f"Encountered error when getting recordings for date {date}: {err}"
+            )
             # user ID expired, get a new one
-            if ERROR_CODES["-71103"] in str(err):
+            if retry is False and (
+                ERROR_CODES["-71103"] in str(err) or ERROR_CODES["-71105"] in str(err)
+            ):
+                self.logger.debugLog(f"Retrying getting recordings for date {date}...")
                 self.getUserID(True)
-                return self.getRecordings(date, start_index, end_index)
+                return self.getRecordings(date, start_index, end_index, True)
             else:
                 raise err
 
@@ -2001,10 +2017,7 @@ class Tapo:
     def getLensDistortionCorrection(self, chn_id: list = None):
         value = self.__getImageSwitch("ldc", chn_id=chn_id)
         if chn_id and isinstance(value, dict):
-            return {
-                key: self.__compareOrNone(val, "on")
-                for key, val in value.items()
-            }
+            return {key: self.__compareOrNone(val, "on") for key, val in value.items()}
         return self.__compareOrNone(value, "on")
 
     def setLensDistortionCorrection(self, enable, chn_id: list = None):
@@ -2125,10 +2138,7 @@ class Tapo:
     def getForceWhitelampState(self, chn_id: list = None) -> bool:
         value = self.__getImageSwitch("force_wtl_state", chn_id=chn_id)
         if chn_id and isinstance(value, dict):
-            return {
-                key: self.__compareOrNone(val, "on")
-                for key, val in value.items()
-            }
+            return {key: self.__compareOrNone(val, "on") for key, val in value.items()}
         return self.__compareOrNone(value, "on")
 
     def setForceWhitelampState(self, enable: bool, chn_id: list = None):
