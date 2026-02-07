@@ -1344,25 +1344,29 @@ class Tapo:
                 {"led": {"config": {"enabled": "on" if enabled else "off"}}},
             )
 
-    def getUserID(self, forceReload=False):
+    def getUserID(self, forceReload=False, retry=False):
         if not self.userID or forceReload is True:
-            response = self.userID = self.executeFunction(
-                "getUserID", {"system": {"get_user_id": "null"}}
-            )
-
-            if "error_code" not in response or response["error_code"] == 0:
+            try:
+                response = self.userID = self.executeFunction(
+                    "getUserID", {"system": {"get_user_id": "null"}}
+                )
                 if "user_id" in response:
                     self.userID = response["user_id"]
+                    return self.userID
                 else:
                     raise Exception(
-                        "Failed to retrieve user ID, device responded with no value:"
+                        "Failed to retrieve user ID, device responded with no value."
                     )
-            else:
-                if "error_code" in response and response["error_code"] == -71101:
-                    self.userID = self.getUserID()
+            except Exception as err:
+                self.logger.debugLog(
+                    f"Encountered error when getting getting user ID: {err}"
+                )
+                # Happens for example when recording is being downloaded
+                if retry is False and (ERROR_CODES["-71101"] in str(err)):
+                    self.logger.debugLog("Retrying getting User ID...")
+                    return self.getUserID(True, True)
                 else:
-                    raise Exception(response)
-        return self.userID
+                    raise err
 
     def getRecordingsList(self, start_date="20000101", end_date=None):
         if end_date is None:
