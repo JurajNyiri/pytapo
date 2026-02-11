@@ -1367,6 +1367,7 @@ class Tapo:
                     return self.getUserID(True, True)
                 else:
                     raise err
+        return self.userID
 
     def getRecordingsList(self, start_date="20000101", end_date=None):
         if end_date is None:
