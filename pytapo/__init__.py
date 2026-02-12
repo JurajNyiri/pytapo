@@ -416,6 +416,43 @@ class Tapo:
             {"image_capability": {"name": ["dualCam"]}},
         )
 
+    def getDualCamLinkage(self):
+        return self.executeFunction(
+            "getDualCamLinkage",
+            {"dual_cam_linkage": {"name": "linkage_state"}},
+        )
+
+    def setDualCamLinkage(self, enabled: bool = None, linkage_type: int = None):
+        params = {}
+        if enabled is not None:
+            params["enabled"] = "on" if enabled else "off"
+        if linkage_type is not None:
+            params["linkage_type"] = linkage_type
+        return self.executeFunction(
+            "setDualCamLinkage",
+            {"dual_cam_linkage": {"linkage_state": params}},
+        )
+
+    def getLinkageTargetSetting(self):
+        return self.executeFunction(
+            "readLinkageTargetSetting",
+            {"dual_cam_linkage": {"read_linkage_target_setting": {}}},
+        )
+
+    def setLinkageTargetSetting(self, param_to_set: str, enabled: bool):
+        params = {param_to_set: "on" if enabled else "off"}
+
+        return self.executeFunction(
+            "modifyLinkageTargetSetting",
+            {"dual_cam_linkage": {"modify_linkage_target_setting": params}},
+        )
+
+    def getLinkageTargetCapability(self):
+        return self.executeFunction(
+            "getLinkageTargetCapability",
+            {"dual_cam_linkage": {"name": "linkage_target_capability"}},
+        )
+
     def getAllChnInfo(self):
         return self.executeFunction(
             "getAllChnInfo",
@@ -2392,6 +2429,24 @@ class Tapo:
                             "params": {
                                 "linecrossing_detection": {
                                     "name": ["detection", "arming_schedule"]
+                                }
+                            },
+                        },
+                        {
+                            "method": "getDualCamLinkage",
+                            "params": {"dual_cam_linkage": {"name": "linkage_state"}},
+                        },
+                        {
+                            "method": "readLinkageTargetSetting",
+                            "params": {
+                                "dual_cam_linkage": {"read_linkage_target_setting": {}}
+                            },
+                        },
+                        {
+                            "method": "getLinkageTargetCapability",
+                            "params": {
+                                "dual_cam_linkage": {
+                                    "name": "linkage_target_capability"
                                 }
                             },
                         },
