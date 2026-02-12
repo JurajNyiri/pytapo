@@ -13,6 +13,7 @@ from ...media_stream._utils import generate_nonce
 from ...asyncHandler import AsyncHandler
 from .const import (
     RETRY_BACKOFF_SECONDS,
+    TRANSIENT_REQUEST_RETRIES,
     RETRYABLE_ERROR_CODES,
     AUTH_ERROR_CODES,
 )
@@ -316,7 +317,27 @@ class pyTapo:
         )
         return tag
 
-    def _request(self, method, url, **kwargs):
+    def _isTransientConnectionReset(self, err):
+        if not isinstance(err, requests.RequestException):
+            return False
+        err_str = str(err).lower()
+        transient_markers = (
+            "connection reset by peer",
+            "remote end closed connection without response",
+            "connection aborted",
+            "remotedisconnected",
+        )
+        return any(marker in err_str for marker in transient_markers)
+
+    def _resetHttpSession(self):
+        if self.reuseSession and self.session not in (False, None):
+            try:
+                self.session.close()
+            except Exception as err:
+                self.debugLog(f"Failed to close session during reset: {err}")
+            self.session = False
+
+    def _request(self, method, url, transientRetryCount=0, **kwargs):
         if self.session is False and self.reuseSession is True:
             self.session = requests.session()
             self.session.mount("https://", TlsAdapter())
@@ -369,7 +390,28 @@ class pyTapo:
                 redactedKwargs["headers"] = redactedKwargsHeaders
         self.debugLog("New request:")
         self.debugLog(redactedKwargs)
-        response = session.request(method, url, **kwargs)
+        try:
+            response = session.request(method, url, **kwargs)
+        except requests.RequestException as err:
+            if self.reuseSession is False:
+                session.close()
+            if (
+                transientRetryCount < TRANSIENT_REQUEST_RETRIES
+                and self._isTransientConnectionReset(err)
+            ):
+                transientRetryCount += 1
+                self.debugLog(
+                    f"Transient connection error ({err}), retrying request: {transientRetryCount}/{TRANSIENT_REQUEST_RETRIES}."
+                )
+                self._resetHttpSession()
+                time.sleep(RETRY_BACKOFF_SECONDS)
+                return self._request(
+                    method,
+                    url,
+                    transientRetryCount=transientRetryCount,
+                    **kwargs,
+                )
+            raise
         self.debugLog(f"Response status code: {response.status_code}")
         try:
             loadJson = json.loads(response.text)
