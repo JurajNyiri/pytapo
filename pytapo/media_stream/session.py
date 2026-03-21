@@ -521,6 +521,8 @@ class HttpMediaSession:
             # Ensure the queue is deleted even if the coroutine is canceled externally
             if session in self._sessions:
                 del self._sessions[session]
+            if sequence is not None and sequence in self._sequence_numbers:
+                del self._sequence_numbers[sequence]
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()

@@ -10,6 +10,10 @@ from .asyncHandler import AsyncHandler
 
 from datetime import datetime, timedelta
 from warnings import warn
+import logging
+
+_LOGGER = logging.getLogger(__name__)
+_LOGGER.warning("--- LOADED PATCHED PYTAPO (MEMORY LEAK FIX) ---")
 
 from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession

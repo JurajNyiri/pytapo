@@ -48,6 +48,7 @@ class Streamer:
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 50
         self.stream_task = None
+        self.log_task = None
         self.quality = quality
         self.running = False
         self.logLevel = logLevel
@@ -237,7 +238,7 @@ class Streamer:
             pass_fds=pass_fds,
         )
 
-        asyncio.create_task(self._print_ffmpeg_logs(self.streamProcess.stderr))
+        self.log_task = asyncio.create_task(self._print_ffmpeg_logs(self.streamProcess.stderr))
 
         self.running = True
         if self.stream_task is None or self.stream_task.done():
@@ -273,48 +274,59 @@ class Streamer:
         mediaSession.set_window_size(self.window_size)
         self.currentAction = "Streaming"
 
-        async with mediaSession:
-            payload = json.dumps(self._build_preview_payload())
+        try:
+            async with mediaSession:
+                payload = json.dumps(self._build_preview_payload())
 
-            async for resp in mediaSession.transceive(payload):
-                if not self.running:
-                    break
-
-                if resp.mimetype != "video/mp2t":
-                    continue
-
-                # Audio - Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
-                if self.includeAudio and resp.audioPayload:
-                    self._audio_buffer += resp.audioPayload
-
-                    while len(self._audio_buffer) >= 160:
-                        frame = self._audio_buffer[:160]
-                        self._audio_buffer = self._audio_buffer[160:]
-                        try:
-                            os.write(self.audio_w, frame)
-                        except OSError:
-                            break
-
-                # Video – re‑assemble & byte‑align to 188‑byte TS cells
-                self._ts_buffer += resp.plaintext
-
-                # drop leading garbage until the first real sync byte (0x47)
-                while len(self._ts_buffer) >= 188 and self._ts_buffer[0] != 0x47:
-                    pos = self._ts_buffer.find(0x47, 1)
-                    if pos == -1:
-                        # no sync byte in current buffer – wait for more data
-                        self._ts_buffer.clear()
+                async for resp in mediaSession.transceive(payload):
+                    if not self.running:
                         break
-                    self._ts_buffer = self._ts_buffer[pos:]
 
-                # forward only full, correctly aligned 188‑byte packets
-                while len(self._ts_buffer) >= 188:
-                    packet = self._ts_buffer[:188]
-                    self._ts_buffer = self._ts_buffer[188:]
-                    self.streamProcess.stdin.write(packet)
+                    if resp.mimetype != "video/mp2t":
+                        continue
 
-                if not self.includeAudio:
-                    await self.streamProcess.stdin.drain()
+                    # Audio - Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
+                    if self.includeAudio and resp.audioPayload:
+                        self._audio_buffer += resp.audioPayload
+
+                        while len(self._audio_buffer) >= 160:
+                            frame = self._audio_buffer[:160]
+                            self._audio_buffer = self._audio_buffer[160:]
+                            try:
+                                os.write(self.audio_w, frame)
+                            except OSError:
+                                break
+
+                    # Video – re‑assemble & byte‑align to 188‑byte TS cells
+                    self._ts_buffer += resp.plaintext
+
+                    # drop leading garbage until the first real sync byte (0x47)
+                    while len(self._ts_buffer) >= 188 and self._ts_buffer[0] != 0x47:
+                        pos = self._ts_buffer.find(0x47, 1)
+                        if pos == -1:
+                            # no sync byte in current buffer – wait for more data
+                            self._ts_buffer.clear()
+                            break
+                        self._ts_buffer = self._ts_buffer[pos:]
+
+                    # forward only full, correctly aligned 188‑byte packets
+                    while len(self._ts_buffer) >= 188:
+                        packet = self._ts_buffer[:188]
+                        self._ts_buffer = self._ts_buffer[188:]
+                        self.streamProcess.stdin.write(packet)
+
+                    if not self.includeAudio:
+                        await self.streamProcess.stdin.drain()
+        except Exception as e:
+            if self.logFunction is not None:
+                self.logFunction(
+                    {
+                        "currentAction": "Stream Error",
+                        "error": str(e),
+                    }
+                )
+        finally:
+            self.running = False
 
     async def stop(self):
         self.currentAction = "Stopping stream"
@@ -325,3 +337,45 @@ class Streamer:
                 await self.stream_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                pass
+
+        if self.log_task:
+            self.log_task.cancel()
+            try:
+                await self.log_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+        if hasattr(self, 'streamProcess') and self.streamProcess:
+            try:
+                if self.streamProcess.stdin:
+                    self.streamProcess.stdin.close()
+            except Exception:
+                pass
+            try:
+                self.streamProcess.kill()
+            except Exception:
+                pass
+            try:
+                # Give it a short moment to terminate
+                await asyncio.wait_for(self.streamProcess.wait(), timeout=5.0)
+            except Exception:
+                pass
+            self.streamProcess = None
+
+        if hasattr(self, 'audio_r') and self.audio_r is not None:
+            try:
+                os.close(self.audio_r)
+            except OSError:
+                pass
+            self.audio_r = None
+
+        if hasattr(self, 'audio_w') and self.audio_w is not None:
+            try:
+                os.close(self.audio_w)
+            except OSError:
+                pass
+            self.audio_w = None
