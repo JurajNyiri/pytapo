@@ -314,7 +314,14 @@ class Streamer:
                     self.streamProcess.stdin.write(packet)
 
                 if not self.includeAudio:
-                    await self.streamProcess.stdin.drain()
+                    try:
+                        # If the consumer stops reading the pipe, ffmpeg output hangs.
+                        # This causes ffmpeg to stop reading stdin, which makes drain()
+                        # block forever. A timeout cleanly breaks the deadlock.
+                        await asyncio.wait_for(self.streamProcess.stdin.drain(), timeout=15.0)
+                    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, asyncio.TimeoutError):
+                        self.running = False
+                        break
 
     async def stop(self):
         self.currentAction = "Stopping stream"
