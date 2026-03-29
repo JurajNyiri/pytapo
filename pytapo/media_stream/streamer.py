@@ -332,3 +332,12 @@ class Streamer:
                 await self.stream_task
             except asyncio.CancelledError:
                 pass
+
+        if self.streamProcess:
+            try:
+                self.streamProcess.terminate()
+                await self.streamProcess.wait()
+            except ProcessLookupError:
+                pass
+            except OSError:
+                pass
