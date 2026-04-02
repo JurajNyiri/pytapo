@@ -40,7 +40,9 @@ class Streamer:
         resolutions=None,
         audio=None,
         ignore_limit=None,
+        no_data_timeout=10.0,
     ):
+        self.no_data_timeout = no_data_timeout
         self.currentAction = "Idle"
         self.logFunction = logFunction
         self.tapo = tapo
@@ -276,7 +278,7 @@ class Streamer:
         async with mediaSession:
             payload = json.dumps(self._build_preview_payload())
 
-            async for resp in mediaSession.transceive(payload):
+            async for resp in mediaSession.transceive(payload, no_data_timeout=self.no_data_timeout):
                 if not self.running:
                     break
 
