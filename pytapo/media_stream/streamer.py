@@ -40,7 +40,9 @@ class Streamer:
         resolutions=None,
         audio=None,
         ignore_limit=None,
+        no_data_timeout=10.0,
     ):
+        self.no_data_timeout = no_data_timeout
         self.currentAction = "Idle"
         self.logFunction = logFunction
         self.tapo = tapo
@@ -276,7 +278,7 @@ class Streamer:
         async with mediaSession:
             payload = json.dumps(self._build_preview_payload())
 
-            async for resp in mediaSession.transceive(payload):
+            async for resp in mediaSession.transceive(payload, no_data_timeout=self.no_data_timeout):
                 if not self.running:
                     break
 
@@ -314,7 +316,14 @@ class Streamer:
                     self.streamProcess.stdin.write(packet)
 
                 if not self.includeAudio:
-                    await self.streamProcess.stdin.drain()
+                    try:
+                        # If the consumer stops reading the pipe, ffmpeg output hangs.
+                        # This causes ffmpeg to stop reading stdin, which makes drain()
+                        # block forever. A timeout cleanly breaks the deadlock.
+                        await asyncio.wait_for(self.streamProcess.stdin.drain(), timeout=15.0)
+                    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, asyncio.TimeoutError):
+                        self.running = False
+                        break
 
     async def stop(self):
         self.currentAction = "Stopping stream"
@@ -324,4 +333,13 @@ class Streamer:
             try:
                 await self.stream_task
             except asyncio.CancelledError:
+                pass
+
+        if self.streamProcess:
+            try:
+                self.streamProcess.terminate()
+                await self.streamProcess.wait()
+            except ProcessLookupError:
+                pass
+            except OSError:
                 pass
