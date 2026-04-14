@@ -1,52 +1,22 @@
 #
 # Author: See contributors at https://github.com/JurajNyiri/pytapo/graphs/contributors
 #
-import hashlib
 import json
 import requests
-import base64
-import copy
-import asyncio
-import logging
 import uuid
-
-from kasa.transports import KlapTransportV2, KlapTransport
-from kasa.exceptions import AuthenticationError
-from kasa import DeviceConfig
-from kasa import Credentials
+from .transport.transport import Transport
+from .logger import Logger
+from .asyncHandler import AsyncHandler
 
 from datetime import datetime, timedelta
 from warnings import warn
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
 
-from .const import ERROR_CODES, MAX_LOGIN_RETRIES, EncryptionMethod
+from .const import ERROR_CODES, MAX_LOGIN_RETRIES
 from .media_stream.session import HttpMediaSession
-from .TlsAdapter import TlsAdapter
-from .media_stream._utils import generate_nonce, StreamType
-
-LOGGER = logging.getLogger("pytapo")
-
-
-# Supress Error messages, we handle them internally and log if necessary
-class SuppressPythonKasaLogs(logging.Filter):
-    def filter(self, record):
-        return (
-            "Response status is 403" not in record.getMessage()
-            and "Server disconnected" not in record.getMessage()
-            and "Response status is 400, Request was" not in record.getMessage()
-        )
+from .media_stream._utils import StreamType
 
 
 class Tapo:
-    def debugLog(self, msg):
-        if self.printDebugInformation is True:
-            print(msg)
-        elif callable(self.printDebugInformation):
-            self.printDebugInformation(msg)
-
-    def getControlHost(self):
-        return f"{self.host}:{self.controlPort}"
 
     def __init__(
         self,
@@ -56,7 +26,7 @@ class Tapo:
         cloudPassword="",
         superSecretKey="",
         childID=None,
-        reuseSession=False,
+        reuseSession=True,
         printDebugInformation=False,
         controlPort=443,
         retryStok=True,
@@ -66,15 +36,13 @@ class Tapo:
         KLAPVersion=None,
         hass=None,
         playerID=None,
+        printWarnInformation=True,
+        transportMethod=None,
     ):
-        logger = logging.getLogger("kasa.transports.klaptransport")
-        logger.addFilter(SuppressPythonKasaLogs())
 
-        self.retryStok = retryStok
-        self.redactConfidentialInformation = redactConfidentialInformation
-        self.printDebugInformation = printDebugInformation
-        self.passwordEncryptionMethod = None
-        self.seq = None
+        self.logger = Logger(printDebugInformation, printWarnInformation)
+        self.asyncHandler = AsyncHandler(hass)
+
         self.host = host
         if hass is not None:
             self.hass = hass
@@ -84,9 +52,6 @@ class Tapo:
             self.controlPort = 443
         else:
             self.controlPort = controlPort
-        self.lsk = None
-        self.cnonce = None
-        self.ivb = None
         if isKLAP is not None:
             self.isKLAP = isKLAP
         else:
@@ -101,39 +66,44 @@ class Tapo:
         else:
             self.playerID = playerID
 
+        if transportMethod is None:
+            if self.isKLAP:
+                transport_method = "klap"
+            else:
+                transport_method = "pytapo"
+        else:
+            transport_method = transportMethod
+
+        self.logger.debugLog(f"Transport method determined: {transport_method}")
+
+        self.transport = Transport(
+            host=host,
+            controlPort=controlPort,
+            user=user,
+            password=password,
+            logger=self.logger,
+            method=transport_method,
+            KLAPVersion=self.KLAPVersion,
+            retryStok=retryStok,
+            hass=hass,
+            asyncHandler=self.asyncHandler,
+            cloudPassword=cloudPassword,
+            reuseSession=reuseSession,
+            redactConfidentialInformation=redactConfidentialInformation,
+        )
+
         self.klapTransport = None
         self.user = user
         self.password = password
         self.cloudPassword = cloudPassword
         self.superSecretKey = superSecretKey
-        self.stok = False
         self.userID = False
         self.childID = childID
         self.timeCorrection = False
-        self.reuseSession = reuseSession
-        self.isSecureConnectionCached = None
         if streamPort is None:
             self.streamPort = 8800
         else:
             self.streamPort = streamPort
-        self.headers = {
-            "Host": self.getControlHost(),
-            "Referer": "https://{host}".format(host=self.getControlHost()),
-            "Accept": "application/json",
-            "Accept-Encoding": "gzip, deflate",
-            "User-Agent": "Tapo CameraClient Android",
-            "Connection": "close",
-            "requestByApp": "true",
-            "Content-Type": "application/json; charset=UTF-8",
-        }
-        self.hashedPassword = hashlib.md5(password.encode("utf8")).hexdigest().upper()
-        self.hashedSha256Password = (
-            hashlib.sha256(password.encode("utf8")).hexdigest().upper()
-        )
-        self.hashedCloudPassword = (
-            hashlib.md5(cloudPassword.encode("utf8")).hexdigest().upper()
-        )
-        self.session = False
 
         self.basicInfo = self.getBasicInfo()
         if "type" in self.basicInfo:
@@ -160,475 +130,26 @@ class Tapo:
         except Exception:
             return False
 
-    def getHostURL(self):
-        return "https://{host}/stok={stok}/ds".format(
-            host=self.getControlHost(), stok=self.stok
-        )
-
     def getStreamURL(self):
         return "{host}:{streamPort}".format(host=self.host, streamPort=self.streamPort)
 
     def _isKLAP(self, timeout=2):
+        self.logger.debugLog("_isKLAP: Finding out whether device is KLAP...")
         try:
             url = f"http://{self.host}:{self.controlPort}"
             response = requests.get(url, timeout=timeout)
-            return "200 OK" in response.text
-        except requests.RequestException:
+            result = "200 OK" in response.text
+            self.logger.debugLog(f"_isKLAP: Device is KLAP result: {result}")
+            return result
+        except requests.RequestException as err:
+            self.logger.debugLog(f"_isKLAP: Device is not KLAP: {err}")
             return False
 
-    async def initiateKlapTransport(self, version=1):
-        try:
-            if self.klapTransport is None:
-                creds = Credentials(self.user, self.password)
-                config = DeviceConfig(
-                    self.host, port_override=self.controlPort, credentials=creds
-                )
-                if version == 1:
-                    transport = KlapTransport(config=config)
-                elif version == 2:
-                    transport = KlapTransportV2(config=config)
-                await transport.perform_handshake()
-                self.klapTransport = transport
-                return self.klapTransport
-        finally:
-            await transport.close()
-
-    async def sendKlapRequest(self, request, retry=0):
-        try:
-            if self.klapTransport is None:
-                await self.ensureAuthenticated()
-            response = await self.klapTransport.send(json.dumps(request))
-            return response
-        except Exception as err:
-            if (
-                "Response status is 403, Request was" in str(err)
-                or "Response status is 400, Request was" in str(err)
-                or "Server disconnected" in str(err)
-            ):
-                raise Exception("PyTapo KLAP Error #6: " + str(err))
-
-            self.debugLog("Retrying request... Error: " + str(err))
-            if retry < 5:
-                await self.ensureAuthenticated()
-                return await self.sendKlapRequest(request, retry + 1)
-            else:
-                raise Exception("PyTapo KLAP Error #1: " + str(err))
-        finally:
-            if self.klapTransport is not None:
-                await self.klapTransport.close()
-
-    async def ensureAuthenticated(self):
-        if self.isKLAP:
-            if self.klapTransport is None:
-                if self.KLAPVersion is None:
-                    try:
-                        await self.initiateKlapTransport(1)
-                        self.KLAPVersion = 1
-                    except AuthenticationError:
-                        try:
-                            await self.initiateKlapTransport(2)
-                            self.KLAPVersion = 2
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #2: " + str(err))
-                    except Exception as err:
-                        raise Exception("PyTapo KLAP Error #3: " + str(err))
-                else:
-                    if self.KLAPVersion == 1:
-                        try:
-                            await self.initiateKlapTransport(1)
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #4: " + str(err))
-                    elif self.KLAPVersion == 2:
-                        try:
-                            await self.initiateKlapTransport(2)
-                        except AuthenticationError:
-                            raise Exception("Invalid authentication data")
-                        except Exception as err:
-                            raise Exception("PyTapo KLAP Error #5: " + str(err))
-        elif not self.stok:
-            if self.hass is None:
-                return self.refreshStok()
-            else:
-                await self.hass.async_add_executor_job(self.refreshStok)
-        return True
-
-    def request(self, method, url, **kwargs):
-        if self.session is False and self.reuseSession is True:
-            self.session = requests.session()
-            self.session.mount("https://", TlsAdapter())
-
-        if self.reuseSession is True:
-            session = self.session
-        else:
-            session = requests.session()
-            session.mount("https://", TlsAdapter())
-        if self.printDebugInformation:
-            redactedKwargs = copy.deepcopy(kwargs)
-            if self.redactConfidentialInformation:
-                if "data" in redactedKwargs:
-                    redactedKwargsData = json.loads(redactedKwargs["data"])
-                    if "params" in redactedKwargsData:
-                        if (
-                            "password" in redactedKwargsData["params"]
-                            and redactedKwargsData["params"]["password"] != ""
-                        ):
-                            redactedKwargsData["params"]["password"] = "REDACTED"
-                        if (
-                            "digest_passwd" in redactedKwargsData["params"]
-                            and redactedKwargsData["params"]["digest_passwd"] != ""
-                        ):
-                            redactedKwargsData["params"]["digest_passwd"] = "REDACTED"
-                        if (
-                            "cnonce" in redactedKwargsData["params"]
-                            and redactedKwargsData["params"]["cnonce"] != ""
-                        ):
-                            redactedKwargsData["params"]["cnonce"] = "REDACTED"
-                    redactedKwargs["data"] = redactedKwargsData
-                if "headers" in redactedKwargs:
-                    redactedKwargsHeaders = redactedKwargs["headers"]
-                    if (
-                        "Tapo_tag" in redactedKwargsHeaders
-                        and redactedKwargsHeaders["Tapo_tag"] != ""
-                    ):
-                        redactedKwargsHeaders["Tapo_tag"] = "REDACTED"
-                    if (
-                        "Host" in redactedKwargsHeaders
-                        and redactedKwargsHeaders["Host"] != ""
-                    ):
-                        redactedKwargsHeaders["Host"] = "REDACTED"
-                    if (
-                        "Referer" in redactedKwargsHeaders
-                        and redactedKwargsHeaders["Referer"] != ""
-                    ):
-                        redactedKwargsHeaders["Referer"] = "REDACTED"
-                    redactedKwargs["headers"] = redactedKwargsHeaders
-            self.debugLog("New request:")
-            self.debugLog(redactedKwargs)
-        response = session.request(method, url, **kwargs)
-        if self.printDebugInformation:
-            self.debugLog(response.status_code)
-            try:
-                loadJson = json.loads(response.text)
-                if self.redactConfidentialInformation:
-                    if "result" in loadJson:
-                        if (
-                            "stok" in loadJson["result"]
-                            and loadJson["result"]["stok"] != ""
-                        ):
-                            loadJson["result"]["stok"] = "REDACTED"
-                        if "data" in loadJson["result"]:
-                            if (
-                                "key" in loadJson["result"]["data"]
-                                and loadJson["result"]["data"]["key"] != ""
-                            ):
-                                loadJson["result"]["data"]["key"] = "REDACTED"
-                            if (
-                                "nonce" in loadJson["result"]["data"]
-                                and loadJson["result"]["data"]["nonce"] != ""
-                            ):
-                                loadJson["result"]["data"]["nonce"] = "REDACTED"
-                            if (
-                                "device_confirm" in loadJson["result"]["data"]
-                                and loadJson["result"]["data"]["device_confirm"] != ""
-                            ):
-                                loadJson["result"]["data"][
-                                    "device_confirm"
-                                ] = "REDACTED"
-                self.debugLog(loadJson)
-            except Exception as err:
-                self.debugLog("Failed to load json:" + str(err))
-
-        if self.reuseSession is False:
-            response.close()
-            session.close()
-        return response
-
-    def isSecureConnection(self):
-        if self.isSecureConnectionCached is None:
-            url = "https://{host}".format(host=self.getControlHost())
-            data = {
-                "method": "login",
-                "params": {
-                    "encrypt_type": "3",
-                    "username": self.user,
-                },
-            }
-            res = self.request(
-                "POST", url, data=json.dumps(data), headers=self.headers, verify=False
-            )
-            response = res.json()
-            self.isSecureConnectionCached = (
-                "error_code" in response
-                and response["error_code"] == -40413
-                and "result" in response
-                and "data" in response["result"]
-                and "encrypt_type" in response["result"]["data"]
-                and "3" in response["result"]["data"]["encrypt_type"]
-            )
-        return self.isSecureConnectionCached
-
-    def validateDeviceConfirm(self, nonce, deviceConfirm):
-        self.passwordEncryptionMethod = None
-        hashedNoncesWithSHA256 = (
-            hashlib.sha256(
-                self.cnonce.encode("utf8")
-                + self.hashedSha256Password.encode("utf8")
-                + nonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        hashedNoncesWithMD5 = (
-            hashlib.sha256(
-                self.cnonce.encode("utf8")
-                + self.hashedPassword.encode("utf8")
-                + nonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        if deviceConfirm == (hashedNoncesWithSHA256 + nonce + self.cnonce):
-            self.passwordEncryptionMethod = EncryptionMethod.SHA256
-        elif deviceConfirm == (hashedNoncesWithMD5 + nonce + self.cnonce):
-            self.passwordEncryptionMethod = EncryptionMethod.MD5
-        return self.passwordEncryptionMethod is not None
-
-    def getTag(self, request):
-        tag = (
-            hashlib.sha256(
-                self.getHashedPassword().encode("utf8") + self.cnonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        tag = (
-            hashlib.sha256(
-                tag.encode("utf8")
-                + json.dumps(request).encode("utf8")
-                + str(self.seq).encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        return tag
-
-    def generateEncryptionToken(self, tokenType, nonce):
-        hashedKey = (
-            hashlib.sha256(
-                self.cnonce.encode("utf8")
-                + self.getHashedPassword().encode("utf8")
-                + nonce.encode("utf8")
-            )
-            .hexdigest()
-            .upper()
-        )
-        return hashlib.sha256(
-            (
-                tokenType.encode("utf8")
-                + self.cnonce.encode("utf8")
-                + nonce.encode("utf8")
-                + hashedKey.encode("utf8")
-            )
-        ).digest()[:16]
-
     def getEncryptionMethod(self):
-        return self.passwordEncryptionMethod
+        return self.transport.getEncryptionMethod()
 
-    def getHashedPassword(self):
-        if self.passwordEncryptionMethod == EncryptionMethod.MD5:
-            return self.hashedPassword
-        elif self.passwordEncryptionMethod == EncryptionMethod.SHA256:
-            return self.hashedSha256Password
-        else:
-            raise Exception("Failure detecting hashing algorithm.")
-
-    def refreshStok(self, loginRetryCount=0):
-        self.debugLog("Refreshing stok...")
-        self.cnonce = generate_nonce(8).decode().upper()
-        url = "https://{host}".format(host=self.getControlHost())
-        if self.isSecureConnection():
-            self.debugLog("Connection is secure.")
-            data = {
-                "method": "login",
-                "params": {
-                    "cnonce": self.cnonce,
-                    "encrypt_type": "3",
-                    "username": self.user,
-                },
-            }
-        else:
-            self.debugLog("Connection is insecure.")
-            data = {
-                "method": "login",
-                "params": {
-                    "hashed": True,
-                    "password": self.hashedPassword,
-                    "username": self.user,
-                },
-            }
-        res = self.request(
-            "POST", url, data=json.dumps(data), headers=self.headers, verify=False
-        )
-        self.debugLog("Status code: " + str(res.status_code))
-
-        if res.status_code == 401:
-            try:
-                data = res.json()
-                if data["result"]["data"]["code"] == -40411:
-                    self.debugLog("Code is -40411, raising Exception.")
-                    raise Exception("Invalid authentication data")
-            except Exception as e:
-                if str(e) == "Invalid authentication data":
-                    raise e
-                else:
-                    pass
-
-        responseData = res.json()
-        if self.isSecureConnection():
-            self.debugLog("Processing secure response.")
-            if (
-                "result" in responseData
-                and "data" in responseData["result"]
-                and "nonce" in responseData["result"]["data"]
-                and "device_confirm" in responseData["result"]["data"]
-            ):
-                self.debugLog("Validating device confirm.")
-                nonce = responseData["result"]["data"]["nonce"]
-                if self.validateDeviceConfirm(
-                    nonce, responseData["result"]["data"]["device_confirm"]
-                ):  # sets self.passwordEncryptionMethod, password verified on client, now request stok
-                    self.debugLog("Signing in with digestPasswd.")
-                    digestPasswd = (
-                        hashlib.sha256(
-                            self.getHashedPassword().encode("utf8")
-                            + self.cnonce.encode("utf8")
-                            + nonce.encode("utf8")
-                        )
-                        .hexdigest()
-                        .upper()
-                    )
-                    data = {
-                        "method": "login",
-                        "params": {
-                            "cnonce": self.cnonce,
-                            "encrypt_type": "3",
-                            "digest_passwd": (
-                                digestPasswd.encode("utf8")
-                                + self.cnonce.encode("utf8")
-                                + nonce.encode("utf8")
-                            ).decode(),
-                            "username": self.user,
-                        },
-                    }
-                    res = self.request(
-                        "POST",
-                        url,
-                        data=json.dumps(data),
-                        headers=self.headers,
-                        verify=False,
-                    )
-                    responseData = res.json()
-                    if (
-                        "result" in responseData
-                        and "start_seq" in responseData["result"]
-                    ):
-                        if (
-                            "user_group" in responseData["result"]
-                            and responseData["result"]["user_group"] != "root"
-                        ):
-                            self.debugLog(
-                                "Incorrect user_group detected, raising Exception."
-                            )
-                            # encrypted control via 3rd party account does not seem to be supported
-                            # see https://github.com/JurajNyiri/HomeAssistant-Tapo-Control/issues/456
-                            raise Exception("Invalid authentication data")
-                        self.debugLog("Geneerating encryption tokens.")
-                        self.lsk = self.generateEncryptionToken("lsk", nonce)
-                        self.ivb = self.generateEncryptionToken("ivb", nonce)
-                        self.seq = responseData["result"]["start_seq"]
-                else:
-                    if (
-                        self.retryStok
-                        and (
-                            "error_code" in responseData
-                            and responseData["error_code"] == -40413
-                        )
-                        and loginRetryCount < MAX_LOGIN_RETRIES
-                    ):
-                        loginRetryCount += 1
-                        self.debugLog(
-                            f"Incorrect device_confirm value, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
-                        )
-                        return self.refreshStok(loginRetryCount)
-                    else:
-                        self.debugLog(
-                            "Incorrect device_confirm value, raising Exception."
-                        )
-                        raise Exception("Invalid authentication data")
-        else:
-            self.passwordEncryptionMethod = EncryptionMethod.MD5
-        if (
-            "result" in responseData
-            and "data" in responseData["result"]
-            and "time" in responseData["result"]["data"]
-            and "max_time" in responseData["result"]["data"]
-            and "sec_left" in responseData["result"]["data"]
-            and responseData["result"]["data"]["sec_left"] > 0
-        ):
-            raise Exception(
-                f"Temporary Suspension: Try again in {str(responseData['result']['data']['sec_left'])} seconds"
-            )
-        if (
-            "data" in responseData
-            and "code" in responseData["data"]
-            and "sec_left" in responseData["data"]
-            and responseData["data"]["code"] == -40404
-            and responseData["data"]["sec_left"] > 0
-        ):
-            raise Exception(
-                f"Temporary Suspension: Try again in {str(responseData['data']['sec_left'])} seconds"
-            )
-
-        if self.responseIsOK(res):
-            self.debugLog("Saving stok.")
-            self.stok = res.json()["result"]["stok"]
-            return self.stok
-        if (
-            self.retryStok
-            and ("error_code" in responseData and responseData["error_code"] == -40413)
-            and loginRetryCount < MAX_LOGIN_RETRIES
-        ):
-            loginRetryCount += 1
-            self.debugLog(
-                f"Unexpected response, retrying: {loginRetryCount}/{MAX_LOGIN_RETRIES}."
-            )
-            return self.refreshStok(loginRetryCount)
-        else:
-            self.debugLog("Unexpected response, raising Exception.")
-            raise Exception("Invalid authentication data")
-
-    def responseIsOK(self, res, data=None):
-        if res is None and self.isKLAP is True and data is None:
-            return True
-        if res is not None and (
-            (res.status_code != 200 and not self.isSecureConnection())
-            or (
-                res.status_code != 200
-                and res.status_code != 500
-                and self.isSecureConnection()  # pass responseIsOK for secure connections 500 which are communicating expiring session
-            )
-        ):
-            raise Exception(
-                "Error communicating with Tapo Camera. Status code: "
-                + str(res.status_code)
-            )
+    def responseIsOK(self, data=None):
         try:
-            if data is None:
-                data = res.json()
             if "error_code" not in data or data["error_code"] == 0:
                 return True
             return False
@@ -686,26 +207,11 @@ class Tapo:
                 )
             )
 
-    def encryptRequest(self, request):
-        cipher = AES.new(self.lsk, AES.MODE_CBC, self.ivb)
-        ct_bytes = cipher.encrypt(pad(request, AES.block_size))
-        return ct_bytes
-
-    def decryptResponse(self, response):
-        cipher = AES.new(self.lsk, AES.MODE_CBC, self.ivb)
-        pt = cipher.decrypt(response)
-        return unpad(pt, AES.block_size)
-
-    def executeAsyncExecutorJob(self, job, *args):
-        if self.hass is None:
-            return asyncio.run(job(*args))
-        else:
-            return asyncio.run_coroutine_threadsafe(job(*args), self.hass.loop).result()
+    def close(self):
+        return self.asyncHandler.executeAsyncExecutorJob(self.transport.close)
 
     def performRequest(self, requestData, loginRetryCount=0):
-        self.executeAsyncExecutorJob(self.ensureAuthenticated)
-        authValid = True
-        url = self.getHostURL()
+        self.asyncHandler.executeAsyncExecutorJob(self.transport.authenticate)
         if self.childID:
             fullRequest = {
                 "method": "multipleRequest",
@@ -727,16 +233,15 @@ class Tapo:
             fullRequest = requestData
 
         if self.isKLAP:
-            responseJSON = self.executeAsyncExecutorJob(
-                self.sendKlapRequest, fullRequest
+            responseJSON = self.asyncHandler.executeAsyncExecutorJob(
+                self.transport.send, fullRequest
             )
-            res = None
             if (
                 "result" in responseJSON
                 and "responses" in responseJSON["result"]
                 and len(responseJSON["result"]["responses"]) == 1
             ):
-                if not self.responseIsOK(res, responseJSON["result"]["responses"][0]):
+                if not self.responseIsOK(responseJSON["result"]["responses"][0]):
                     raise Exception(
                         "Error: {}, Response: {}".format(
                             self.getErrorMessage(responseJSON["error_code"]),
@@ -744,70 +249,20 @@ class Tapo:
                         )
                     )
         else:
-            if self.seq is not None and self.isSecureConnection():
-                fullRequest = {
-                    "method": "securePassthrough",
-                    "params": {
-                        "request": base64.b64encode(
-                            self.encryptRequest(json.dumps(fullRequest).encode("utf-8"))
-                        ).decode("utf8")
-                    },
-                }
-                self.headers["Seq"] = str(self.seq)
-                try:
-                    self.headers["Tapo_tag"] = self.getTag(fullRequest)
-                except Exception as err:
-                    if str(err) == "Failure detecting hashing algorithm.":
-                        authValid = False
-                        self.debugLog(
-                            "Failure detecting hashing algorithm on getTag, reauthenticating."
-                        )
-                    else:
-                        raise err
-                self.seq += 1
-
-            res = self.request(
-                "POST",
-                url,
-                data=json.dumps(fullRequest),
-                headers=self.headers,
-                verify=False,
+            responseJSON = self.asyncHandler.executeAsyncExecutorJob(
+                self.transport.send, fullRequest
             )
-            responseData = res.json()
-            if (
-                self.isSecureConnection()
-                and "result" in responseData
-                and "response" in responseData["result"]
-            ):
-                encryptedResponse = responseData["result"]["response"]
-                encryptedResponse = base64.b64decode(responseData["result"]["response"])
-                try:
-                    responseJSON = json.loads(self.decryptResponse(encryptedResponse))
-                except Exception as err:
-                    if (
-                        str(err) == "Padding is incorrect."
-                        or str(err) == "PKCS#7 padding is incorrect."
-                    ):
-                        self.debugLog(f"{str(err)} Reauthenticating.")
-                        authValid = False
-                    else:
-                        raise err
-            else:
-                responseJSON = res.json()
-        if not authValid or not self.responseIsOK(res, responseJSON):
+        if not self.responseIsOK(responseJSON):
             #  -40401: Invalid Stok
             if (
-                not authValid
-                or (
-                    responseJSON
-                    and "error_code" in responseJSON
-                    and (
-                        responseJSON["error_code"] == -40401
-                        or responseJSON["error_code"] == -1
-                    )
+                responseJSON
+                and "error_code" in responseJSON
+                and (
+                    responseJSON["error_code"] == -40401
+                    or responseJSON["error_code"] == -1
                 )
             ) and loginRetryCount < MAX_LOGIN_RETRIES:
-                self.refreshStok()
+                self.close()
                 return self.performRequest(requestData, loginRetryCount + 1)
             else:
                 raise Exception(
@@ -831,18 +286,15 @@ class Tapo:
             responseJSON["result"]["responses"] = responses
             return responseJSON["result"]["responses"][0]
         else:
-            if self.isKLAP:
-                if self.responseIsOK(res, responseJSON):
-                    return responseJSON
-                else:
-                    raise Exception(
-                        "Error: {}, Response: {}".format(
-                            self.getErrorMessage(responseJSON["error_code"]),
-                            json.dumps(responseJSON),
-                        )
-                    )
-            elif self.responseIsOK(res):
+            if self.responseIsOK(responseJSON):
                 return responseJSON
+            else:
+                raise Exception(
+                    "Error: {}, Response: {}".format(
+                        self.getErrorMessage(responseJSON["error_code"]),
+                        json.dumps(responseJSON),
+                    )
+                )
 
     def getMediaSession(self, stream_type: StreamType = None, start_time=""):
         query_params = {}
@@ -874,13 +326,16 @@ class Tapo:
         )  # pragma: no cover
 
     def getChildDevices(self):
-        childDevices = self.performRequest(
-            {
-                "method": "getChildDeviceList",
-                "params": {"childControl": {"start_index": 0}},
-            }
+        return self.executeFunction(
+            "getChildDeviceList",
+            {"childControl": {"start_index": 0}},
         )
-        return childDevices["result"]["child_device_list"]
+
+    def getChildDeviceComponentList(self):
+        return self.executeFunction(
+            "getChildDeviceComponentList",
+            {"childControl": {"start_index": 0}},
+        )
 
     def getTimeCorrection(self):
         if self.timeCorrection is False:
@@ -952,7 +407,56 @@ class Tapo:
     def getVideoCapability(self):
         return self.executeFunction(
             "getVideoCapability",
-            {"video_capability": {"name": "main"}},
+            {"video_capability": {"name": ["main", "minor"]}},
+        )
+
+    def getDualCamCapability(self):
+        return self.executeFunction(
+            "getDualCamCapability",
+            {"image_capability": {"name": ["dualCam"]}},
+        )
+
+    def getDualCamLinkage(self):
+        return self.executeFunction(
+            "getDualCamLinkage",
+            {"dual_cam_linkage": {"name": "linkage_state"}},
+        )
+
+    def setDualCamLinkage(self, enabled: bool = None, linkage_type: int = None):
+        params = {}
+        if enabled is not None:
+            params["enabled"] = "on" if enabled else "off"
+        if linkage_type is not None:
+            params["linkage_type"] = linkage_type
+        return self.executeFunction(
+            "setDualCamLinkage",
+            {"dual_cam_linkage": {"linkage_state": params}},
+        )
+
+    def getLinkageTargetSetting(self):
+        return self.executeFunction(
+            "readLinkageTargetSetting",
+            {"dual_cam_linkage": {"read_linkage_target_setting": {}}},
+        )
+
+    def setLinkageTargetSetting(self, param_to_set: str, enabled: bool):
+        params = {param_to_set: "on" if enabled else "off"}
+
+        return self.executeFunction(
+            "modifyLinkageTargetSetting",
+            {"dual_cam_linkage": {"modify_linkage_target_setting": params}},
+        )
+
+    def getLinkageTargetCapability(self):
+        return self.executeFunction(
+            "getLinkageTargetCapability",
+            {"dual_cam_linkage": {"name": "linkage_target_capability"}},
+        )
+
+    def getAllChnInfo(self):
+        return self.executeFunction(
+            "getAllChnInfo",
+            {"system": {"table": "chn_info"}},
         )
 
     # returns empty response for child devices
@@ -1397,11 +901,24 @@ class Tapo:
             {"auto_upgrade": {"common": params}},
         )
 
-    def getRotationStatus(self):
-        return self.executeFunction(
-            "getRotationStatus",
-            {"image": {"name": ["switch"]}},
-        )
+    def getRotationStatus(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getRotationStatus", params)
+        if not chn_id:
+            return data
+
+        image = data.get("image", {})
+        switch_chn = image.get("switch_chn")
+        if isinstance(switch_chn, dict):
+            result = {
+                str(chn): switch_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in switch_chn
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+        return data
 
     def getLED(self):
         return self.executeFunction(
@@ -1449,19 +966,19 @@ class Tapo:
         recordPlan = {"enabled": "on" if enabled else "off"}
 
         if sunday is not None and type(sunday) is list:
-            recordPlan["sunday"] = json.dumps(sunday)
+            recordPlan["sunday"] = json.dumps(sunday, separators=(',', ':'))
         if monday is not None and type(monday) is list:
-            recordPlan["monday"] = json.dumps(monday)
+            recordPlan["monday"] = json.dumps(monday, separators=(',', ':'))
         if tuesday is not None and type(tuesday) is list:
-            recordPlan["tuesday"] = json.dumps(tuesday)
+            recordPlan["tuesday"] = json.dumps(tuesday, separators=(',', ':'))
         if wednesday is not None and type(wednesday) is list:
-            recordPlan["wednesday"] = json.dumps(wednesday)
+            recordPlan["wednesday"] = json.dumps(wednesday, separators=(',', ':'))
         if thursday is not None and type(thursday) is list:
-            recordPlan["thursday"] = json.dumps(thursday)
+            recordPlan["thursday"] = json.dumps(thursday, separators=(',', ':'))
         if friday is not None and type(friday) is list:
-            recordPlan["friday"] = json.dumps(friday)
+            recordPlan["friday"] = json.dumps(friday, separators=(',', ':'))
         if saturday is not None and type(saturday) is list:
-            recordPlan["saturday"] = json.dumps(saturday)
+            recordPlan["saturday"] = json.dumps(saturday, separators=(',', ':'))
 
         return self.executeFunction(
             "setRecordPlan",
@@ -1680,19 +1197,52 @@ class Tapo:
             {"smart_track": {"name": "smart_track_info"}},
         )
 
-    def getWhitelampConfig(self):
-        return self.executeFunction(
-            "getWhitelampConfig",
-            {"image": {"name": "switch"}},
-        )
+    def getWhitelampConfig(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getWhitelampConfig", params)
+        image = data.get("image", {})
+        switch_chn = image.get("switch_chn")
+        switch = image.get("switch")
 
-    def setWhitelampConfig(self, forceTime=False, intensityLevel=False):
-        params = {"image": {"switch": {}}}
+        if not chn_id:
+            if switch:
+                return switch
+            if switch_chn:
+                if len(switch_chn) == 1:
+                    return next(iter(switch_chn.values()))
+                return switch_chn
+            return data
+
+        if switch_chn:
+            result = {
+                str(chn): switch_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in switch_chn
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+
+        if switch:
+            return switch
+        return data
+
+    def setWhitelampConfig(
+        self, forceTime=False, intensityLevel=False, chn_id: list = None
+    ):
+        per_channel_extra_fields = {}
         if forceTime is not False:
-            params["image"]["switch"]["wtl_force_time"] = str(forceTime)
+            per_channel_extra_fields["wtl_force_time"] = str(forceTime)
         if intensityLevel is not False:
-            params["image"]["switch"]["wtl_intensity_level"] = str(intensityLevel)
+            per_channel_extra_fields["wtl_intensity_level"] = str(intensityLevel)
 
+        params = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction(
             "setWhitelampConfig",
             params,
@@ -1839,28 +1389,29 @@ class Tapo:
                 {"led": {"config": {"enabled": "on" if enabled else "off"}}},
             )
 
-    def getUserID(self, forceReload=False):
+    def getUserID(self, forceReload=False, retry=False):
         if not self.userID or forceReload is True:
-            response = self.userID = self.performRequest(
-                {
-                    "method": "multipleRequest",
-                    "params": {
-                        "requests": [
-                            {
-                                "method": "getUserID",
-                                "params": {"system": {"get_user_id": "null"}},
-                            }
-                        ]
-                    },
-                }
-            )["result"]["responses"][0]["result"]
-            if "error_code" not in response or response["error_code"] == 0:
-                self.userID = response["user_id"]
-            else:
-                if "error_code" in response and response["error_code"] == -71101:
-                    self.userID = self.getUserID()
+            try:
+                response = self.userID = self.executeFunction(
+                    "getUserID", {"system": {"get_user_id": "null"}}
+                )
+                if "user_id" in response:
+                    self.userID = response["user_id"]
+                    return self.userID
                 else:
-                    raise Exception(response)
+                    raise Exception(
+                        "Failed to retrieve user ID, device responded with no value."
+                    )
+            except Exception as err:
+                self.logger.debugLog(
+                    f"Encountered error when getting getting user ID: {err}"
+                )
+                # Happens for example when recording is being downloaded
+                if retry is False and (ERROR_CODES["-71101"] in str(err)):
+                    self.logger.debugLog("Retrying getting User ID...")
+                    return self.getUserID(True, True)
+                else:
+                    raise err
         return self.userID
 
     def getRecordingsList(self, start_date="20000101", end_date=None):
@@ -1883,7 +1434,7 @@ class Tapo:
         return result["playback"]["search_results"]
 
     def getRecordingsUTC(
-        self, start_time, end_time, start_index=0, end_index=999999999
+        self, start_time, end_time, start_index=0, end_index=999999999, retry=False
     ):
         try:
             result = self.executeFunction(
@@ -1907,14 +1458,24 @@ class Tapo:
 
             return result["playback"]["search_video_results"]
         except Exception as err:
+            self.logger.debugLog(
+                f"Encountered error when getting recordings time {start_time} - {end_time}: {err}"
+            )
             # user ID expired, get a new one
-            if ERROR_CODES["-71103"] in str(err):
+            if retry is False and (
+                ERROR_CODES["-71103"] in str(err) or ERROR_CODES["-71105"] in str(err)
+            ):
+                self.logger.debugLog(
+                    f"Retrying getting recordings for time {start_time} - {end_time}..."
+                )
                 self.getUserID(True)
                 return self.getRecordingsUTC(
-                    start_time, end_time, start_index, end_index
+                    start_time, end_time, start_index, end_index, True
                 )
+            else:
+                raise err
 
-    def getRecordings(self, date, start_index=0, end_index=999999999):
+    def getRecordings(self, date, start_index=0, end_index=999999999, retry=False):
         if self.childID is not None:
             date_object = datetime.strptime(date, "%Y%m%d")
             start_time = int(date_object.timestamp())
@@ -1941,10 +1502,18 @@ class Tapo:
                 raise Exception("Video playback is not supported by this camera")
             return result["playback"]["search_video_results"]
         except Exception as err:
+            self.logger.debugLog(
+                f"Encountered error when getting recordings for date {date}: {err}"
+            )
             # user ID expired, get a new one
-            if ERROR_CODES["-71103"] in str(err):
+            if retry is False and (
+                ERROR_CODES["-71103"] in str(err) or ERROR_CODES["-71105"] in str(err)
+            ):
+                self.logger.debugLog(f"Retrying getting recordings for date {date}...")
                 self.getUserID(True)
-                return self.getRecordings(date, start_index, end_index)
+                return self.getRecordings(date, start_index, end_index, True)
+            else:
+                raise err
 
     # does not work for child devices, function discovery needed
     def getCommonImage(self):
@@ -1970,25 +1539,132 @@ class Tapo:
             else:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
 
-    def getMotionDetection(self):
-        return self.executeFunction(
-            "getDetectionConfig",
-            {"motion_detection": {"name": ["motion_det"]}},
-        )["motion_detection"]["motion_det"]
+    def __getSensitivityLabel(self, sensitivity):
+        if isinstance(sensitivity, str):
+            if sensitivity == "normal":
+                return "medium"
+            if sensitivity in ["low", "medium", "high"]:
+                return sensitivity
+        value = int(self.__getSensitivityNumber(sensitivity))
+        if value <= 20:
+            return "low"
+        elif value <= 50:
+            return "medium"
+        return "high"
 
-    def setMotionDetection(self, enabled=None, sensitivity=False):
-        data = {
-            "motion_detection": {"motion_det": {}},
-        }
+    def __unwrapSingleChn(self, chn_id: list, data_by_chn: dict):
+        if chn_id and len(chn_id) == 1:
+            return data_by_chn.get(str(chn_id[0]))
+        return data_by_chn
+
+    def __compareOrNone(self, value, expected):
+        if value is None:
+            return None
+        return value == expected
+
+    def __buildChnAwareConfig(
+        self,
+        root_key: str,
+        chn_id: list = None,
+        item_key: str = "detection",
+        per_channel_key: str = "detection_chn",
+        chn_id_key: str = "chn_id",
+        extra_fields: dict = None,
+        per_channel_extra_fields: dict = None,
+        per_channel_extra_fields_by_chn: dict = None,
+    ):
+        def add_fields(target: dict, fields: dict):
+            if not fields:
+                return
+            target.update(fields)
+
+        if chn_id:
+            data = {
+                root_key: {
+                    chn_id_key: chn_id,
+                    per_channel_key: {str(chn): {} for chn in chn_id},
+                }
+            }
+            add_fields(data[root_key], extra_fields)
+            for chn in chn_id:
+                fields = (
+                    per_channel_extra_fields_by_chn.get(str(chn))
+                    if per_channel_extra_fields_by_chn
+                    else per_channel_extra_fields
+                )
+                add_fields(
+                    data[root_key][per_channel_key][str(chn)],
+                    fields,
+                )
+            return data
+
+        data = {root_key: {item_key: {}}}
+        add_fields(data[root_key], extra_fields)
+        add_fields(data[root_key][item_key], per_channel_extra_fields)
+        return data
+
+    def __selectDetectionKey(
+        self,
+        chn_id: list = None,
+        detection_key: str = "detection",
+        per_channel_key: str = "detection_chn",
+    ):
+        return per_channel_key if chn_id else detection_key
+
+    def getMotionDetection(self, chn_id: list = None):
+        params = {"motion_detection": {"name": ["motion_det"]}}
+        if chn_id:
+            params["motion_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getDetectionConfig", params)
+        key = self.__selectDetectionKey(
+            chn_id, detection_key="motion_det", per_channel_key="motion_det_chn"
+        )
+        result = data["motion_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
+
+    def setMotionDetection(self, enabled=None, sensitivity=False, chn_id: list = None):
+        base_fields = {}
         if enabled is not None:
-            data["motion_detection"]["motion_det"]["enabled"] = (
-                "on" if enabled else "off"
-            )
-
+            base_fields["enabled"] = "on" if enabled else "off"
         if sensitivity:
-            data["motion_detection"]["motion_det"]["digital_sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
+            base_fields["digital_sensitivity"] = self.__getSensitivityNumber(
+                sensitivity
             )
+            if isinstance(sensitivity, str):
+                base_fields["sensitivity"] = self.__getSensitivityLabel(sensitivity)
+
+        if chn_id:
+            per_channel_extra_fields_by_chn = {
+                str(chn): dict(base_fields) for chn in chn_id
+            }
+            # child devices always need digital_sensitivity setting
+            if self.childID and "digital_sensitivity" not in base_fields:
+                currentData = self.getMotionDetection(chn_id)
+                for chn in chn_id:
+                    chn_key = str(chn)
+                    per_channel_extra_fields_by_chn[str(chn)]["digital_sensitivity"] = (
+                        currentData[chn_key]["digital_sensitivity"]
+                    )
+                    if "sensitivity" in currentData[chn_key]:
+                        per_channel_extra_fields_by_chn[chn_key]["sensitivity"] = (
+                            currentData[chn_key]["sensitivity"]
+                        )
+                    else:
+                        per_channel_extra_fields_by_chn[chn_key]["sensitivity"] = (
+                            self.__getSensitivityLabel(
+                                currentData[chn_key]["digital_sensitivity"]
+                            )
+                        )
+            data = self.__buildChnAwareConfig(
+                "motion_detection",
+                chn_id=chn_id,
+                item_key="motion_det",
+                per_channel_key="motion_det_chn",
+                per_channel_extra_fields_by_chn=per_channel_extra_fields_by_chn,
+            )
+            return self.executeFunction("setDetectionConfig", data)
+
+        data = {"motion_detection": {"motion_det": dict(base_fields)}}
         # child devices always need digital_sensitivity setting
         if (
             self.childID
@@ -1998,45 +1674,102 @@ class Tapo:
             data["motion_detection"]["motion_det"]["digital_sensitivity"] = currentData[
                 "digital_sensitivity"
             ]
+            if "sensitivity" in currentData:
+                data["motion_detection"]["motion_det"]["sensitivity"] = currentData[
+                    "sensitivity"
+                ]
+            else:
+                data["motion_detection"]["motion_det"]["sensitivity"] = (
+                    self.__getSensitivityLabel(currentData["digital_sensitivity"])
+                )
         return self.executeFunction("setDetectionConfig", data)
 
-    def getPersonDetection(self):
-        return self.executeFunction(
-            "getPersonDetectionConfig",
-            {"people_detection": {"name": ["detection"]}},
-        )["people_detection"]["detection"]
+    def getPersonDetection(self, chn_id: list = None):
+        params = {"people_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["people_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getPersonDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        result = data["people_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setPersonDetection(self, enabled, sensitivity=False):
-        data = {
-            "people_detection": {"detection": {"enabled": "on" if enabled else "off"}}
-        }
-        if sensitivity:
-            data["people_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
+    def setPersonDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "people_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setPersonDetectionConfig", data)
 
-    def getVehicleDetection(self):
-        return self.executeFunction(
-            "getVehicleDetectionConfig",
-            {"vehicle_detection": {"name": ["detection"]}},
-        )["vehicle_detection"]["detection"]
+    def getVehicleDetection(self, chn_id: list = None):
+        params = {"vehicle_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["vehicle_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getVehicleDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        result = data["vehicle_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setVehicleDetection(self, enabled, sensitivity=False):
-        data = {
-            "vehicle_detection": {"detection": {"enabled": "on" if enabled else "off"}}
-        }
-        if sensitivity:
-            data["vehicle_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
+    def setVehicleDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "vehicle_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setVehicleDetectionConfig", data)
 
-    def getPetDetection(self):
-        return self.executeFunction(
-            "getPetDetectionConfig",
-            {"pet_detection": {"name": ["detection"]}},
-        )["pet_detection"]["detection"]
+    def getPetDetection(self, chn_id: list = None):
+        params = {"pet_detection": {"name": ["detection"]}}
+        if chn_id:
+            params["pet_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getPetDetectionConfig", params)
+        key = self.__selectDetectionKey(chn_id)
+        result = data["pet_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
+
+    def getLinecrossingDetection(self, chn_id: list = None):
+        params = {"linecrossing_detection": {"name": ["detection", "arming_schedule"]}}
+        if chn_id:
+            params["linecrossing_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getLinecrossingDetectionConfig", params)
+        linecross = data.get("linecrossing_detection", {})
+        if not chn_id:
+            return linecross
+
+        detection_chn = linecross.get("detection_chn")
+        if detection_chn is not None:
+            result = {
+                str(chn): detection_chn[str(chn)]
+                for chn in chn_id
+                if str(chn) in detection_chn
+            }
+            detection = self.__unwrapSingleChn(chn_id, result)
+        else:
+            detection = linecross.get("detection")
+
+        return {
+            "detection": detection,
+            "arming_schedule": linecross.get("arming_schedule"),
+        }
+
+    def setLinecrossingDetection(self, enabled, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"}
+        data = self.__buildChnAwareConfig(
+            "linecrossing_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
+        return self.executeFunction("setLinecrossingDetectionConfig", data)
 
     def getPackageDetection(self):
         return self.executeFunction(
@@ -2044,13 +1777,17 @@ class Tapo:
             {"package_detection": {"name": ["detection"]}},
         )["package_detection"]["detection"]
 
-    def setPetDetection(self, enabled, sensitivity=False):
-        data = {"pet_detection": {"detection": {"enabled": "on" if enabled else "off"}}}
-        if sensitivity:
-            data["pet_detection"]["detection"]["sensitivity"] = (
-                self.__getSensitivityNumber(sensitivity)
-            )
-
+    def setPetDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"} | (
+            {"sensitivity": self.__getSensitivityNumber(sensitivity)}
+            if sensitivity
+            else {}
+        )
+        data = self.__buildChnAwareConfig(
+            "pet_detection",
+            chn_id=chn_id,
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setPetDetectionConfig", data)
 
     def setPackageDetection(self, enabled, sensitivity=False):
@@ -2153,23 +1890,33 @@ class Tapo:
 
         return self.executeFunction("setGlassDetectionConfig", data)
 
-    def getTamperDetection(self):
-        return self.executeFunction(
-            "getTamperDetectionConfig",
-            {"tamper_detection": {"name": "tamper_det"}},
-        )["tamper_detection"]["tamper_det"]
+    def getTamperDetection(self, chn_id: list = None):
+        params = {"tamper_detection": {"name": ["tamper_det"]}}
+        if chn_id:
+            params["tamper_detection"]["chn_id"] = chn_id
+        data = self.executeFunction("getTamperDetectionConfig", params)
+        key = self.__selectDetectionKey(
+            chn_id, detection_key="tamper_det", per_channel_key="tamper_det_chn"
+        )
+        result = data["tamper_detection"][key]
+        return self.__unwrapSingleChn(chn_id, result)
 
-    def setTamperDetection(self, enabled, sensitivity=False):
-        data = {
-            "tamper_detection": {"tamper_det": {"enabled": "on" if enabled else "off"}}
-        }
+    def setTamperDetection(self, enabled, sensitivity=False, chn_id: list = None):
+        per_channel_extra_fields = {"enabled": "on" if enabled else "off"}
         if sensitivity:
             if sensitivity not in ["high", "normal", "low"]:
                 raise Exception("Invalid sensitivity, can be low, normal or high")
             if sensitivity == "normal":
                 sensitivity = "medium"
-            data["tamper_detection"]["tamper_det"]["sensitivity"] = sensitivity
+            per_channel_extra_fields["sensitivity"] = sensitivity
 
+        data = self.__buildChnAwareConfig(
+            "tamper_detection",
+            chn_id=chn_id,
+            item_key="tamper_det",
+            per_channel_key="tamper_det_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
         return self.executeFunction("setTamperDetectionConfig", data)
 
     def getBabyCryDetection(self):
@@ -2287,54 +2034,98 @@ class Tapo:
 
     # Switches
 
-    def __getImageSwitch(self, switch: str) -> str:
-        data = self.executeFunction("getLdc", {"image": {"name": ["switch"]}})
-        switches = data["image"]["switch"]
+    def __getImageSwitch(self, switch: str, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getLdc", params)
+        image = data.get("image", {})
+        if chn_id:
+            switch_chn = image.get("switch_chn")
+            if isinstance(switch_chn, dict):
+                result = {
+                    str(chn): switch_chn[str(chn)].get(switch)
+                    for chn in chn_id
+                    if str(chn) in switch_chn
+                }
+                return self.__unwrapSingleChn(chn_id, result)
+        switches = image.get("switch", {})
         if switch not in switches:
             raise Exception("Switch {} is not supported by this camera".format(switch))
         return switches[switch]
 
-    def __setImageSwitch(self, switch: str, value: str):
-        return self.executeFunction("setLdc", {"image": {"switch": {switch: value}}})
+    def __setImageSwitch(self, switch: str, value: str, chn_id: list = None):
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields={switch: value},
+        )
+        return self.executeFunction("setLdc", data)
 
-    def getLensDistortionCorrection(self):
-        return self.__getImageSwitch("ldc") == "on"
+    def getLensDistortionCorrection(self, chn_id: list = None):
+        value = self.__getImageSwitch("ldc", chn_id=chn_id)
+        if chn_id and isinstance(value, dict):
+            return {key: self.__compareOrNone(val, "on") for key, val in value.items()}
+        return self.__compareOrNone(value, "on")
 
-    def setLensDistortionCorrection(self, enable):
-        return self.__setImageSwitch("ldc", "on" if enable else "off")
+    def setLensDistortionCorrection(self, enable, chn_id: list = None):
+        return self.__setImageSwitch("ldc", "on" if enable else "off", chn_id=chn_id)
 
-    def getDayNightMode(self) -> str:
-        if self.childID:
-            rawValue = self.getNightVisionModeConfig()["image"]["switch"][
-                "night_vision_mode"
-            ]
-            if rawValue == "inf_night_vision":
+    def getDayNightMode(self, chn_id: list = None):
+        def to_day_night_mode(raw_value: str) -> str:
+            if raw_value == "inf_night_vision":
                 return "on"
-            elif rawValue == "wtl_night_vision":
+            elif raw_value == "wtl_night_vision":
                 return "off"
-            elif rawValue == "md_night_vision":
+            elif raw_value == "md_night_vision":
                 return "auto"
-        else:
-            return self.__getImageCommon("inf_type")
+            else:
+                return raw_value
 
-    def setDayNightMode(self, mode):
+        if self.childID:
+            data = self.getNightVisionModeConfig(chn_id)
+            if chn_id:
+                result = {
+                    str(chn): to_day_night_mode(
+                        data["image"]["switch_chn"][str(chn)]["night_vision_mode"]
+                    )
+                    for chn in chn_id
+                }
+                return self.__unwrapSingleChn(chn_id, result)
+            rawValue = data["image"]["switch"]["night_vision_mode"]
+            return to_day_night_mode(rawValue)
+        else:
+            return self.__getImageCommon("inf_type", chn_id=chn_id)
+
+    def setDayNightMode(self, mode, chn_id: list = None):
         allowed_modes = ["off", "on", "auto"]
         if mode not in allowed_modes:
             raise Exception("Day night mode must be one of {}".format(allowed_modes))
         if self.childID:
-            if mode == "on":
-                return self.setNightVisionModeConfig("inf_night_vision")
-            elif mode == "off":
-                return self.setNightVisionModeConfig("wtl_night_vision")
-            elif mode == "auto":
-                return self.setNightVisionModeConfig("md_night_vision")
+            mode_map = {
+                "on": "inf_night_vision",
+                "off": "wtl_night_vision",
+                "auto": "md_night_vision",
+            }
+            return self.setNightVisionModeConfig(mode_map[mode], chn_id=chn_id)
         else:
-            return self.__setImageCommon("inf_type", mode)
+            return self.__setImageCommon("inf_type", mode, chn_id=chn_id)
 
-    def getNightVisionModeConfig(self):
-        return self.executeFunction(
-            "getNightVisionModeConfig", {"image": {"name": "switch"}}
-        )
+    def getNightVisionModeConfig(self, chn_id: list = None):
+        params = {"image": {"name": ["switch"]}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getNightVisionModeConfig", params)
+        if chn_id:
+            result = {
+                str(chn): data["image"]["switch_chn"][str(chn)]
+                for chn in chn_id
+                if str(chn) in data["image"].get("switch_chn", {})
+            }
+            return self.__unwrapSingleChn(chn_id, result)
+        return data
 
     def getNightVisionCapability(self):
         return self.executeFunction(
@@ -2342,57 +2133,120 @@ class Tapo:
             {"image_capability": {"name": ["supplement_lamp"]}},
         )
 
-    def setNightVisionModeConfig(self, mode):
-        return self.executeFunction(
-            "setNightVisionModeConfig",
-            {"image": {"switch": {"night_vision_mode": mode}}},
+    def setNightVisionModeConfig(self, mode, chn_id: list = None):
+        per_channel_extra_fields = {"night_vision_mode": mode}
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
         )
+        return self.executeFunction("setNightVisionModeConfig", data)
 
-    def getImageFlipVertical(self):
+    def getImageFlipVertical(self, chn_id: list = None):
         if self.childID:
-            return self.getRotationStatus()["image"]["switch"]["flip_type"] == "center"
+            data = self.getRotationStatus(chn_id)
+            if chn_id:
+                if isinstance(data, dict) and "flip_type" in data:
+                    return self.__compareOrNone(data["flip_type"], "center")
+                if isinstance(data, dict):
+                    return {
+                        key: self.__compareOrNone(val.get("flip_type"), "center")
+                        for key, val in data.items()
+                        if isinstance(val, dict)
+                    }
+                return data
+            return data["image"]["switch"]["flip_type"] == "center"
         else:
-            return self.__getImageSwitch("flip_type") == "center"
+            value = self.__getImageSwitch("flip_type", chn_id=chn_id)
+            if chn_id and isinstance(value, dict):
+                return {
+                    key: self.__compareOrNone(val, "center")
+                    for key, val in value.items()
+                }
+            return self.__compareOrNone(value, "center")
 
-    def setImageFlipVertical(self, enable):
+    def setImageFlipVertical(self, enable, chn_id: list = None):
         if self.childID:
-            return self.setRotationStatus("center" if enable else "off")
+            return self.setRotationStatus("center" if enable else "off", chn_id=chn_id)
         else:
-            return self.__setImageSwitch("flip_type", "center" if enable else "off")
+            return self.__setImageSwitch(
+                "flip_type", "center" if enable else "off", chn_id=chn_id
+            )
 
-    def setRotationStatus(self, flip_type):
-        return self.executeFunction(
-            "setRotationStatus",
-            {"image": {"switch": {"flip_type": flip_type}}},
+    def setRotationStatus(self, flip_type, chn_id: list = None):
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="switch",
+            per_channel_key="switch_chn",
+            per_channel_extra_fields={"flip_type": flip_type},
         )
+        return self.executeFunction("setRotationStatus", data)
 
-    def getForceWhitelampState(self) -> bool:
-        return self.__getImageSwitch("force_wtl_state") == "on"
+    def getForceWhitelampState(self, chn_id: list = None) -> bool:
+        value = self.__getImageSwitch("force_wtl_state", chn_id=chn_id)
+        if chn_id and isinstance(value, dict):
+            return {key: self.__compareOrNone(val, "on") for key, val in value.items()}
+        return self.__compareOrNone(value, "on")
 
-    def setForceWhitelampState(self, enable: bool):
-        return self.__setImageSwitch("force_wtl_state", "on" if enable else "off")
+    def setForceWhitelampState(self, enable: bool, chn_id: list = None):
+        return self.__setImageSwitch(
+            "force_wtl_state", "on" if enable else "off", chn_id=chn_id
+        )
 
     # Common
 
-    def __getImageCommon(self, field: str) -> str:
-        data = self.executeFunction(
-            "getLightFrequencyInfo", {"image": {"name": "common"}}
-        )
-        if "common" not in data["image"]:
+    def __getImageCommon(self, field: str, chn_id: list = None):
+        params = {"image": {"name": "common"}}
+        if chn_id:
+            params["image"]["chn_id"] = chn_id
+        data = self.executeFunction("getLightFrequencyInfo", params)
+        image = data.get("image", {})
+        common = image.get("common")
+        common_chn = image.get("common_chn")
+
+        if chn_id:
+            if common_chn:
+                result = {
+                    str(chn): common_chn[str(chn)][field]
+                    for chn in chn_id
+                    if str(chn) in common_chn
+                }
+                return self.__unwrapSingleChn(chn_id, result)
+            if common and field in common:
+                result = {str(chn): common[field] for chn in chn_id}
+                return self.__unwrapSingleChn(chn_id, result)
             raise Exception("__getImageCommon is not supported by this camera")
-        fields = data["image"]["common"]
+
+        if common is None and common_chn:
+            first_key = next(iter(common_chn))
+            fields = common_chn[first_key]
+        elif common is None:
+            raise Exception("__getImageCommon is not supported by this camera")
+        else:
+            fields = common
         if field not in fields:
             raise Exception("Field {} is not supported by this camera".format(field))
         return fields[field]
 
-    def __setImageCommon(self, field: str, value: str):
-        return self.executeFunction(
-            "setLightFrequencyInfo", {"image": {"common": {field: value}}}
+    def __setImageCommon(self, field: str, value: str, chn_id: list = None):
+        per_channel_extra_fields = {field: value}
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="common",
+            per_channel_key="common_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
         )
+        return self.executeFunction("setLightFrequencyInfo", data)
 
+    # no need for chn_id, because setting it only works on chn_id 1, when setter called on 2, nothing happens, when on 1, both adjusted
     def getLightFrequencyMode(self) -> str:
         return self.__getImageCommon("light_freq_mode")
 
+    # no need for chn_id, because setting it only works on chn_id 1, when setter called on 2, nothing happens, when on 1, both adjusted
     def setLightFrequencyMode(self, mode):
         # todo: auto does not work on some child cameras?
         allowed_modes = ["auto", "50", "60"]
@@ -2550,7 +2404,7 @@ class Tapo:
 
     # Used for purposes of HomeAssistant-Tapo-Control
     # Uses method names from https://md.depau.eu/s/r1Ys_oWoP
-    def getMost(self, omit_methods=[]):
+    def getMost(self, omit_methods=[], chn_id: list = None):
         if self.deviceType == "SMART.TAPOCHIME":
             requestData = {
                 "method": "multipleRequest",
@@ -2578,6 +2432,40 @@ class Tapo:
                 "method": "multipleRequest",
                 "params": {
                     "requests": [
+                        {
+                            "method": "getLinecrossingDetectionConfig",
+                            "params": {
+                                "linecrossing_detection": {
+                                    "name": ["detection", "arming_schedule"]
+                                }
+                            },
+                        },
+                        {
+                            "method": "getDualCamLinkage",
+                            "params": {"dual_cam_linkage": {"name": "linkage_state"}},
+                        },
+                        {
+                            "method": "readLinkageTargetSetting",
+                            "params": {
+                                "dual_cam_linkage": {"read_linkage_target_setting": {}}
+                            },
+                        },
+                        {
+                            "method": "getLinkageTargetCapability",
+                            "params": {
+                                "dual_cam_linkage": {
+                                    "name": "linkage_target_capability"
+                                }
+                            },
+                        },
+                        {
+                            "method": "getDualCamCapability",
+                            "params": {"image_capability": {"name": ["dualCam"]}},
+                        },
+                        {
+                            "method": "getAllChnInfo",
+                            "params": {"system": {"table": "chn_info"}},
+                        },
                         {
                             "method": "getDiagnoseMode",
                             "params": {"system": {"name": "sys"}},
@@ -2686,7 +2574,7 @@ class Tapo:
                         },
                         {
                             "method": "getTamperDetectionConfig",
-                            "params": {"tamper_detection": {"name": "tamper_det"}},
+                            "params": {"tamper_detection": {"name": ["tamper_det"]}},
                         },
                         {
                             "method": "getLensMaskConfig",
@@ -2694,7 +2582,12 @@ class Tapo:
                         },
                         {
                             "method": "getLdc",
-                            "params": {"image": {"name": ["switch", "common"]}},
+                            "params": {"image": {"name": ["switch"]}},
+                        },
+                        # needs to be duplicated twice, once for switch, once for common for chnID to work properly
+                        {
+                            "method": "getLdc",
+                            "params": {"image": {"name": ["common"]}},
                         },
                         {
                             "method": "getLastAlarmInfo",
@@ -2752,7 +2645,7 @@ class Tapo:
                         {"method": "getSirenStatus", "params": {"siren": {}}},
                         {
                             "method": "getLightFrequencyInfo",
-                            "params": {"image": {"name": "common"}},
+                            "params": {"image": {"name": ["common"]}},
                         },
                         {
                             "method": "getLightFrequencyCapability",
@@ -2768,7 +2661,7 @@ class Tapo:
                         },
                         {
                             "method": "getNightVisionModeConfig",
-                            "params": {"image": {"name": "switch"}},
+                            "params": {"image": {"name": ["switch"]}},
                         },
                         {
                             "method": "getWhitelampStatus",
@@ -2776,7 +2669,7 @@ class Tapo:
                         },
                         {
                             "method": "getWhitelampConfig",
-                            "params": {"image": {"name": "switch"}},
+                            "params": {"image": {"name": ["switch"]}},
                         },
                         {
                             "method": "getMsgPushConfig",
@@ -2814,7 +2707,7 @@ class Tapo:
                         },
                         {
                             "method": "getVideoCapability",
-                            "params": {"video_capability": {"name": "main"}},
+                            "params": {"video_capability": {"name": ["main", "minor"]}},
                         },
                         {
                             "method": "getQuickRespList",
@@ -2885,6 +2778,25 @@ class Tapo:
                     ]
                 },
             }
+            if chn_id:
+                method_chn_roots = {
+                    "getLinecrossingDetectionConfig": "linecrossing_detection",
+                    "getDetectionConfig": "motion_detection",
+                    "getPersonDetectionConfig": "people_detection",
+                    "getVehicleDetectionConfig": "vehicle_detection",
+                    "getPetDetectionConfig": "pet_detection",
+                    "getTamperDetectionConfig": "tamper_detection",
+                    "getNightVisionModeConfig": "image",
+                    "getWhitelampConfig": "image",
+                    "getLightFrequencyInfo": "image",
+                    "getLdc": "image",
+                }
+                for request in requestData["params"]["requests"]:
+                    root_key = method_chn_roots.get(request.get("method"))
+                    if not root_key:
+                        continue
+                    params = request.setdefault("params", {})
+                    params.setdefault(root_key, {})["chn_id"] = chn_id
         if len(omit_methods) != 0:
             filtered_requests = [
                 request
@@ -2894,6 +2806,14 @@ class Tapo:
             requestData["params"]["requests"] = filtered_requests
 
         results = self.performRequest(requestData)
+        try:
+            responses_len = len(results.get("result", {}).get("responses", []))
+            requested_len = len(requestData["params"]["requests"])
+            self.logger.debugLog(
+                f"getMost: requested {requested_len} responses, received {responses_len}"
+            )
+        except Exception:
+            pass
 
         # handle malformed / unexpected response from camera
         if len(requestData["params"]["requests"]) != len(
@@ -2905,7 +2825,7 @@ class Tapo:
                 # response, where camera returns invalid json and incorrect number of responses (1)
                 # containing all the others. When getAudioConfig is not requested in this function
                 # it returns everything as expected.
-                return self.getMost(["getAudioConfig"])
+                return self.getMost(["getAudioConfig"], chn_id)
             else:
                 raise Exception(f"Unexpected camera response: {results}")
 
@@ -2942,6 +2862,57 @@ class Tapo:
                     raise Exception(
                         f"Method {result['method']} has been returned more times than expected. Response: {results}"
                     )
+
+        if chn_id:
+            method_normalization = {
+                "getLinecrossingDetectionConfig": [
+                    ("linecrossing_detection", "detection_chn", "detection")
+                ],
+                "getDetectionConfig": [
+                    ("motion_detection", "motion_det_chn", "motion_det")
+                ],
+                "getPersonDetectionConfig": [
+                    ("people_detection", "detection_chn", "detection")
+                ],
+                "getVehicleDetectionConfig": [
+                    ("vehicle_detection", "detection_chn", "detection")
+                ],
+                "getPetDetectionConfig": [
+                    ("pet_detection", "detection_chn", "detection")
+                ],
+                "getTamperDetectionConfig": [
+                    ("tamper_detection", "tamper_det_chn", "tamper_det")
+                ],
+                "getNightVisionModeConfig": [("image", "switch_chn", "switch")],
+                "getWhitelampConfig": [("image", "switch_chn", "switch")],
+                "getLightFrequencyInfo": [("image", "common_chn", "common")],
+                "getLdc": [
+                    ("image", "switch_chn", "switch"),
+                    ("image", "common_chn", "common"),
+                ],
+            }
+            for method, mappings in method_normalization.items():
+                if method not in returnData:
+                    continue
+                for entry in returnData[method]:
+                    if not entry:
+                        continue
+                    for root_key, per_chn_key, single_key in mappings:
+                        root = entry.get(root_key)
+                        if not isinstance(root, dict):
+                            continue
+                        per_chn = root.get(per_chn_key)
+                        if not isinstance(per_chn, dict):
+                            continue
+                        normalized = (
+                            self.__unwrapSingleChn(chn_id, per_chn)
+                            if len(chn_id) == 1
+                            else per_chn
+                        )
+                        if normalized is None:
+                            continue
+                        root[single_key] = normalized
+                        del root[per_chn_key]
 
         if "getPresetConfig" in returnData and len(returnData["getPresetConfig"]) == 1:
             if returnData["getPresetConfig"][0]:

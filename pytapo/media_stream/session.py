@@ -94,7 +94,7 @@ class HttpMediaSession:
             b"Connection": b"keep-alive",
             b"Content-Length": b"-1",
         }
-        if self.query_params_str:
+        if self.query_params_str and "playerId" in self.query_params:
             headers[b"X-Client-UUID"] = self.query_params["playerId"].encode()
         try:
             self._reader, self._writer = await asyncio.open_connection(
@@ -518,9 +518,22 @@ class HttpMediaSession:
                 yield resp
 
         finally:
+            # Drain the queue before removing references to ensure all
+            # HttpMediaResponse objects are released and can be garbage
+            # collected. Without this, items sitting in queue._queue
+            # (a deque) are permanently stranded in memory.
+            if queue is not None:
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+
             # Ensure the queue is deleted even if the coroutine is canceled externally
             if session in self._sessions:
                 del self._sessions[session]
+            if sequence is not None and sequence in self._sequence_numbers:
+                del self._sequence_numbers[sequence]
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
@@ -528,6 +541,35 @@ class HttpMediaSession:
     async def close(self):
         if self._started:
             self._started = False
+
+            # Cancel the response handler and WAIT for it to fully stop.
+            # Without awaiting, the task may still be suspended inside
+            # queue.put() when we drain below, leading to residual objects.
             self._response_handler_task.cancel()
+            try:
+                await self._response_handler_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+            # Close the writer
             self._writer.close()
             await self._writer.wait_closed()
+
+            # Drain all queues that were never fully consumed.
+            # Any HttpMediaResponse objects sitting in these queues would
+            # otherwise be permanently stranded in memory.
+            for queue in list(self._sessions.values()):
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+            self._sessions.clear()
+
+            for queue in list(self._sequence_numbers.values()):
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+            self._sequence_numbers.clear()
