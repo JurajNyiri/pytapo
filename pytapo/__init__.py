@@ -487,7 +487,7 @@ class Tapo:
         weekX=0,
         weekY=0,
         logoX=0,
-        logoY=0,
+        logoY=9150,
     ):
         if self.childID:
             raise Exception("setOsd not supported for child devices yet")
@@ -533,6 +533,7 @@ class Tapo:
             "dateX": dateX, "dateY": dateY,
             "labelX": labelX, "labelY": labelY,
             "weekX": weekX, "weekY": weekY,
+            "logoX": logoX, "logoY": logoY,
         }
         for name, val in coords.items():
             if not 0 <= val <= 10000:
