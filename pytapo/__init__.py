@@ -529,21 +529,16 @@ class Tapo:
             data["OSD"]["label_info_1"]["enabled"] = "off"
         else:
             data["OSD"]["label_info_1"]["text"] = label
-        if (
-            dateX > 10000
-            or dateX < 0
-            or labelX > 10000
-            or labelX < 0
-            or weekX > 10000
-            or weekX < 0
-            or dateY > 10000
-            or dateY < 0
-            or labelY > 10000
-            or labelY < 0
-            or weekY > 10000
-            or weekY < 0
-        ):
-            raise Exception("Error: Incorrect corrdinates, must be between 0 and 10000")
+        coords = {
+            "dateX": dateX, "dateY": dateY,
+            "labelX": labelX, "labelY": labelY,
+            "weekX": weekX, "weekY": weekY,
+        }
+        for name, val in coords.items():
+            if not 0 <= val <= 10000:
+                raise Exception(
+                    f"Error: {name} is {val}, must be between 0 and 10000"
+                )
 
         return self.performRequest(data)
 
