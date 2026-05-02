@@ -81,8 +81,10 @@ class Convert:
     # calculates real stream length, hard on processing since it has to go through all the frames
     def calculateLength(self):
         detectedLength = False
+        tmp_name = None
         try:
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_name = tmp.name
                 tmp.write(self.writer.getvalue())
                 result = subprocess.run(
                     [
@@ -93,7 +95,7 @@ class Convert:
                         "format=duration",
                         "-of",
                         "default=noprint_wrappers=1:nokey=1",
-                        tmp.name,
+                        tmp_name,
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -101,12 +103,16 @@ class Convert:
                 detectedLength = float(result.stdout)
                 self.known_lengths[self.addedChunks] = detectedLength
                 self.lengthLastCalculatedAtChunk = self.addedChunks
-            os.unlink(tmp.name)
         except Exception as e:
             print("")
             print(e)
             print("Warning: Could not calculate length from stream.")
-            pass
+        finally:
+            if tmp_name is not None:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
         return detectedLength
 
     # returns length of video, can return an estimate which is usually very close
