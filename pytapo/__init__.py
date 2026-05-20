@@ -698,6 +698,33 @@ class Tapo:
                 "setWakeUpConfig", {"wake_up": {"config": {"wake_up_type": wakeUpType}}}
             )
 
+    def setReboot(self, enabled=None, time=None, day=None, random_range=30):
+        params = {}
+        if enabled is None or time is None or day is None:
+            rebootConfig = self.getReboot()["timing_reboot"]["reboot"]
+
+        if enabled is not None:
+            params["enabled"] = "on" if enabled else "off"
+        else:
+            params["enabled"] = rebootConfig["enabled"]
+
+        if time is not None:
+            params["time"] = time
+        else:
+            params["time"] = rebootConfig["time"]
+
+        if day is not None:
+            params["day"] = str(day)
+        else:
+            params["day"] = rebootConfig["day"]
+
+        params["random_range"] = int(random_range)
+
+        return self.executeFunction(
+            "setReboot",
+            {"timing_reboot": {"reboot": params}},
+        )
+
     def setChimeRingPlan(self, enabled=None, ringPlan=None):
         params = {}
         if enabled is None or ringPlan is None:
@@ -747,6 +774,12 @@ class Tapo:
 
     def getWakeUpConfig(self):
         return self.executeFunction("getWakeUpConfig", {"wake_up": {"name": "config"}})
+
+    def getReboot(self):
+        return self.executeFunction(
+            "getReboot",
+            {"timing_reboot": {"name": ["reboot"]}},
+        )
 
     def getChimeCtrlList(self):
         return self.executeFunction(
@@ -2758,6 +2791,10 @@ class Tapo:
                         {
                             "method": "getWakeUpConfig",
                             "params": {"wake_up": {"name": "config"}},
+                        },
+                        {
+                            "method": "getReboot",
+                            "params": {"timing_reboot": {"name": ["reboot"]}},
                         },
                         {
                             "method": "getBatteryCapability",
