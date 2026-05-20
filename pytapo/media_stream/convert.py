@@ -81,32 +81,38 @@ class Convert:
     # calculates real stream length, hard on processing since it has to go through all the frames
     def calculateLength(self):
         detectedLength = False
+        tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_path = tmp.name
                 tmp.write(self.writer.getvalue())
-                result = subprocess.run(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "fatal",
-                        "-show_entries",
-                        "format=duration",
-                        "-of",
-                        "default=noprint_wrappers=1:nokey=1",
-                        tmp.name,
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                )
-                detectedLength = float(result.stdout)
-                self.known_lengths[self.addedChunks] = detectedLength
-                self.lengthLastCalculatedAtChunk = self.addedChunks
-            os.unlink(tmp.name)
-        except Exception as e:
-            print("")
-            print(e)
-            print("Warning: Could not calculate length from stream.")
-            pass
+
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "fatal",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    tmp_path,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            duration_output = result.stdout.decode(errors="ignore").strip()
+            if not duration_output:
+                return False
+
+            detectedLength = float(duration_output)
+            self.known_lengths[self.addedChunks] = detectedLength
+            self.lengthLastCalculatedAtChunk = self.addedChunks
+        except Exception:
+            logger.debug("Could not calculate length from stream", exc_info=True)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
         return detectedLength
 
     # returns length of video, can return an estimate which is usually very close
