@@ -5,7 +5,7 @@ import logging
 import random
 import warnings
 import urllib.parse
-from ..const import EncryptionMethod
+from ..const import EncryptionMethod, CONNECTION_TIMEOUT
 from asyncio import StreamReader, StreamWriter, Task, Queue
 from json import JSONDecodeError
 from typing import Optional, Mapping, Generator, MutableMapping
@@ -97,8 +97,8 @@ class HttpMediaSession:
         if self.query_params_str and "playerId" in self.query_params:
             headers[b"X-Client-UUID"] = self.query_params["playerId"].encode()
         try:
-            self._reader, self._writer = await asyncio.open_connection(
-                self.ip, self.port
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self.ip, self.port), timeout=CONNECTION_TIMEOUT
             )
             logger.debug("Connected to the media streaming server")
 
@@ -393,7 +393,7 @@ class HttpMediaSession:
         mimetype: str = "application/json",
         session: int = None,
         encrypt: bool = False,
-        no_data_timeout=10.0,
+        no_data_timeout=CONNECTION_TIMEOUT,
     ) -> Generator[HttpMediaResponse, None, None]:
         sequence = None
         queue = None

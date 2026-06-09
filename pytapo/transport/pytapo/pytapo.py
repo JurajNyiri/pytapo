@@ -5,7 +5,7 @@ import requests
 import json
 import hashlib
 import copy
-from ...const import EncryptionMethod, MAX_LOGIN_RETRIES
+from ...const import EncryptionMethod, MAX_LOGIN_RETRIES, CONNECTION_TIMEOUT
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from .TlsAdapter import TlsAdapter
@@ -390,6 +390,7 @@ class pyTapo:
                 redactedKwargs["headers"] = redactedKwargsHeaders
         self.debugLog("New request:")
         self.debugLog(redactedKwargs)
+        kwargs.setdefault("timeout", CONNECTION_TIMEOUT)
         try:
             response = session.request(method, url, **kwargs)
         except requests.RequestException as err:

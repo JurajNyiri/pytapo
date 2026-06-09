@@ -130,6 +130,7 @@ ERROR_CODES = {
     "-2099": "UNKNOWN_ERROR",
 }
 MAX_LOGIN_RETRIES = 1
+CONNECTION_TIMEOUT = 10
 
 
 class EncryptionMethod:
