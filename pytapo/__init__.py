@@ -487,7 +487,7 @@ class Tapo:
         weekX=0,
         weekY=0,
         logoX=0,
-        logoY=0,
+        logoY=9150,
     ):
         if self.childID:
             raise Exception("setOsd not supported for child devices yet")
@@ -529,21 +529,17 @@ class Tapo:
             data["OSD"]["label_info_1"]["enabled"] = "off"
         else:
             data["OSD"]["label_info_1"]["text"] = label
-        if (
-            dateX > 10000
-            or dateX < 0
-            or labelX > 10000
-            or labelX < 0
-            or weekX > 10000
-            or weekX < 0
-            or dateY > 10000
-            or dateY < 0
-            or labelY > 10000
-            or labelY < 0
-            or weekY > 10000
-            or weekY < 0
-        ):
-            raise Exception("Error: Incorrect corrdinates, must be between 0 and 10000")
+        coords = {
+            "dateX": dateX, "dateY": dateY,
+            "labelX": labelX, "labelY": labelY,
+            "weekX": weekX, "weekY": weekY,
+            "logoX": logoX, "logoY": logoY,
+        }
+        for name, val in coords.items():
+            if not 0 <= val <= 10000:
+                raise Exception(
+                    f"Error: {name} is {val}, must be between 0 and 10000"
+                )
 
         return self.performRequest(data)
 
@@ -698,6 +694,33 @@ class Tapo:
                 "setWakeUpConfig", {"wake_up": {"config": {"wake_up_type": wakeUpType}}}
             )
 
+    def setReboot(self, enabled=None, time=None, day=None, random_range=30):
+        params = {}
+        if enabled is None or time is None or day is None:
+            rebootConfig = self.getReboot()["timing_reboot"]["reboot"]
+
+        if enabled is not None:
+            params["enabled"] = "on" if enabled else "off"
+        else:
+            params["enabled"] = rebootConfig["enabled"]
+
+        if time is not None:
+            params["time"] = time
+        else:
+            params["time"] = rebootConfig["time"]
+
+        if day is not None:
+            params["day"] = str(day)
+        else:
+            params["day"] = rebootConfig["day"]
+
+        params["random_range"] = int(random_range)
+
+        return self.executeFunction(
+            "setReboot",
+            {"timing_reboot": {"reboot": params}},
+        )
+
     def setChimeRingPlan(self, enabled=None, ringPlan=None):
         params = {}
         if enabled is None or ringPlan is None:
@@ -747,6 +770,12 @@ class Tapo:
 
     def getWakeUpConfig(self):
         return self.executeFunction("getWakeUpConfig", {"wake_up": {"name": "config"}})
+
+    def getReboot(self):
+        return self.executeFunction(
+            "getReboot",
+            {"timing_reboot": {"name": ["reboot"]}},
+        )
 
     def getChimeCtrlList(self):
         return self.executeFunction(
@@ -2758,6 +2787,10 @@ class Tapo:
                         {
                             "method": "getWakeUpConfig",
                             "params": {"wake_up": {"name": "config"}},
+                        },
+                        {
+                            "method": "getReboot",
+                            "params": {"timing_reboot": {"name": ["reboot"]}},
                         },
                         {
                             "method": "getBatteryCapability",
