@@ -326,6 +326,8 @@ class pyTapo:
             "remote end closed connection without response",
             "connection aborted",
             "remotedisconnected",
+            "unexpected_eof_while_reading",  # Python 3.12+ SSL EOF on Tapo cameras
+            "eof occurred in violation of protocol",
         )
         return any(marker in err_str for marker in transient_markers)
 
