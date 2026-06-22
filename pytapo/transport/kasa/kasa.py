@@ -423,6 +423,10 @@ class Kasa:
             context.set_ciphers(SslAesTransport.CIPHERS)
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+        with suppress(Exception):
+            # Tapo cameras do not properly close TLS connections; suppress the
+            # resulting EOF error introduced in Python 3.12 (ssl.OP_IGNORE_UNEXPECTED_EOF).
+            context.options |= ssl.OP_IGNORE_UNEXPECTED_EOF
         return context
 
     def _get_kasa_default_ssl_context(self):
@@ -439,6 +443,8 @@ class Kasa:
             context.minimum_version = ssl.TLSVersion.TLSv1
         with suppress(Exception):
             context.options |= ssl.OP_LEGACY_SERVER_CONNECT
+        with suppress(Exception):
+            context.options |= ssl.OP_IGNORE_UNEXPECTED_EOF
         with suppress(Exception):
             context.set_ciphers("ALL:@SECLEVEL=0")
         return context
