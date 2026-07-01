@@ -1370,19 +1370,19 @@ class Tapo:
                 data["msg_alarm"]["chn1_msg_alarm_info"]["alarm_type"] = str(alarmType)
             return self.performRequest(data)
 
-    # todo child
     def moveMotor(self, x, y):
-        return self.performRequest(
-            {"method": "do", "motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}}
+        return self.executeFunction(
+            "motorMove",
+            {"motor": {"move": {"x_coord": str(x), "y_coord": str(y)}}},
         )
 
-    # todo child
     def moveMotorStep(self, angle):
         if not (0 <= angle < 360):
             raise Exception("Angle must be in a range 0 <= angle < 360")
 
-        return self.performRequest(
-            {"method": "do", "motor": {"movestep": {"direction": str(angle)}}}
+        return self.executeFunction(
+            "relativeMove",
+            {"motor": {"movestep": {"direction": str(angle)}}},
         )
 
     def moveMotorClockWise(self):
@@ -1399,7 +1399,10 @@ class Tapo:
 
     # todo child
     def calibrateMotor(self):
-        return self.performRequest({"method": "do", "motor": {"manual_cali": ""}})
+        return self.executeFunction(
+            "manualCalibrate",
+            {"motor": {"manual_cali": ""}},
+        )
 
     def format(self):
         return self.executeFunction(
