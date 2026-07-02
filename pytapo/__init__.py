@@ -1963,6 +1963,18 @@ class Tapo:
         )
         return data
 
+    def getPatrolSchedule(self):
+        data = self.executeFunction(
+            "getPatrolSchedule", {"patrol": {"get_patrol_schedule": {}}}
+        )
+        return data["patrol"]["patrol"]
+
+    def setPatrolStatus(self, enabled):
+        return self.executeFunction(
+            "setPatrolStatus",
+            {"patrol": {"set_patrol_status": {"value": "on" if enabled else "off"}}},
+        )
+
     def setBabyCryDetection(self, enabled, sensitivity=False):
         data = {"sound_detection": {"bcd": {"enabled": "on" if enabled else "off"}}}
         if sensitivity:
@@ -2632,6 +2644,14 @@ class Tapo:
                         {
                             "method": "getTargetTrackConfig",
                             "params": {"target_track": {"name": ["target_track_info"]}},
+                        },
+                        {
+                            "method": "getPatrolSchedule",
+                            "params": {"patrol": {"get_patrol_schedule": {}}},
+                        },
+                        {
+                            "method": "getPatrolAction",
+                            "params": {"patrol": {"get_patrol_action": {}}},
                         },
                         {
                             "method": "getPresetConfig",
