@@ -2155,7 +2155,7 @@ class Tapo:
             }
             return self.setNightVisionModeConfig(mode_map[mode], chn_id=chn_id)
         else:
-            return self.__setImageCommon("inf_type", mode, chn_id=chn_id)
+            return self.setDayNightModeConfig(mode, chn_id=chn_id)
 
     def getNightVisionModeConfig(self, chn_id: list = None):
         params = {"image": {"name": ["switch"]}}
@@ -2187,6 +2187,17 @@ class Tapo:
             per_channel_extra_fields=per_channel_extra_fields,
         )
         return self.executeFunction("setNightVisionModeConfig", data)
+
+    def setDayNightModeConfig(self, mode, chn_id: list = None):
+        per_channel_extra_fields = {"inf_type": mode}
+        data = self.__buildChnAwareConfig(
+            "image",
+            chn_id=chn_id,
+            item_key="common",
+            per_channel_key="common_chn",
+            per_channel_extra_fields=per_channel_extra_fields,
+        )
+        return self.executeFunction("setDayNightModeConfig", data)
 
     def getImageFlipVertical(self, chn_id: list = None):
         if self.childID:
