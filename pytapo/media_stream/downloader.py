@@ -161,81 +161,53 @@ class Downloader:
                         currentAction = "Downloading"
                     downloadedFull = False
                     stream = mediaSession.transceive(payload)
-                    while True:
-                        try:
-                            if self.stall_timeout and self.stall_timeout > 0:
-                                resp = await asyncio.wait_for(
-                                    stream.__anext__(), timeout=self.stall_timeout
-                                )
-                            else:
-                                resp = await stream.__anext__()
-                        except StopAsyncIteration:
-                            self.tapo.logger.debugLog("Received end of stream.")
-                            break
-                        except asyncio.TimeoutError:
-                            # Camera stopped responding mid-download; break out so we can retry.
-                            self.tapo.logger.debugLog(
-                                "Timed out waiting for recording data, retrying."
-                            )
-                            break
-                        if resp.mimetype == "video/mp2t":
-                            dataChunks += 1
-                            convert.write(
-                                resp.plaintext,
-                                resp.audioPayload,
-                                resp.audioPayloadType,
-                                self.audio_sample_rate,
-                            )
-                            detectedLength = convert.getLength()
-                            if detectedLength is False:
-                                yield {
-                                    "currentAction": currentAction,
-                                    "fileName": fileName,
-                                    "progress": 0,
-                                    "total": segmentLength,
-                                }
-                                detectedLength = 0
-                            else:
-                                yield {
-                                    "currentAction": currentAction,
-                                    "fileName": fileName,
-                                    "progress": detectedLength,
-                                    "total": segmentLength,
-                                }
-                            if (detectedLength > segmentLength + self.padding) or (
-                                retry
-                                and detectedLength
-                                >= segmentLength  # fix for the latest latest recording
-                            ):
-                                downloadedFull = True
-                                currentAction = "Converting"
-                                yield {
-                                    "currentAction": currentAction,
-                                    "fileName": fileName,
-                                    "progress": 0,
-                                    "total": 0,
-                                }
-                                await convert.save(fileName, segmentLength)
-                                downloading = False
-                                break
-                        # in case a finished stream notification is caught, save the chunks as is
-                        elif resp.mimetype == "application/json":
+                    try:
+                        while True:
                             try:
-                                json_data = json.loads(resp.plaintext.decode())
-
-                                if (
-                                    "type" in json_data
-                                    and json_data["type"] == "notification"
-                                    and "params" in json_data
-                                    and "event_type" in json_data["params"]
-                                    and json_data["params"]["event_type"]
-                                    == "stream_status"
-                                    and "status" in json_data["params"]
-                                    and json_data["params"]["status"] == "finished"
-                                ):
-                                    self.tapo.logger.debugLog(
-                                        "Received json notification about finished stream."
+                                if self.stall_timeout and self.stall_timeout > 0:
+                                    resp = await asyncio.wait_for(
+                                        stream.__anext__(), timeout=self.stall_timeout
                                     )
+                                else:
+                                    resp = await stream.__anext__()
+                            except StopAsyncIteration:
+                                self.tapo.logger.debugLog("Received end of stream.")
+                                break
+                            except asyncio.TimeoutError:
+                                # Camera stopped responding mid-download; break out so we can retry.
+                                self.tapo.logger.debugLog(
+                                    "Timed out waiting for recording data, retrying."
+                                )
+                                break
+                            if resp.mimetype == "video/mp2t":
+                                dataChunks += 1
+                                convert.write(
+                                    resp.plaintext,
+                                    resp.audioPayload,
+                                    resp.audioPayloadType,
+                                    self.audio_sample_rate,
+                                )
+                                detectedLength = convert.getLength()
+                                if detectedLength is False:
+                                    yield {
+                                        "currentAction": currentAction,
+                                        "fileName": fileName,
+                                        "progress": 0,
+                                        "total": segmentLength,
+                                    }
+                                    detectedLength = 0
+                                else:
+                                    yield {
+                                        "currentAction": currentAction,
+                                        "fileName": fileName,
+                                        "progress": detectedLength,
+                                        "total": segmentLength,
+                                    }
+                                if (detectedLength > segmentLength + self.padding) or (
+                                    retry
+                                    and detectedLength
+                                    >= segmentLength  # fix for the latest latest recording
+                                ):
                                     downloadedFull = True
                                     currentAction = "Converting"
                                     yield {
@@ -244,13 +216,48 @@ class Downloader:
                                         "progress": 0,
                                         "total": 0,
                                     }
-                                    await convert.save(fileName, convert.getLength())
+                                    await convert.save(fileName, segmentLength)
                                     downloading = False
                                     break
-                            except JSONDecodeError:
-                                self.tapo.logger.debugLog(
-                                    "Unable to parse JSON sent from device"
-                                )
+                            # in case a finished stream notification is caught, save the chunks as is
+                            elif resp.mimetype == "application/json":
+                                try:
+                                    json_data = json.loads(resp.plaintext.decode())
+
+                                    if (
+                                        "type" in json_data
+                                        and json_data["type"] == "notification"
+                                        and "params" in json_data
+                                        and "event_type" in json_data["params"]
+                                        and json_data["params"]["event_type"]
+                                        == "stream_status"
+                                        and "status" in json_data["params"]
+                                        and json_data["params"]["status"] == "finished"
+                                    ):
+                                        self.tapo.logger.debugLog(
+                                            "Received json notification about finished stream."
+                                        )
+                                        downloadedFull = True
+                                        currentAction = "Converting"
+                                        yield {
+                                            "currentAction": currentAction,
+                                            "fileName": fileName,
+                                            "progress": 0,
+                                            "total": 0,
+                                        }
+                                        await convert.save(fileName, convert.getLength())
+                                        downloading = False
+                                        break
+                                except JSONDecodeError:
+                                    self.tapo.logger.debugLog(
+                                        "Unable to parse JSON sent from device"
+                                    )
+                    finally:
+                        if stream is not None:
+                            try:
+                                await stream.aclose()
+                            except (AttributeError, RuntimeError, StopAsyncIteration):
+                                pass
                     if downloading:
                         # Handle case where camera randomly stopped respoding
                         if not downloadedFull and not retry:
