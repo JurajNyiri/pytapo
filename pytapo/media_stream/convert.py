@@ -91,30 +91,31 @@ class Convert:
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp_name = tmp.name
                 tmp.write(self.writer.getvalue())
-                result = subprocess.run(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "fatal",
-                        "-show_entries",
-                        "format=duration",
-                        "-of",
-                        "default=noprint_wrappers=1:nokey=1",
-                        tmp_name,
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+            # Closing the file flushes buffered data before ffprobe reads it.
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "fatal",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    tmp_name,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            detectedLength = float(result.stdout)
+            self.known_lengths[self.addedChunks] = detectedLength
+            self.lengthLastCalculatedAtChunk = self.addedChunks
+            # Cache the bytes-per-second ratio so cheap estimates can be
+            # used between ffprobe calls instead of spawning a subprocess
+            # for every progress update.
+            if detectedLength and detectedLength > 0:
+                self._cached_bytes_per_second = (
+                    len(self.writer.getvalue()) / detectedLength
                 )
-                detectedLength = float(result.stdout)
-                self.known_lengths[self.addedChunks] = detectedLength
-                self.lengthLastCalculatedAtChunk = self.addedChunks
-                # Cache the bytes-per-second ratio so cheap estimates can be
-                # used between ffprobe calls instead of spawning a subprocess
-                # for every progress update.
-                if detectedLength and detectedLength > 0:
-                    self._cached_bytes_per_second = (
-                        len(self.writer.getvalue()) / detectedLength
-                    )
         except Exception as e:
             logger.debug("Could not calculate length from stream: %s", e)
         finally:
