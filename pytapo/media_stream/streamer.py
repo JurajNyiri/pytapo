@@ -237,6 +237,10 @@ class Streamer:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             pass_fds=pass_fds,
+            # ffmpeg can emit very long stderr lines (a single warning/error with
+            # no newline). The default StreamReader limit is 64 KiB, which makes
+            # readline() raise ValueError on such a line; give it more headroom.
+            limit=2**20,  # 1 MiB
         )
 
         asyncio.create_task(self._print_ffmpeg_logs(self.streamProcess.stderr))
@@ -259,7 +263,15 @@ class Streamer:
 
     async def _print_ffmpeg_logs(self, stderr):
         while True:
-            line = await stderr.readline()
+            try:
+                line = await stderr.readline()
+            except ValueError:
+                # An ffmpeg stderr line exceeded the StreamReader buffer limit.
+                # asyncio's readline() discards the oversized data and raises
+                # ValueError; skip that line and keep pumping logs instead of
+                # letting this fire-and-forget task die with an unretrieved
+                # exception (which crashes the log task and spams a traceback).
+                continue
             if not line:
                 break
             if self.logFunction is not None:
