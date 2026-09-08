@@ -509,7 +509,7 @@ class HttpMediaSession:
                 if resp.encrypted and isinstance(resp.plaintext, Exception):
                     raise resp.plaintext
 
-                tsReader.setBuffer(list(resp.plaintext))
+                tsReader.setBuffer(resp.plaintext)
                 pkt = tsReader.getPacket()
                 if pkt and pkt.payloadType in (PayloadType.PCMA, PayloadType.PCMU):
                     resp.audioPayload = pkt.payload

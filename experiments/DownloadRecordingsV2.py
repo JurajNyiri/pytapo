@@ -68,7 +68,7 @@ async def download_async(tapo: Tapo, fileNamePrefix=""):
                 logFunction=callback,
                 outputDirectory=outputDir,
                 includeAudio=True if enable_audio == "yes" else False,
-                fileName=f"{recording[key]["startTime"]}-{recording[key]["endTime"]}.mp4",
+                fileName=f"{recording[key]['startTime']}-{recording[key]['endTime']}.mp4",
                 mode="mp4",
                 quality="VGA",
             )

@@ -4,6 +4,7 @@ import subprocess
 import os
 import datetime
 import tempfile
+import time
 import aiofiles
 from rtp import PayloadType
 
@@ -21,6 +22,9 @@ class Convert:
         self.lengthLastCalculatedAtChunk = 0
         self.audio_payload_type = PayloadType.PCMA
         self.audio_sample_rate = 8000
+        self._last_length_calc_time = None
+        self._cached_bytes_per_second = None
+        self._min_time_between_ffprobe = 5.0  # seconds
 
     def _get_audio_format(self):
         if self.audio_payload_type == PayloadType.PCMU:
@@ -82,6 +86,7 @@ class Convert:
     def calculateLength(self):
         detectedLength = False
         tmp_name = None
+        self._last_length_calc_time = time.time()
         try:
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp_name = tmp.name
@@ -103,10 +108,15 @@ class Convert:
                 detectedLength = float(result.stdout)
                 self.known_lengths[self.addedChunks] = detectedLength
                 self.lengthLastCalculatedAtChunk = self.addedChunks
+                # Cache the bytes-per-second ratio so cheap estimates can be
+                # used between ffprobe calls instead of spawning a subprocess
+                # for every progress update.
+                if detectedLength and detectedLength > 0:
+                    self._cached_bytes_per_second = (
+                        len(self.writer.getvalue()) / detectedLength
+                    )
         except Exception as e:
-            print("")
-            print(e)
-            print("Warning: Could not calculate length from stream.")
+            logger.debug("Could not calculate length from stream: %s", e)
         finally:
             if tmp_name is not None:
                 try:
@@ -115,29 +125,56 @@ class Convert:
                     pass
         return detectedLength
 
-    # returns length of video, can return an estimate which is usually very close
-    def getLength(self, exact=False):
-        if bool(self.known_lengths) is True:
-            lastKnownChunk = list(self.known_lengths)[-1]
-            lastKnownLength = self.known_lengths[lastKnownChunk]
+    def _should_recalculate_length(self):
+        """Decide whether to pay the cost of an ffprobe subprocess call."""
+        if self._last_length_calc_time is None:
+            return True
+        # Do not run ffprobe more often than _min_time_between_ffprobe seconds.
+        # This prevents the download loop from spawning hundreds of ffprobe
+        # processes on fast streams with small chunks.
+        if time.time() - self._last_length_calc_time < self._min_time_between_ffprobe:
+            return False
+        if not self.known_lengths:
+            # ffprobe has failed so far; keep retrying, but only at the
+            # throttled rate above.
+            return True
         if (
-            exact
-            or not self.known_lengths
-            or self.addedChunks
+            self.addedChunks
             > self.lengthLastCalculatedAtChunk
             + self.getRefreshIntervalForLengthEstimate()
-            or lastKnownLength == 0
+        ):
+            return True
+        return False
+
+    # returns length of video, can return an estimate which is usually very close
+    def getLength(self, exact=False):
+        # Finalization must probe the complete buffer and must not fall back to
+        # a progress estimate if that probe fails.
+        if exact:
+            return self.calculateLength()
+        lastKnownChunk = 0
+        lastKnownLength = 0
+        has_known_lengths = bool(self.known_lengths)
+        if has_known_lengths:
+            lastKnownChunk = list(self.known_lengths)[-1]
+            lastKnownLength = self.known_lengths[lastKnownChunk]
+        if self._should_recalculate_length() or (
+            has_known_lengths and lastKnownLength == 0
         ):
             calculatedLength = self.calculateLength()
             if calculatedLength is not False:
                 return calculatedLength
-            else:
-                if bool(self.known_lengths) is True:
-                    bytesPerChunk = lastKnownChunk / lastKnownLength
-                    return self.addedChunks / bytesPerChunk
+            elif has_known_lengths:
+                bytesPerChunk = lastKnownChunk / lastKnownLength
+                return self.addedChunks / bytesPerChunk
         else:
-            bytesPerChunk = lastKnownChunk / lastKnownLength
-            return self.addedChunks / bytesPerChunk
+            # Prefer a bytes-per-second estimate once a ratio has been cached,
+            # as it avoids the chunk-count assumption when bitrate changes.
+            if self._cached_bytes_per_second:
+                return len(self.writer.getvalue()) / self._cached_bytes_per_second
+            if has_known_lengths:
+                bytesPerChunk = lastKnownChunk / lastKnownLength
+                return self.addedChunks / bytesPerChunk
         return False
 
     def write(self, data: bytes, audioData: bytes, audioPayloadType=None, audioSampleRate=None):

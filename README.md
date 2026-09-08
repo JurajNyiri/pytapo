@@ -70,6 +70,16 @@ You need to call it with following ENV values:
 
 You also need to have ffmpeg installed as that is used for converting the streams to watchable file.
 
+### Performance notes
+
+Recordings are downloaded through the camera's encrypted streaming protocol (`/stream`). The camera does not expose the raw MP4 files directly, so a true "file copy" is not possible; the stream is AES-decrypted and the resulting MPEG-TS data is remuxed into an MP4 container by ffmpeg (the video track is copied as-is, the audio track is re-encoded to AAC).
+
+You can tune the download behavior with the following `Downloader` parameters:
+
+- `window_size`: Affects throughput and stability. Higher values usually download faster but can cause some cameras to stop responding. Common values are `50` (stable) or `200` (default).
+- `progressInterval`: Minimum time in seconds between progress updates (default `1.0`). Increasing this value reduces CPU overhead because the library no longer runs an `ffprobe` subprocess on every chunk just to report progress. Use `progressInterval=0` to restore the previous per-chunk behavior.
+- `stall_timeout`: Seconds to wait for data before treating the stream as stalled and retrying (default `120`).
+
 ## Contributions:
 
 Contributions to pytapo are welcomed.
