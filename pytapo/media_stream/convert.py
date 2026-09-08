@@ -1,6 +1,7 @@
 import logging
 import io
 import subprocess
+import shutil
 import os
 import datetime
 import tempfile
@@ -14,6 +15,13 @@ logging.getLogger("libav").setLevel(logging.ERROR)
 
 class Convert:
     def __init__(self):
+        missing = [name for name in ("ffmpeg", "ffprobe") if shutil.which(name) is None]
+        if missing:
+            raise RuntimeError(
+                "Required executable(s) not found on PATH: "
+                + ", ".join(missing)
+                + ". Install FFmpeg with both ffmpeg and ffprobe available on PATH."
+            )
         self.stream = None
         self.writer = io.BytesIO()
         self.audioWriter = io.BytesIO()
