@@ -148,16 +148,18 @@ class Convert:
 
     # returns length of video, can return an estimate which is usually very close
     def getLength(self, exact=False):
+        # Finalization must probe the complete buffer and must not fall back to
+        # a progress estimate if that probe fails.
+        if exact:
+            return self.calculateLength()
         lastKnownChunk = 0
         lastKnownLength = 0
         has_known_lengths = bool(self.known_lengths)
         if has_known_lengths:
             lastKnownChunk = list(self.known_lengths)[-1]
             lastKnownLength = self.known_lengths[lastKnownChunk]
-        if (
-            exact
-            or self._should_recalculate_length()
-            or (has_known_lengths and lastKnownLength == 0)
+        if self._should_recalculate_length() or (
+            has_known_lengths and lastKnownLength == 0
         ):
             calculatedLength = self.calculateLength()
             if calculatedLength is not False:

@@ -3,6 +3,7 @@ import aiofiles
 import json
 import os
 import hashlib
+import math
 import time
 from datetime import datetime
 from json import JSONDecodeError
@@ -248,6 +249,15 @@ class Downloader:
                                     self.tapo.logger.debugLog(
                                         "Received json notification about finished stream."
                                     )
+                                    detectedLength = convert.getLength(exact=True)
+                                    if (
+                                        not math.isfinite(detectedLength)
+                                        or detectedLength <= 0
+                                    ):
+                                        self.tapo.logger.debugLog(
+                                            "Could not determine finished recording duration."
+                                        )
+                                        break
                                     downloadedFull = True
                                     currentAction = "Converting"
                                     yield {
@@ -256,7 +266,7 @@ class Downloader:
                                         "progress": 0,
                                         "total": 0,
                                     }
-                                    await convert.save(fileName, convert.getLength())
+                                    await convert.save(fileName, detectedLength)
                                     downloading = False
                                     break
                             except JSONDecodeError:
@@ -275,9 +285,11 @@ class Downloader:
                             }
                             retry = True
                         else:
-                            detectedLength = convert.getLength()
+                            detectedLength = convert.getLength(exact=True)
                             if (
-                                detectedLength >= segmentLength - 5
+                                math.isfinite(detectedLength)
+                                and detectedLength > 0
+                                and detectedLength >= segmentLength - 5
                             ):  # workaround for weird cases where the recording is a bit shorter than reported
                                 downloadedFull = True
                                 currentAction = "Converting [shorter]"
