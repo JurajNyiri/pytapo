@@ -13,10 +13,15 @@ async def getRecordingSnapshot(tapo, startTime, timeout=8):
     opens a session of its own and closes it afterwards; several snapshots can be
     fetched in a row with getRecordingSnapshots.
 
-    Returns the JPEG bytes, or None if the camera has no image for that time. For a
-    start_time that does not match a recording the camera acknowledges the request
-    and then stays silent, so that case costs the full timeout (a snapshot itself
-    arrives within a second or two).
+    The camera only keeps such an image for recordings triggered by a detection
+    (video_type other than "1"); the Tapo app only asks for it on detection items.
+    For a timed (continuous) recording, or a start_time that does not match any
+    recording, the camera acknowledges the request and then stays silent, so that
+    case costs the full timeout. Filter on the recording's video_type first when
+    walking a getRecordings() result; a snapshot itself arrives within a second
+    or two.
+
+    Returns the JPEG bytes, or None if the camera has no image for that time.
     """
     async for image in getRecordingSnapshots(tapo, [startTime], timeout=timeout):
         return image
