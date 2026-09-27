@@ -31,7 +31,9 @@ class Transport(Kasa, Klap, pyTapo, Tpap):
         self.host = host
         self.controlPort = controlPort
 
-        backend_cls = {"kasa": Kasa, "klap": Klap, "pytapo": pyTapo, "tpap": Tpap}[self.method]
+        backend_cls = {"kasa": Kasa, "klap": Klap, "pytapo": pyTapo, "tpap": Tpap}[
+            self.method
+        ]
         self.transport = backend_cls
 
         # keep only kwargs that backend __init__ accepts

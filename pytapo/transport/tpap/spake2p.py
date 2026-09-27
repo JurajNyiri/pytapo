@@ -8,6 +8,7 @@ MIT licence). The password_shadow transforms follow the official Tapo app
 (com.tplink.tls.codec.spake2p.bo.Spake2pExtraCryptBean) and were verified live
 against a Tapo C200 5.0 on firmware 1.4.6, which asks for passwd_id 5.
 """
+
 import base64
 import hashlib
 import hmac
@@ -117,8 +118,18 @@ def sha256_hex_upper(text):
 
 
 _CRYPT_B64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-_CRYPT_ORDER = [(0, 10, 20), (21, 1, 11), (12, 22, 2), (3, 13, 23), (24, 4, 14),
-                (15, 25, 5), (6, 16, 26), (27, 7, 17), (18, 28, 8), (9, 19, 29)]
+_CRYPT_ORDER = [
+    (0, 10, 20),
+    (21, 1, 11),
+    (12, 22, 2),
+    (3, 13, 23),
+    (24, 4, 14),
+    (15, 25, 5),
+    (6, 16, 26),
+    (27, 7, 17),
+    (18, 28, 8),
+    (9, 19, 29),
+]
 
 
 def _to64(value, n):
@@ -168,7 +179,9 @@ def sha256_crypt(key, prefix):
         h.update(c if i & 1 else p)
         c = h.digest()
 
-    enc = "".join(_to64((c[x] << 16) | (c[y] << 8) | c[z], 4) for x, y, z in _CRYPT_ORDER)
+    enc = "".join(
+        _to64((c[x] << 16) | (c[y] << 8) | c[z], 4) for x, y, z in _CRYPT_ORDER
+    )
     enc += _to64((c[31] << 8) | c[30], 3)
     rounds_part = f"rounds={rounds}$" if explicit else ""
     return f"$5${rounds_part}{salt}${enc}"
@@ -201,8 +214,9 @@ class Spake2pClient:
     def __init__(self, register_result, user_random, credential, random_scalar):
         res = register_result
         dev_salt = base64.b64decode(res["dev_salt"])
-        dk = hashlib.pbkdf2_hmac("sha256", credential.encode(), dev_salt,
-                                 int(res["iterations"]), 80)
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", credential.encode(), dev_salt, int(res["iterations"]), 80
+        )
         w0 = int.from_bytes(dk[:40], "big") % N
         w1 = int.from_bytes(dk[40:], "big") % N
         Y = decode_point(base64.b64decode(res["dev_share"]))
@@ -211,11 +225,20 @@ class Spake2pClient:
         H = pt_add(Y, pt_neg(pt_mul(w0, N_POINT)))
         self.Xb, Yb = encode_point(X), encode_point(Y)
         context = hashlib.sha256(
-            CONTEXT_TAG + base64.b64decode(user_random) + base64.b64decode(res["dev_random"])
+            CONTEXT_TAG
+            + base64.b64decode(user_random)
+            + base64.b64decode(res["dev_random"])
         ).digest()
         transcript = _len_prefixed(
-            context, b"", b"", encode_point(M_POINT), encode_point(N_POINT),
-            self.Xb, Yb, encode_point(pt_mul(x, H)), encode_point(pt_mul(w1, H)),
+            context,
+            b"",
+            b"",
+            encode_point(M_POINT),
+            encode_point(N_POINT),
+            self.Xb,
+            Yb,
+            encode_point(pt_mul(x, H)),
+            encode_point(pt_mul(w1, H)),
             w0.to_bytes(32, "big"),
         )
         ke = hashlib.sha256(transcript).digest()
@@ -229,8 +252,10 @@ class Spake2pClient:
         return hmac.compare_digest(dev_confirm, expected)
 
     def session_key_and_nonce(self):
-        key = hkdf_sha256(self.shared_key, b"tp-kdf-salt-aes128-key",
-                          b"tp-kdf-info-aes128-key", 32)[:16]
-        nonce = hkdf_sha256(self.shared_key, b"tp-kdf-salt-aes128-iv",
-                            b"tp-kdf-info-aes128-iv", 32)[:12]
+        key = hkdf_sha256(
+            self.shared_key, b"tp-kdf-salt-aes128-key", b"tp-kdf-info-aes128-key", 32
+        )[:16]
+        nonce = hkdf_sha256(
+            self.shared_key, b"tp-kdf-salt-aes128-iv", b"tp-kdf-info-aes128-iv", 32
+        )[:12]
         return key, nonce

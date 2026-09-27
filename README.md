@@ -56,6 +56,12 @@ Exception: Invalid authentication data
 
 Attempt to authenticate using `admin` as `user` and your TP-Link cloud account password as `password`.
 
+Some newer firmware (for example Tapo C200 5.0 on 1.4.6) no longer accepts that login and answers with `-40211`. These cameras use a SPAKE2+ login instead, which pytapo detects and uses automatically. It needs your TP-Link cloud account password, passed either as `password` or as `cloudPassword`:
+
+```python
+tapo = Tapo(host, "admin", password, cloudPassword=cloud_password)
+```
+
 ## Downloading Recordings
 
 Integration supports downloading recordings saved on camera's SD card.

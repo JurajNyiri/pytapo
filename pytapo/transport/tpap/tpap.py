@@ -5,6 +5,7 @@ Cameras on this firmware answer the old login with error -40211. They advertise
 it in `login/discover` as {"tpap": {"pake": [2], ...}}. Protocol write-up:
 https://github.com/freeKC/tapo-v4-protocol
 """
+
 import asyncio
 import base64
 import json
@@ -27,13 +28,22 @@ from .spake2p import (
 # (libtapocameranetwork j2.u): sha256 upper hex if user_hash_type == 1, else md5 hex.
 CAMERA_USER = "admin"
 SESSION_ERRORS = (-40401, -40421)
-RENEW_BEFORE_EXPIRY_SECONDS = 60
+# Keep using a session until it has really expired, as the app does
+# (KasaTpapSessionCacheProvider): there is no benefit in renewing early.
+RENEW_BEFORE_EXPIRY_SECONDS = 0
+# A Tapo C200 (fw 1.4.6) refuses the first pake_share after a session ends
+# with -40401 and accepts the same credential a few seconds later. Re-logins
+# therefore retry the known-good passcode once instead of trying another one.
+RELOGIN_RETRY_DELAY_SECONDS = 2
 
 
 def _lockoutSeconds(response):
     """Seconds left on a login lockout, if the camera reported one."""
-    for holder in (response.get("error_info"), response.get("data"),
-                   (response.get("result") or {}).get("data")):
+    for holder in (
+        response.get("error_info"),
+        response.get("data"),
+        (response.get("result") or {}).get("data"),
+    ):
         if isinstance(holder, dict) and int(holder.get("sec_left") or 0) > 0:
             return int(holder["sec_left"])
     return 0
@@ -141,7 +151,10 @@ class Tpap:
         return res.json()
 
     def _loggedIn(self):
-        return self.stok is not None and time.time() < self.expiresAt - RENEW_BEFORE_EXPIRY_SECONDS
+        return (
+            self.stok is not None
+            and time.time() < self.expiresAt - RENEW_BEFORE_EXPIRY_SECONDS
+        )
 
     def _dropSession(self):
         self.stok = self.key = self.nonce = self.seq = None
@@ -168,47 +181,58 @@ class Tpap:
         if self.tpapInfo is None:
             self.tpapInfo = discover_tpap(self.host, self.controlPort) or {}
         passcodes = self._passcodes()
-        order = list(range(len(passcodes)))
         if self.passcodeIndex is not None:
-            order.remove(self.passcodeIndex)
-            order.insert(0, self.passcodeIndex)
+            # Re-login: only the passcode that worked before (never spend a failed
+            # attempt on a known-bad one), retried once for the refusal above.
+            attempts = [self.passcodeIndex, self.passcodeIndex]
+        else:
+            attempts = list(range(len(passcodes)))  # first login: the app's order
         lastError = None
-        for index in order:
+        for number, index in enumerate(attempts):
+            if number and index == attempts[number - 1]:
+                time.sleep(RELOGIN_RETRY_DELAY_SECONDS)
             try:
                 self._loginWith(passcodes[index])
                 self.passcodeIndex = index
                 return
             except TpapError as err:
                 lastError = err
-                if err.code != -40401:  # only a wrong passcode is worth the next one
+                if err.code != -40401:  # only a refused passcode is worth a retry
                     raise
         raise Exception("Invalid authentication data") from lastError
 
     def _loginWith(self, passcode):
         userRandom = base64.b64encode(os.urandom(32)).decode()
-        register = self._postLogin({
-            "sub_method": "pake_register",
-            "username": self._username(),
-            "user_random": userRandom,
-            "cipher_suites": [1],
-            "encryption": ["aes_128_ccm"],
-            "passcode_type": "userpw",
-        })
+        register = self._postLogin(
+            {
+                "sub_method": "pake_register",
+                "username": self._username(),
+                "user_random": userRandom,
+                "cipher_suites": [1],
+                "encryption": ["aes_128_ccm"],
+                "passcode_type": "userpw",
+            }
+        )
         if "result" not in register:
             raise TpapError(register.get("error_code"), "pake_register failed")
         result = register["result"]
         credential = apply_extra_crypt(passcode, result.get("extra_crypt"))
-        client = Spake2pClient(result, userRandom, credential,
-                               int.from_bytes(os.urandom(32), "big"))
-        share = self._postLogin({
-            "sub_method": "pake_share",
-            "user_share": base64.b64encode(client.Xb).decode(),
-            "user_confirm": base64.b64encode(client.user_confirm).decode(),
-        })
+        client = Spake2pClient(
+            result, userRandom, credential, int.from_bytes(os.urandom(32), "big")
+        )
+        share = self._postLogin(
+            {
+                "sub_method": "pake_share",
+                "user_share": base64.b64encode(client.Xb).decode(),
+                "user_confirm": base64.b64encode(client.user_confirm).decode(),
+            }
+        )
         if "result" not in share:
             secondsLeft = _lockoutSeconds(share)
             if secondsLeft:
-                raise Exception(f"Temporary Suspension: Try again in {secondsLeft} seconds")
+                raise Exception(
+                    f"Temporary Suspension: Try again in {secondsLeft} seconds"
+                )
             raise TpapError(share.get("error_code"), "pake_share failed")
         shareResult = share["result"]
         if not client.device_confirm_ok(base64.b64decode(shareResult["dev_confirm"])):
@@ -223,7 +247,11 @@ class Tpap:
         # The /ds channel only takes multipleRequest; wrap single calls and hand
         # back the single response so callers see the same shape as before.
         single = request.get("method") != "multipleRequest"
-        inner = {"method": "multipleRequest", "params": {"requests": [request]}} if single else request
+        inner = (
+            {"method": "multipleRequest", "params": {"requests": [request]}}
+            if single
+            else request
+        )
         payload = json.dumps(inner, separators=(",", ":")).encode()
         for attempt in (0, 1):
             try:
@@ -252,7 +280,11 @@ class Tpap:
         seq = self.seq
         self.seq += 1
         cipher = AES.new(self.key, AES.MODE_CCM, nonce=self._nonceFor(seq), mac_len=16)
-        body = struct.pack(">I", seq & 0xFFFFFFFF) + cipher.encrypt(payload) + cipher.digest()
+        body = (
+            struct.pack(">I", seq & 0xFFFFFFFF)
+            + cipher.encrypt(payload)
+            + cipher.digest()
+        )
         res = self.session.post(
             f"{self.baseUrl}/stok={self.stok}/ds",
             data=body,
@@ -267,9 +299,13 @@ class Tpap:
                 code = None
             raise TpapError(code, "request refused")
         if len(raw) < 20:
-            raise TpapError(None, f"short reply ({len(raw)} bytes, HTTP {res.status_code})")
+            raise TpapError(
+                None, f"short reply ({len(raw)} bytes, HTTP {res.status_code})"
+            )
         replySeq = struct.unpack(">I", raw[:4])[0]
-        decipher = AES.new(self.key, AES.MODE_CCM, nonce=self._nonceFor(replySeq), mac_len=16)
+        decipher = AES.new(
+            self.key, AES.MODE_CCM, nonce=self._nonceFor(replySeq), mac_len=16
+        )
         try:
             plain = decipher.decrypt_and_verify(raw[4:-16], raw[-16:])
         except ValueError as err:
