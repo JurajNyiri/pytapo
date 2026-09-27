@@ -841,3 +841,29 @@ def test_reboot():
     tapo = Tapo(host, user, password)
     result = tapo.reboot()
     assert result["error_code"] == 0
+
+
+def test_downloader_output_option():
+    from pytapo.media_stream.downloader import Downloader
+
+    class FakeTapo:
+        playerID = "x"
+
+        def getUserID(self):
+            return 1
+
+    d = Downloader(FakeTapo(), 1, 2, 0, output="ts")
+    assert d._saveMethod == "raw"
+    assert Downloader(FakeTapo(), 1, 2, 0)._saveMethod == "ffmpeg"
+    with pytest.raises(ValueError):
+        Downloader(FakeTapo(), 1, 2, 0, output="mkv")
+
+
+def test_convert_save_raw(tmp_path):
+    import asyncio
+    from pytapo.media_stream.convert import Convert
+
+    c = Convert()
+    c.write(b"\x47" * 376, b"")
+    asyncio.run(c.save(str(tmp_path / "clip.ts"), 1, "raw"))
+    assert (tmp_path / "clip.ts").read_bytes() == b"\x47" * 376

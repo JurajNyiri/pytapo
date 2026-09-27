@@ -29,6 +29,7 @@ class Downloader:
         fileName=None,
         stall_timeout=None,
         progressInterval=1.0,  # minimum seconds between progress updates
+        output="mp4",  # "mp4" (remux with ffmpeg) or "ts" (raw MPEG-TS as sent by the camera)
     ):
         self.tapo = tapo
         self.startTime = startTime
@@ -53,6 +54,13 @@ class Downloader:
         )
         self.progressInterval = float(progressInterval)
         self._last_progress_time = 0.0
+        if output not in ("mp4", "ts"):
+            raise ValueError("output must be 'mp4' or 'ts'")
+        self.output = output
+
+    @property
+    def _saveMethod(self):
+        return "raw" if self.output == "ts" else "ffmpeg"
 
     async def md5(self, fileName):
         if os.path.isfile(fileName):
@@ -105,7 +113,7 @@ class Downloader:
             segmentLength = self.endTime - self.startTime
             if self.fileName is None:
                 fileName = (
-                    self.outputDirectory + str(dateStart) + "-" + dateEnd + ".mp4"
+                    self.outputDirectory + str(dateStart) + "-" + dateEnd + "." + self.output
                 )
             else:
                 fileName = self.outputDirectory + self.fileName
@@ -229,7 +237,7 @@ class Downloader:
                                         "progress": 0,
                                         "total": 0,
                                     }
-                                    await convert.save(fileName, segmentLength)
+                                    await convert.save(fileName, segmentLength, self._saveMethod)
                                     downloading = False
                                     break
                             # in case a finished stream notification is caught, save the chunks as is
@@ -267,7 +275,7 @@ class Downloader:
                                             "progress": 0,
                                             "total": 0,
                                         }
-                                        await convert.save(fileName, detectedLength)
+                                        await convert.save(fileName, detectedLength, self._saveMethod)
                                         downloading = False
                                         break
                                 except JSONDecodeError:
@@ -306,7 +314,7 @@ class Downloader:
                                     "progress": 0,
                                     "total": 0,
                                 }
-                                await convert.save(fileName, segmentLength)
+                                await convert.save(fileName, segmentLength, self._saveMethod)
                             else:
                                 currentAction = "Giving up"
                                 yield {

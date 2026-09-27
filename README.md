@@ -76,6 +76,8 @@ Recordings are downloaded through the camera's encrypted streaming protocol (`/s
 
 You can tune the download behavior with the following `Downloader` parameters:
 
+- `output`: `mp4` (default, remuxed with ffmpeg) or `ts` to keep the MPEG-TS exactly as the camera sends it, no ffmpeg involved for the file itself. VLC and most players read it directly, audio included.
+
 - `window_size`: Affects throughput and stability. Higher values usually download faster but can cause some cameras to stop responding. Common values are `50` (stable) or `200` (default).
 - `progressInterval`: Minimum time in seconds between progress updates (default `1.0`). Increasing this value reduces CPU overhead because the library no longer runs an `ffprobe` subprocess on every chunk just to report progress. Use `progressInterval=0` to restore the previous per-chunk behavior.
 - `stall_timeout`: Seconds to wait for data before treating the stream as stalled and retrying (default `120`).

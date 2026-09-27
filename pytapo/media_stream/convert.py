@@ -53,6 +53,11 @@ class Convert:
 
     # cuts and saves the video
     async def save(self, fileLocation, fileLength, method="ffmpeg"):
+        if method == "raw":
+            # the MPEG-TS exactly as the camera sent it (H.264 + G.711 audio), no ffmpeg
+            async with aiofiles.open(fileLocation, "wb") as file:
+                await file.write(self.writer.getvalue())
+            return
         if method == "ffmpeg":
             tempVideoFileLocation = fileLocation + ".ts"
             async with aiofiles.open(tempVideoFileLocation, "wb") as file:
