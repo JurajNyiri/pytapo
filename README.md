@@ -74,6 +74,16 @@ You also need to have ffmpeg installed as that is used for converting the stream
 
 Recordings are downloaded through the camera's encrypted streaming protocol (`/stream`). The camera does not expose the raw MP4 files directly, so a true "file copy" is not possible; the stream is AES-decrypted and the resulting MPEG-TS data is remuxed into an MP4 container by ffmpeg (the video track is copied as-is, the audio track is re-encoded to AAC).
 
+The camera also keeps a thumbnail for every recording on the SD card (the picture the Tapo app shows in its playback list). You can fetch it without downloading the clip:
+
+```python
+from pytapo.media_stream.snapshot import getRecordingSnapshot, getRecordingSnapshots
+
+jpeg = await getRecordingSnapshot(tapo, recording["startTime"])      # bytes, or None
+async for jpeg in getRecordingSnapshots(tapo, [r["startTime"] for r in recordings]):
+    ...                                                               # one media session for all
+```
+
 You can tune the download behavior with the following `Downloader` parameters:
 
 - `window_size`: Affects throughput and stability. Higher values usually download faster but can cause some cameras to stop responding. Common values are `50` (stable) or `200` (default).
