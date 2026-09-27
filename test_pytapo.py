@@ -898,3 +898,29 @@ def test_recording_snapshot_flow():
         return [im async for im in getRecordingSnapshots(tapo, [1000, 2000, 1000])]
 
     assert asyncio.run(collect()) == [b"\xff\xd8jpeg-bytes\xff\xd9", None, b"\xff\xd8jpeg-bytes\xff\xd9"]
+
+def test_downloader_request_download_and_playback():
+    from pytapo.media_stream.downloader import Downloader
+
+    class FakeTapo:
+        playerID = "0123456789abcdef"
+
+        def getUserID(self):
+            return 7
+
+    d = Downloader(FakeTapo(), 1789688911, 1789688977, 0)
+    req = d._buildRequest()
+    assert req["type"] == "request"
+    assert req["params"]["method"] == "get"
+    assert req["params"]["download"] == {
+        "client_id": 7,
+        "channels": [0],
+        "media_type": 0,
+        "start_time": "1789688911",
+        "end_time": "1789688977",
+        "player_id": "0123456789abcdef",
+    }
+    d = Downloader(FakeTapo(), 1789688911, 1789688977, 0, method="playback")
+    assert d._buildRequest()["params"]["playback"]["scale"] == "1/1"
+    with pytest.raises(ValueError):
+        Downloader(FakeTapo(), 1, 2, 0, method="fast")
