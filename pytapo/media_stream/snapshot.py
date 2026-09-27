@@ -2,7 +2,7 @@ import json
 from ..media_stream._utils import StreamType
 
 
-async def getRecordingSnapshot(tapo, startTime, timeout=15):
+async def getRecordingSnapshot(tapo, startTime, timeout=8):
     """Return the JPEG the camera keeps for the recording that starts at startTime.
 
     The Tapo app shows one thumbnail per SD card recording. It comes from the media
@@ -13,14 +13,17 @@ async def getRecordingSnapshot(tapo, startTime, timeout=15):
     opens a session of its own and closes it afterwards; several snapshots can be
     fetched in a row with getRecordingSnapshots.
 
-    Returns the JPEG bytes, or None if the camera has no image for that time.
+    Returns the JPEG bytes, or None if the camera has no image for that time. For a
+    start_time that does not match a recording the camera acknowledges the request
+    and then stays silent, so that case costs the full timeout (a snapshot itself
+    arrives within a second or two).
     """
     async for image in getRecordingSnapshots(tapo, [startTime], timeout=timeout):
         return image
     return None
 
 
-async def getRecordingSnapshots(tapo, startTimes, timeout=15):
+async def getRecordingSnapshots(tapo, startTimes, timeout=8):
     """Yield the JPEG (or None) for each start time, on one media session."""
     mediaSession = tapo.getMediaSession(StreamType.Download)
     mediaSession.set_window_size(50)

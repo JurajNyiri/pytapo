@@ -841,3 +841,60 @@ def test_reboot():
     tapo = Tapo(host, user, password)
     result = tapo.reboot()
     assert result["error_code"] == 0
+
+
+def test_recording_snapshot_flow():
+    import asyncio
+    from pytapo.media_stream.snapshot import getRecordingSnapshot, getRecordingSnapshots
+
+    class Resp:
+        def __init__(self, mimetype, plaintext):
+            self.mimetype, self.plaintext = mimetype, plaintext
+
+    class FakeSession:
+        sent = []
+
+        def set_window_size(self, n):
+            self.window = n
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def transceive(self, payload, no_data_timeout=None):
+            req = json.loads(payload)
+            FakeSession.sent.append(req)
+            start = req["params"]["download"]["start_time"]
+            yield Resp("application/json", b'{"type":"response","seq":1,"params":{"error_code":0,"session_id":"7"}}')
+            if start == "1000":
+                yield Resp("image/jpeg", b"\xff\xd8jpeg-bytes\xff\xd9")
+                yield Resp("application/json", b'{"type":"notification","params":{"event_type":"stream_status","status":"finished"}}')
+            # any other start time: the camera stays silent, the stream just ends
+
+    class FakeTapo:
+        playerID = "abc"
+
+        class logger:
+            @staticmethod
+            def debugLog(m):
+                pass
+
+        def getUserID(self):
+            return 3
+
+        def getMediaSession(self, kind):
+            return FakeSession()
+
+    tapo = FakeTapo()
+    assert asyncio.run(getRecordingSnapshot(tapo, 1000)) == b"\xff\xd8jpeg-bytes\xff\xd9"
+    assert asyncio.run(getRecordingSnapshot(tapo, 2000)) is None
+    req = FakeSession.sent[0]["params"]
+    assert req["method"] == "get" and req["download"]["media_type"] == 2
+    assert req["download"]["start_time"] == "1000" and "end_time" not in req["download"]
+
+    async def collect():
+        return [im async for im in getRecordingSnapshots(tapo, [1000, 2000, 1000])]
+
+    assert asyncio.run(collect()) == [b"\xff\xd8jpeg-bytes\xff\xd9", None, b"\xff\xd8jpeg-bytes\xff\xd9"]
