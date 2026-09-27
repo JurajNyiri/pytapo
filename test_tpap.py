@@ -15,7 +15,7 @@ import pytest
 from Crypto.Cipher import AES
 
 from pytapo.transport.tpap import spake2p as sp
-from pytapo.transport.tpap.tpap import Tpap, TpapError
+from pytapo.transport.tpap.tpap import Tpap
 
 
 # --------------------------------------------------------------------------- #
@@ -204,10 +204,28 @@ def test_multiple_request_is_passed_through_unchanged():
     assert [r["method"] for r in reply["result"]["responses"]] == ["a", "b"]
 
 
-def test_wrong_password_raises():
+def test_wrong_password_raises_the_shared_wording():
     camera = FakeCamera("right pw")
     t = make_transport(camera, cloud_password="wrong pw")
-    with pytest.raises(TpapError):
+    with pytest.raises(Exception, match="^Invalid authentication data$"):
+        t._sendSync({"method": "getDeviceInfo", "params": {}})
+    assert camera.failed_logins == 2  # md5 and sha256, then give up
+
+
+def test_empty_password_never_reaches_the_camera():
+    camera = FakeCamera("right pw")
+    t = Tpap("192.0.2.1", 443, "invalid", "", cloudPassword="")
+    t.session, t.tpapInfo = camera, {"pake": [2]}
+    with pytest.raises(Exception, match="^Invalid authentication data$"):
+        t._sendSync({"method": "getDeviceInfo", "params": {}})
+    assert camera.usernames == []
+
+
+def test_lockout_reports_temporary_suspension():
+    camera = FakeCamera("right pw")
+    camera._share = lambda body: FakeResponse({"error_code": -40404, "data": {"code": -40404, "sec_left": 1799}})
+    t = make_transport(camera, cloud_password="wrong pw")
+    with pytest.raises(Exception, match="^Temporary Suspension: Try again in 1799 seconds$"):
         t._sendSync({"method": "getDeviceInfo", "params": {}})
 
 

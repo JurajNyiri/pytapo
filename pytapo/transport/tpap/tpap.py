@@ -30,6 +30,15 @@ SESSION_ERRORS = (-40401, -40421)
 RENEW_BEFORE_EXPIRY_SECONDS = 60
 
 
+def _lockoutSeconds(response):
+    """Seconds left on a login lockout, if the camera reported one."""
+    for holder in (response.get("error_info"), response.get("data"),
+                   (response.get("result") or {}).get("data")):
+        if isinstance(holder, dict) and int(holder.get("sec_left") or 0) > 0:
+            return int(holder["sec_left"])
+    return 0
+
+
 class TpapError(Exception):
     def __init__(self, code, message=""):
         super().__init__(f"error_code={code} {message}".strip())
@@ -150,6 +159,12 @@ class Tpap:
 
     # -- login ----------------------------------------------------------------
     def _login(self):
+        # Same wording as the other transports, so callers (e.g. the Home Assistant
+        # config flow probe, which passes an empty password) can tell a bad login
+        # apart from "not a Tapo device". An empty password never reaches the
+        # camera: every failed attempt counts towards its lockout.
+        if not self.password:
+            raise Exception("Invalid authentication data")
         if self.tpapInfo is None:
             self.tpapInfo = discover_tpap(self.host, self.controlPort) or {}
         passcodes = self._passcodes()
@@ -167,7 +182,7 @@ class Tpap:
                 lastError = err
                 if err.code != -40401:  # only a wrong passcode is worth the next one
                     raise
-        raise lastError
+        raise Exception("Invalid authentication data") from lastError
 
     def _loginWith(self, passcode):
         userRandom = base64.b64encode(os.urandom(32)).decode()
@@ -191,6 +206,9 @@ class Tpap:
             "user_confirm": base64.b64encode(client.user_confirm).decode(),
         })
         if "result" not in share:
+            secondsLeft = _lockoutSeconds(share)
+            if secondsLeft:
+                raise Exception(f"Temporary Suspension: Try again in {secondsLeft} seconds")
             raise TpapError(share.get("error_code"), "pake_share failed")
         shareResult = share["result"]
         if not client.device_confirm_ok(base64.b64decode(shareResult["dev_confirm"])):
