@@ -56,6 +56,12 @@ Exception: Invalid authentication data
 
 Attempt to authenticate using `admin` as `user` and your TP-Link cloud account password as `password`.
 
+Some newer firmware (for example Tapo C200 5.0 on 1.4.6) no longer accepts that login and answers with `-40211`. These cameras use a SPAKE2+ login instead, which pytapo detects and uses automatically. It needs your TP-Link cloud account password, passed either as `password` or as `cloudPassword`:
+
+```python
+tapo = Tapo(host, "admin", password, cloudPassword=cloud_password)
+```
+
 ## Downloading Recordings
 
 Integration supports downloading recordings saved on camera's SD card.
@@ -74,10 +80,22 @@ You also need to have ffmpeg installed as that is used for converting the stream
 
 Recordings are downloaded through the camera's encrypted streaming protocol (`/stream`). The camera does not expose the raw MP4 files directly, so a true "file copy" is not possible; the stream is AES-decrypted and the resulting MPEG-TS data is remuxed into an MP4 container by ffmpeg (the video track is copied as-is, the audio track is re-encoded to AAC).
 
+Two stream requests exist for this. By default the `Downloader` sends the `download` request, the one the Tapo app sends when you tap download on a recording: the camera delivers the clip as fast as the link allows (about 10x realtime on Wi-Fi), with the full frame rate and the audio, and ends the stream itself at `end_time`. The older `playback` request plays the recording at realtime speed and keeps going past `end_time`, so a one minute clip takes a minute to download. If a camera does not accept the `download` request, the `Downloader` falls back to `playback` on its own.
+
+The camera also keeps a thumbnail for every recording on the SD card (the picture the Tapo app shows in its playback list). You can fetch it without downloading the clip:
+
+```python
+from pytapo.media_stream.snapshot import getRecordingSnapshot, getRecordingSnapshots
+
+jpeg = await getRecordingSnapshot(tapo, recording["startTime"])      # bytes, or None
+async for jpeg in getRecordingSnapshots(tapo, [r["startTime"] for r in recordings]):
+    ...                                                               # one media session for all
+```
+
 You can tune the download behavior with the following `Downloader` parameters:
 
 - `output`: `mp4` (default, remuxed with ffmpeg) or `ts` to keep the MPEG-TS exactly as the camera sends it, no ffmpeg involved for the file itself. VLC and most players read it directly, audio included.
-
+- `method`: `download` (default) or `playback`, see above.
 - `window_size`: Affects throughput and stability. Higher values usually download faster but can cause some cameras to stop responding. Common values are `50` (stable) or `200` (default).
 - `progressInterval`: Minimum time in seconds between progress updates (default `1.0`). Increasing this value reduces CPU overhead because the library no longer runs an `ffprobe` subprocess on every chunk just to report progress. Use `progressInterval=0` to restore the previous per-chunk behavior.
 - `stall_timeout`: Seconds to wait for data before treating the stream as stalled and retrying (default `120`).
