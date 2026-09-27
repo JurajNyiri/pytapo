@@ -283,75 +283,101 @@ class Streamer:
                 )
 
     async def _stream_to_ffmpeg(self):
-        mediaSession = self.tapo.getMediaSession(StreamType.Stream)
-        mediaSession.set_window_size(self.window_size)
-        self.currentAction = "Streaming"
+        try:
+            mediaSession = self.tapo.getMediaSession(StreamType.Stream)
+            mediaSession.set_window_size(self.window_size)
+            self.currentAction = "Streaming"
 
-        async with mediaSession:
-            payload = json.dumps(self._build_preview_payload())
+            async with mediaSession:
+                payload = json.dumps(self._build_preview_payload())
 
-            async for resp in mediaSession.transceive(payload, no_data_timeout=self.no_data_timeout):
-                if not self.running:
-                    break
+                async for resp in mediaSession.transceive(
+                    payload, no_data_timeout=self.no_data_timeout
+                ):
+                    if (
+                        not self.running
+                        or self.streamProcess.returncode is not None
+                        or self.streamProcess.stdin.is_closing()
+                    ):
+                        break
 
-                if resp.mimetype != "video/mp2t":
-                    continue
+                    if resp.mimetype != "video/mp2t":
+                        continue
 
-                # Audio - Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
-                if self.includeAudio and resp.audioPayload:
-                    self._audio_buffer += resp.audioPayload
+                    # Audio - Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
+                    if self.includeAudio and resp.audioPayload:
+                        self._audio_buffer += resp.audioPayload
 
-                    while len(self._audio_buffer) >= 160:
-                        frame = self._audio_buffer[:160]
-                        self._audio_buffer = self._audio_buffer[160:]
-                        try:
-                            os.write(self.audio_w, frame)
-                        except OSError:
+                        while len(self._audio_buffer) >= 160:
+                            frame = self._audio_buffer[:160]
+                            self._audio_buffer = self._audio_buffer[160:]
+                            try:
+                                os.write(self.audio_w, frame)
+                            except OSError:
+                                break
+
+                    # Video – re‑assemble & byte‑align to 188‑byte TS cells
+                    self._ts_buffer += resp.plaintext
+
+                    # drop leading garbage until the first real sync byte (0x47)
+                    while len(self._ts_buffer) >= 188 and self._ts_buffer[0] != 0x47:
+                        pos = self._ts_buffer.find(0x47, 1)
+                        if pos == -1:
+                            # no sync byte in current buffer – wait for more data
+                            self._ts_buffer.clear()
                             break
+                        self._ts_buffer = self._ts_buffer[pos:]
 
-                # Video – re‑assemble & byte‑align to 188‑byte TS cells
-                self._ts_buffer += resp.plaintext
+                    # forward only full, correctly aligned 188‑byte packets
+                    while len(self._ts_buffer) >= 188:
+                        if self.streamProcess.stdin.is_closing():
+                            return
+                        packet = self._ts_buffer[:188]
+                        self._ts_buffer = self._ts_buffer[188:]
+                        self.streamProcess.stdin.write(packet)
 
-                # drop leading garbage until the first real sync byte (0x47)
-                while len(self._ts_buffer) >= 188 and self._ts_buffer[0] != 0x47:
-                    pos = self._ts_buffer.find(0x47, 1)
-                    if pos == -1:
-                        # no sync byte in current buffer – wait for more data
-                        self._ts_buffer.clear()
-                        break
-                    self._ts_buffer = self._ts_buffer[pos:]
-
-                # forward only full, correctly aligned 188‑byte packets
-                while len(self._ts_buffer) >= 188:
-                    packet = self._ts_buffer[:188]
-                    self._ts_buffer = self._ts_buffer[188:]
-                    self.streamProcess.stdin.write(packet)
-
-                if not self.includeAudio:
-                    try:
-                        # If the consumer stops reading the pipe, ffmpeg output hangs.
-                        # This causes ffmpeg to stop reading stdin, which makes drain()
-                        # block forever. A timeout cleanly breaks the deadlock.
-                        await asyncio.wait_for(self.streamProcess.stdin.drain(), timeout=15.0)
-                    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, asyncio.TimeoutError):
-                        self.running = False
-                        break
+                    if not self.includeAudio:
+                        try:
+                            # If the consumer stops reading the pipe, ffmpeg output hangs.
+                            # This causes ffmpeg to stop reading stdin, which makes drain()
+                            # block forever. A timeout cleanly breaks the deadlock.
+                            await asyncio.wait_for(
+                                self.streamProcess.stdin.drain(), timeout=15.0
+                            )
+                        except (
+                            ConnectionResetError,
+                            BrokenPipeError,
+                            ConnectionAbortedError,
+                            asyncio.TimeoutError,
+                        ):
+                            self.running = False
+                            break
+        except (OSError, asyncio.TimeoutError) as err:
+            if self.logFunction is not None:
+                self.logFunction(
+                    {"currentAction": self.currentAction, "streamError": repr(err)}
+                )
+        finally:
+            self.running = False
+            self.streamProcess.stdin.close()
 
     async def stop(self):
         self.currentAction = "Stopping stream"
         self.running = False
-        if self.stream_task:
-            self.stream_task.cancel()
-            try:
-                await self.stream_task
-            except asyncio.CancelledError:
-                pass
+        try:
+            if self.stream_task:
+                self.stream_task.cancel()
+                try:
+                    await self.stream_task
+                except asyncio.CancelledError:
+                    pass
 
-        if self.streamProcess:
-            try:
-                self.streamProcess.terminate()
-                await self.streamProcess.wait()
-            except ProcessLookupError:
-                pass
-            except OSError:
-                pass
+        finally:
+            if self.streamProcess:
+                try:
+                    self.streamProcess.terminate()
+                    await self.streamProcess.wait()
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    pass
