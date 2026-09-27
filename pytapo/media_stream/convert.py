@@ -68,7 +68,7 @@ class Convert:
             async with aiofiles.open(tempAudioFileLocation, "wb") as file:
                 await file.write(self.audioWriter.getvalue())
 
-            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f {audioFormat} -ar {audioRate} -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
+            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f {audioFormat} -ar {audioRate} -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
                 inputVideoFile=tempVideoFileLocation,
                 inputAudioFile=tempAudioFileLocation,
                 outputFile=fileLocation,
