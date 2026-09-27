@@ -5,7 +5,7 @@ import json
 import requests
 import uuid
 from .transport.transport import Transport
-from .transport.tpap.tpap import discover_tpap
+from .transport.tpap.tpap import discover_tpap, rejects_legacy_login
 from .logger import Logger
 from .asyncHandler import AsyncHandler
 
@@ -70,7 +70,9 @@ class Tapo:
         if transportMethod is None:
             if self.isKLAP:
                 transport_method = "klap"
-            elif discover_tpap(host, self.controlPort) is not None:
+            elif discover_tpap(host, self.controlPort) is not None or (
+                rejects_legacy_login(host, self.controlPort)
+            ):
                 # newer firmware: SPAKE2+ login, the encrypt_type 3 login gets -40211
                 transport_method = "tpap"
             else:

@@ -549,3 +549,27 @@ def test_relogin_never_falls_back_to_another_passcode(monkeypatch):
     with pytest.raises(Exception, match="^Invalid authentication data$"):
         t._sendSync({"method": "getDeviceInfo", "params": {}})
     assert tried == [sp.sha256_hex_upper("secret pw")] * 2
+
+
+@pytest.mark.parametrize(
+    "payload,rejects",
+    [
+        ({"error_code": -40211}, True),  # new-firmware camera (e.g. C510W 1.3.4)
+        ({"error_code": -40413, "result": {"data": {"encrypt_type": ["3"]}}}, False),
+        (["not", "a", "dict"], False),
+        (ValueError("not json"), False),
+    ],
+)
+def test_rejects_legacy_login(monkeypatch, payload, rejects):
+    monkeypatch.setattr(
+        tpap_module.requests, "post", lambda *a, **k: DiscoverReply(payload)
+    )
+    assert tpap_module.rejects_legacy_login("192.0.2.1") is rejects
+
+
+def test_rejects_legacy_login_unreachable(monkeypatch):
+    def refuse(*a, **k):
+        raise requests.ConnectionError("no route")
+
+    monkeypatch.setattr(tpap_module.requests, "post", refuse)
+    assert tpap_module.rejects_legacy_login("192.0.2.1") is False

@@ -72,6 +72,33 @@ def discover_tpap(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
     return None
 
 
+def rejects_legacy_login(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
+    """True if the camera answers the encrypt_type 3 login probe with -40211.
+
+    Some TPAP cameras (e.g. C510W fw 1.3.4) refuse login/discover with -40209 and
+    only advertise the new login over UDP discovery. They still answer the probe
+    the old transport sends first with -40211. The probe carries no password, so
+    it cannot count towards the camera's lockout.
+    """
+    try:
+        res = requests.post(
+            f"https://{host}:{controlPort}/",
+            json={
+                "method": "login",
+                "params": {
+                    "encrypt_type": "3",
+                    "username": CAMERA_USER,
+                    "cnonce": os.urandom(8).hex().upper(),
+                },
+            },
+            verify=False,
+            timeout=timeout,
+        ).json()
+    except (requests.RequestException, ValueError):
+        return False
+    return isinstance(res, dict) and res.get("error_code") == -40211
+
+
 class Tpap:
     def __init__(
         self,
