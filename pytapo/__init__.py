@@ -987,6 +987,12 @@ class Tapo:
         saturday=None,
     ):
         """
+        Set recording enabled state and optionally update weekday schedules.
+
+        Omitted weekdays keep their existing schedules; [] clears a day.
+        Partial schedule updates read the current plan and send a complete week.
+        Enabled-only calls do not read or rewrite the schedule.
+
         Example day object - list with explanation:
         [
             "0000-0700:1", # Record continuously from 00:00 to 07:00 (note the :1)
@@ -998,22 +1004,26 @@ class Tapo:
             "1700-2400:1", # Record continuously from 17:00 to 24:00
         ]
         """
+        days = {
+            "sunday": sunday,
+            "monday": monday,
+            "tuesday": tuesday,
+            "wednesday": wednesday,
+            "thursday": thursday,
+            "friday": friday,
+            "saturday": saturday,
+        }
+        updates = {
+            day: json.dumps(periods, separators=(",", ":"))
+            for day, periods in days.items()
+            if isinstance(periods, list)
+        }
         recordPlan = {"enabled": "on" if enabled else "off"}
-
-        if sunday is not None and type(sunday) is list:
-            recordPlan["sunday"] = json.dumps(sunday, separators=(',', ':'))
-        if monday is not None and type(monday) is list:
-            recordPlan["monday"] = json.dumps(monday, separators=(',', ':'))
-        if tuesday is not None and type(tuesday) is list:
-            recordPlan["tuesday"] = json.dumps(tuesday, separators=(',', ':'))
-        if wednesday is not None and type(wednesday) is list:
-            recordPlan["wednesday"] = json.dumps(wednesday, separators=(',', ':'))
-        if thursday is not None and type(thursday) is list:
-            recordPlan["thursday"] = json.dumps(thursday, separators=(',', ':'))
-        if friday is not None and type(friday) is list:
-            recordPlan["friday"] = json.dumps(friday, separators=(',', ':'))
-        if saturday is not None and type(saturday) is list:
-            recordPlan["saturday"] = json.dumps(saturday, separators=(',', ':'))
+        if updates and len(updates) < len(days):
+            # Send a complete week, preserving days omitted by the caller.
+            currentPlan = self.getRecordPlan()
+            recordPlan.update({day: currentPlan[day] for day in days})
+        recordPlan.update(updates)
 
         return self.executeFunction(
             "setRecordPlan",
