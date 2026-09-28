@@ -46,10 +46,11 @@ class HttpMediaSession:
         self.window_size = window_size
         self.cloud_password = cloud_password
         self.super_secret_key = super_secret_key
+        # Keep the transport-provided value as a fallback/API value, but do not
+        # hash the media password yet. Port 8800 advertises its own hashing
+        # scheme in WWW-Authenticate and is authoritative for media auth.
         self.encryptionMethod = encryptionMethod
-        self.hashed_password = pwd_digest(
-            cloud_password.encode(), self.encryptionMethod
-        ).decode()
+        self.hashed_password = None
         self.port = port
         self.username = username
         self.client_boundary = multipart_boundary
@@ -73,6 +74,18 @@ class HttpMediaSession:
         self.query_params_str = ""
         if any(query_params):
             self.query_params_str = f"?{urllib.parse.urlencode(query_params)}"
+
+    @staticmethod
+    def _get_media_encryption_method(auth_data: Mapping[str, str]):
+        """Select the cloud-password hash required by port 8800.
+
+        Streamd advertises encrypt_type="3" when it expects
+        SHA256(cloud_password).hexdigest().upper(). Older media servers omit
+        encrypt_type and expect the legacy MD5-derived password.
+        """
+        if auth_data.get("encrypt_type") == "3":
+            return EncryptionMethod.SHA256
+        return EncryptionMethod.MD5
 
     def set_window_size(self, window_size):
         self.window_size = window_size
@@ -124,6 +137,18 @@ class HttpMediaSession:
                     "nc": "00000001",
                     "qop": "auth",
                 }
+            )
+
+            # Control transport and media authentication are independent. In
+            # particular, a TPAP/V4 camera can still advertise encrypt_type="3"
+            # on port 8800. Select the hash from the media challenge itself.
+            self.encryptionMethod = self._get_media_encryption_method(self._auth_data)
+            self.hashed_password = pwd_digest(
+                self.cloud_password.encode(), self.encryptionMethod
+            ).decode()
+            logger.debug(
+                "Media stream password hashing method selected from challenge: %s",
+                self.encryptionMethod,
             )
 
             challenge1 = hashlib.md5(

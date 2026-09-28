@@ -142,6 +142,9 @@ class Tpap:
             return await self._runBlocking(self._sendSync, request)
 
     def getEncryptionMethod(self):
+        # Media port 8800 selects its actual password hashing method from its
+        # own WWW-Authenticate challenge. SHA256 is the correct fallback for
+        # currently known TPAP cameras and preserves the public API contract.
         return EncryptionMethod.SHA256
 
     async def close(self):
