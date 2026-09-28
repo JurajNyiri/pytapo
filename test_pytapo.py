@@ -923,6 +923,53 @@ def test_recording_snapshot_flow():
 
     assert asyncio.run(collect()) == [b"\xff\xd8jpeg-bytes\xff\xd9", None, b"\xff\xd8jpeg-bytes\xff\xd9"]
 
+def test_live_snapshot_flow():
+    import asyncio
+    from pytapo.media_stream.snapshot import getSnapshot
+
+    class Resp:
+        def __init__(self, mimetype, plaintext):
+            self.mimetype, self.plaintext = mimetype, plaintext
+
+    class FakeSession:
+        sent = []
+
+        def set_window_size(self, n):
+            self.window = n
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def transceive(self, payload, no_data_timeout=None):
+            req = json.loads(payload)
+            FakeSession.sent.append(req)
+            yield Resp("application/json", b'{"type":"response","seq":1,"params":{"error_code":0,"session_id":"7"}}')
+            if req["params"]["download"]["media_type"] == 3:
+                yield Resp("image/jpeg", b"\xff\xd8live\xff\xd9")
+                yield Resp("application/json", b'{"type":"notification","params":{"event_type":"stream_status","status":"finished"}}')
+
+    class FakeTapo:
+        playerID = "abc"
+
+        class logger:
+            @staticmethod
+            def debugLog(m):
+                pass
+
+        def getUserID(self):
+            return 3
+
+        def getMediaSession(self, kind):
+            return FakeSession()
+
+    assert asyncio.run(getSnapshot(FakeTapo())) == b"\xff\xd8live\xff\xd9"
+    req = FakeSession.sent[0]["params"]["download"]
+    assert req["media_type"] == 3 and req["start_time"].isdigit()
+
+
 def test_downloader_request_download_and_playback():
     from pytapo.media_stream.downloader import Downloader
 
