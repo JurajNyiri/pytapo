@@ -13,6 +13,7 @@ import json
 import os
 import struct
 
+from pytapo.const import EncryptionMethod
 import pytest
 import requests
 from Crypto.Cipher import AES
@@ -386,7 +387,7 @@ def test_async_interface_without_hass():
     assert asyncio.run(t.authenticate()) is True
     reply = asyncio.run(t.send({"method": "getDeviceInfo", "params": {"a": 1}}))
     assert reply["result"]["echo"] == {"a": 1}
-    assert t.getEncryptionMethod() == "tpap"
+    assert t.getEncryptionMethod() == EncryptionMethod.SHA256
     asyncio.run(t.close())
     assert t.stok is None
 

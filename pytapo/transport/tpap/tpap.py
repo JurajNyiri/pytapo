@@ -16,7 +16,7 @@ import time
 import requests
 from Crypto.Cipher import AES
 
-from ...const import CONNECTION_TIMEOUT
+from ...const import CONNECTION_TIMEOUT, EncryptionMethod
 from .spake2p import (
     Spake2pClient,
     apply_extra_crypt,
@@ -142,7 +142,7 @@ class Tpap:
             return await self._runBlocking(self._sendSync, request)
 
     def getEncryptionMethod(self):
-        return "tpap"
+        return EncryptionMethod.SHA256
 
     async def close(self):
         self._dropSession()
