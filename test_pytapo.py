@@ -923,6 +923,64 @@ def test_recording_snapshot_flow():
 
     assert asyncio.run(collect()) == [b"\xff\xd8jpeg-bytes\xff\xd9", None, b"\xff\xd8jpeg-bytes\xff\xd9"]
 
+def test_downloader_reports_busy_camera(tmp_path):
+    import asyncio
+    from pytapo.media_stream.downloader import Downloader
+
+    class Resp:
+        def __init__(self, mimetype, plaintext):
+            self.mimetype, self.plaintext = mimetype, plaintext
+            self.audioPayload, self.audioPayloadType = b"", None
+
+    class BusySession:
+        requests = []
+
+        def set_window_size(self, n):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def transceive(self, payload, no_data_timeout=None):
+            BusySession.requests.append(json.loads(payload))
+            yield Resp(
+                "application/json",
+                b'{"type":"response","seq":1,"params":{"error_code":-52405}}',
+            )
+
+    class FakeTapo:
+        playerID = "abc"
+
+        class logger:
+            @staticmethod
+            def debugLog(m):
+                pass
+
+        def getUserID(self):
+            return 1
+
+        def getAudioConfig(self):
+            return {"audio_config": {"microphone": {"sampling_rate": "8"}}}
+
+        def getMediaSession(self, kind):
+            return BusySession()
+
+    d = Downloader(FakeTapo(), 1000, 1066, 0, outputDirectory=str(tmp_path) + "/")
+
+    async def run():
+        return [s async for s in d.download()]
+
+    states = asyncio.run(run())
+    assert states[-1]["currentAction"] == "Camera busy"
+    assert states[-1]["errorCode"] == -52405
+    # a busy camera is not a reason to fall back to the playback request
+    assert d.method == "download"
+    assert [list(r["params"])[0] for r in BusySession.requests] == ["download"]
+
+
 def test_downloader_request_download_and_playback():
     from pytapo.media_stream.downloader import Downloader
 
