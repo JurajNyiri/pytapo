@@ -5,13 +5,15 @@ class TSReader:
     b = bytearray  # packets buffer
     i = 0  # read position
     s = 0  # end position
-    pmt = 0
-    pes = {}
     PacketSize = 188
     SyncByte = 0x47
 
     def __init__(self):
-        pass
+        # Dual-lens cameras send one program per lens plus one for audio, each with
+        # its own PMT: track every PMT the PAT lists and merge their streams.
+        self.pmts = set()  # PMT PIDs announced by the PAT
+        self.parsed_pmts = set()
+        self.pes = {}
 
     def setBuffer(self, body):
         # Accept any bytes-like buffer (bytes, bytearray, memoryview) to avoid
@@ -75,7 +77,7 @@ class TSReader:
             const_pid_pat = 0
             if pid == const_pid_pat:
                 # already processed
-                if self.pmt != 0:
+                if self.pmts:
                     continue
 
                 self.read_psi_header()
@@ -85,24 +87,23 @@ class TSReader:
                     p_num = self.read_uint16()
                     p_pid = self.read_uint16() & 0x1FFF
                     if p_num != 0:
-                        self.pmt = p_pid
+                        self.pmts.add(p_pid)
 
                 self.skip(4)  # CRC32
                 continue
 
             # PMT : Program Map Table
-            if pid == self.pmt:
+            if pid in self.pmts:
                 # already processed
-                if bool(self.pes) is True:
+                if pid in self.parsed_pmts:
                     continue
+                self.parsed_pmts.add(pid)
 
                 self.read_psi_header()
 
                 pes_pid = self.read_uint16() & 0x1FFF  # ? PCR PID
                 p_size = self.read_uint16() & 0x03FF  # ? 0x0FFF
                 self.skip(p_size)
-
-                self.pes = {}
 
                 const_crc_size = 4
                 while self.left() > const_crc_size:
