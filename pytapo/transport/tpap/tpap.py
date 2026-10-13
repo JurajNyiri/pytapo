@@ -55,8 +55,12 @@ class TpapError(Exception):
         self.code = code
 
 
-def discover_tpap(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
-    """Return the camera's tpap info (dict) if it offers the TPAP password login."""
+def discover_login(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
+    """Return the camera's reply to the discover request (a dict), or None.
+
+    On cameras with the encrypt_type 3 login this reply is already a login-phase
+    answer, so it counts towards the camera's lockout like any other.
+    """
     try:
         res = requests.post(
             f"https://{host}:{controlPort}/",
@@ -66,10 +70,28 @@ def discover_tpap(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
         ).json()
     except (requests.RequestException, ValueError):
         return None
+    return res if isinstance(res, dict) else None
+
+
+def tpap_from_discover(res):
+    """The camera's tpap info (dict) if the discover reply offers TPAP login."""
     tpap = (res.get("result") or {}).get("tpap") if isinstance(res, dict) else None
     if isinstance(tpap, dict) and 2 in (tpap.get("pake") or []):
         return tpap
     return None
+
+
+def legacy_login_offered(res):
+    """True if the discover reply says the encrypt_type 3 login is available."""
+    if not isinstance(res, dict) or res.get("error_code") != -40413:
+        return False
+    data = (res.get("result") or {}).get("data")
+    return isinstance(data, dict) and "3" in (data.get("encrypt_type") or [])
+
+
+def discover_tpap(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
+    """Return the camera's tpap info (dict) if it offers the TPAP password login."""
+    return tpap_from_discover(discover_login(host, controlPort, timeout))
 
 
 def rejects_legacy_login(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
@@ -77,8 +99,10 @@ def rejects_legacy_login(host, controlPort=443, timeout=CONNECTION_TIMEOUT):
 
     Some TPAP cameras (e.g. C510W fw 1.3.4) refuse login/discover with -40209 and
     only advertise the new login over UDP discovery. They still answer the probe
-    the old transport sends first with -40211. The probe carries no password, so
-    it cannot count towards the camera's lockout.
+    the old transport sends first with -40211. The probe carries no password, but
+    cameras with the encrypt_type 3 login still count it towards their lockout
+    (their reply carries time/max_time), so only send it when discover did not
+    already say that login is available (see legacy_login_offered).
     """
     try:
         res = requests.post(
