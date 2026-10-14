@@ -5,7 +5,12 @@ import json
 import requests
 import uuid
 from .transport.transport import Transport
-from .transport.tpap.tpap import discover_tpap, rejects_legacy_login
+from .transport.tpap.tpap import (
+    discover_login,
+    legacy_login_offered,
+    rejects_legacy_login,
+    tpap_from_discover,
+)
 from .logger import Logger
 from .asyncHandler import AsyncHandler
 
@@ -67,16 +72,23 @@ class Tapo:
         else:
             self.playerID = playerID
 
+        legacyLoginOffered = False
         if transportMethod is None:
             if self.isKLAP:
                 transport_method = "klap"
-            elif discover_tpap(host, self.controlPort) is not None or (
-                rejects_legacy_login(host, self.controlPort)
-            ):
-                # newer firmware: SPAKE2+ login, the encrypt_type 3 login gets -40211
-                transport_method = "tpap"
             else:
-                transport_method = "pytapo"
+                discovery = discover_login(host, self.controlPort)
+                legacyLoginOffered = legacy_login_offered(discovery)
+                if tpap_from_discover(discovery) is not None or (
+                    # login-phase requests count towards the lockout: skip this
+                    # probe when discover already offered the old login
+                    not legacyLoginOffered
+                    and rejects_legacy_login(host, self.controlPort)
+                ):
+                    # newer firmware: SPAKE2+ login, the encrypt_type 3 login gets -40211
+                    transport_method = "tpap"
+                else:
+                    transport_method = "pytapo"
         else:
             transport_method = transportMethod
 
@@ -97,6 +109,9 @@ class Tapo:
             reuseSession=reuseSession,
             redactConfidentialInformation=redactConfidentialInformation,
         )
+        if legacyLoginOffered and transport_method == "pytapo":
+            # discover already answered what _isSecureConnection would probe for
+            self.transport.isSecureConnectionCached = True
 
         self.klapTransport = None
         self.user = user

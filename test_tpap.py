@@ -577,6 +577,62 @@ def test_rejects_legacy_login_unreachable(monkeypatch):
     assert tpap_module.rejects_legacy_login("192.0.2.1") is False
 
 
+LEGACY_DISCOVER = {
+    "error_code": -40413,
+    "result": {
+        "data": {"code": -40401, "encrypt_type": ["3"], "time": 10, "max_time": 10}
+    },
+}
+
+
+@pytest.mark.parametrize(
+    "payload,offered",
+    [
+        (LEGACY_DISCOVER, True),
+        ({"error_code": -40413, "result": {"data": {"encrypt_type": ["2"]}}}, False),
+        ({"error_code": -40413, "result": {"data": {}}}, False),
+        ({"error_code": -40211}, False),
+        ({"error_code": 0, "result": {"tpap": {"pake": [2]}}}, False),
+        (None, False),
+    ],
+)
+def test_legacy_login_offered(payload, offered):
+    assert tpap_module.legacy_login_offered(payload) is offered
+
+
+def _count_login_requests(monkeypatch, reply):
+    """Build a Tapo with the transport left to auto-detect; return what was sent."""
+    import pytapo as pytapo_module
+
+    sent = []
+
+    def post(url, json=None, **kwargs):
+        sent.append(json["params"])
+        return DiscoverReply(reply)
+
+    monkeypatch.setattr(tpap_module.requests, "post", post)
+    monkeypatch.setattr(pytapo_module.Tapo, "getBasicInfo", lambda self: {"type": "x"})
+    monkeypatch.setattr(pytapo_module.Tapo, "isSupportingPresets", lambda self: False)
+    camera = pytapo_module.Tapo("192.0.2.1", "admin", "pw", isKLAP=False)
+    return camera, sent
+
+
+def test_legacy_camera_is_asked_once_to_pick_the_login(monkeypatch):
+    """A C460-style camera counts every login-phase request towards its lockout
+    (the reply carries time/max_time), so detecting the login must not send more
+    than the discover request, and the secure-connection probe is not repeated."""
+    camera, sent = _count_login_requests(monkeypatch, LEGACY_DISCOVER)
+    assert sent == [{"sub_method": "discover"}]
+    assert camera.transport.method == "pytapo"
+    assert camera.transport._isSecureConnection() is True
+    assert len(sent) == 1
+
+
+def test_new_firmware_camera_still_probes_for_rejected_legacy_login(monkeypatch):
+    camera, sent = _count_login_requests(monkeypatch, {"error_code": -40211})
+    assert [p.get("sub_method") for p in sent] == ["discover", None]
+    assert camera.transport.method == "tpap"
+
 
 def test_requests_skip_verification_even_with_requests_ca_bundle(monkeypatch, tmp_path):
     # The Home Assistant image sets REQUESTS_CA_BUNDLE. With trust_env on, requests
