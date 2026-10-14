@@ -92,6 +92,16 @@ async for jpeg in getRecordingSnapshots(tapo, [r["startTime"] for r in recording
     ...                                                               # one media session for all
 ```
 
+Only recordings triggered by a detection have one; for a timed (continuous) recording the camera stays silent until the timeout, so filter on `video_type` first.
+
+The same request also gives a picture of what the camera sees right now, without RTSP or ffmpeg:
+
+```python
+from pytapo.media_stream.snapshot import getSnapshot
+
+jpeg = await getSnapshot(tapo)      # bytes (640x360 on a C510W, about 0.2 s), or None
+```
+
 You can tune the download behavior with the following `Downloader` parameters:
 
 - `output`: `mp4` (default, remuxed with ffmpeg) or `ts` to keep the MPEG-TS exactly as the camera sends it, no ffmpeg involved for the file itself. VLC and most players read it directly, audio included.
