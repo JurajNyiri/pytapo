@@ -201,6 +201,10 @@ class Tpap:
             data=json.dumps({"method": "login", "params": params}),
             headers=self._headers("application/json"),
             timeout=CONNECTION_TIMEOUT,
+            # Per request on purpose: with trust_env, requests replaces
+            # session.verify with REQUESTS_CA_BUNDLE when that is set (as in
+            # the Home Assistant image), and the camera cert is self-signed.
+            verify=False,
         )
         return res.json()
 
@@ -344,6 +348,7 @@ class Tpap:
             data=body,
             headers=self._headers("application/octet-stream"),
             timeout=CONNECTION_TIMEOUT,
+            verify=False,
         )
         raw = res.content
         if raw[:1] == b"{":  # refused before decryption, sent in plain JSON

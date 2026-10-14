@@ -12,6 +12,7 @@ import hmac
 import json
 import os
 import struct
+import time
 
 from pytapo.const import EncryptionMethod
 import pytest
@@ -631,3 +632,34 @@ def test_new_firmware_camera_still_probes_for_rejected_legacy_login(monkeypatch)
     camera, sent = _count_login_requests(monkeypatch, {"error_code": -40211})
     assert [p.get("sub_method") for p in sent] == ["discover", None]
     assert camera.transport.method == "tpap"
+
+
+def test_requests_skip_verification_even_with_requests_ca_bundle(monkeypatch, tmp_path):
+    # The Home Assistant image sets REQUESTS_CA_BUNDLE. With trust_env on, requests
+    # replaces session.verify with that bundle unless verify is passed per request,
+    # and the camera's self-signed certificate is then rejected.
+    import requests
+
+    bundle = tmp_path / "ca.crt"
+    bundle.write_text("")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(bundle))
+    seen = []
+
+    def fake_send(self, request, **kwargs):
+        seen.append(kwargs.get("verify"))
+        resp = requests.Response()
+        resp.status_code = 200
+        resp._content = b'{"error_code": 0, "result": {}}'
+        resp.request = request
+        return resp
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", fake_send)
+    t = Tpap("192.0.2.1", 443, "admin", "pw", cloudPassword="pw")
+    t._postLogin({"sub_method": "pake_register"})
+    t.stok, t.seq, t.expiresAt = "x", 1, time.time() + 3600
+    t.key, t.nonce = b"\x00" * 16, b"\x00" * 12
+    try:
+        t._sendSync({"method": "multipleRequest", "params": {"requests": []}})
+    except Exception:
+        pass  # the fake reply is not a valid encrypted frame, only the request matters
+    assert seen == [False, False], seen

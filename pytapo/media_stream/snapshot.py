@@ -1,4 +1,5 @@
 import json
+import time
 from ..media_stream._utils import StreamType
 
 
@@ -30,10 +31,30 @@ async def getRecordingSnapshot(tapo, startTime, timeout=8):
 
 async def getRecordingSnapshots(tapo, startTimes, timeout=8):
     """Yield the JPEG (or None) for each start time, on one media session."""
+    async for image in _snapshots(tapo, [(2, t) for t in startTimes], timeout):
+        yield image
+
+
+async def getSnapshot(tapo, timeout=8):
+    """Return a JPEG of what the camera sees right now, or None.
+
+    Same media port request as the recording thumbnails, with media_type 3:
+    the camera answers with one image/jpeg part carrying the current OSD time
+    (640x360 on a C510W, about 0.2 s), no RTSP or ffmpeg involved. The
+    start_time field is part of the request shape but the camera ignores it
+    for this media type, so the current time is sent.
+    """
+    async for image in _snapshots(tapo, [(3, int(time.time()))], timeout):
+        return image
+    return None
+
+
+async def _snapshots(tapo, requests, timeout):
+    """Yield one image (or None) per (media_type, start_time) on one session."""
     mediaSession = tapo.getMediaSession(StreamType.Download)
     mediaSession.set_window_size(50)
     async with mediaSession:
-        for seq, startTime in enumerate(startTimes, start=1):
+        for seq, (mediaType, startTime) in enumerate(requests, start=1):
             payload = json.dumps(
                 {
                     "type": "request",
@@ -42,7 +63,7 @@ async def getRecordingSnapshots(tapo, startTimes, timeout=8):
                         "download": {
                             "client_id": tapo.getUserID(),
                             "channels": [0],
-                            "media_type": 2,
+                            "media_type": mediaType,
                             "start_time": str(startTime),
                             "player_id": tapo.playerID,
                         },
@@ -62,12 +83,17 @@ async def getRecordingSnapshots(tapo, startTimes, timeout=8):
                         except (ValueError, AttributeError):
                             continue
                         params = data.get("params") or {}
-                        if data.get("type") == "response" and params.get("error_code", 0) not in (0, None):
+                        if data.get("type") == "response" and params.get(
+                            "error_code", 0
+                        ) not in (0, None):
                             tapo.logger.debugLog(
                                 f"Camera refused the snapshot request: {params.get('error_code')}"
                             )
                             break
-                        if params.get("event_type") == "stream_status" and params.get("status") == "finished":
+                        if (
+                            params.get("event_type") == "stream_status"
+                            and params.get("status") == "finished"
+                        ):
                             break
             finally:
                 try:

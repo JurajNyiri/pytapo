@@ -14,6 +14,10 @@ from ._utils import StreamType
 
 class Downloader:
     FRESH_RECORDING_TIME_SECONDS = 60
+    # Media port codes meaning another client holds the camera's stream slot
+    # (TOO_MANY_REQUEST, TOO_MANY_CLIENT and two more the Tapo app treats as
+    # "device in use, retry later"). They are not a reason to switch requests.
+    BUSY_ERROR_CODES = (-52405, -52407, -52417, -52435)
     STALL_TIMEOUT_SECONDS = 120
 
     def __init__(
@@ -191,6 +195,7 @@ class Downloader:
                 async with mediaSession:
                     payload = json.dumps(self._buildRequest())
                     unsupported = False
+                    busyCode = None
                     dataChunks = 0
                     if retry:
                         currentAction = "Retrying"
@@ -269,6 +274,18 @@ class Downloader:
                                 try:
                                     json_data = json.loads(resp.plaintext.decode())
 
+                                    responseCode = (
+                                        (json_data.get("params") or {}).get("error_code")
+                                        if json_data.get("type") == "response"
+                                        else None
+                                    )
+                                    if responseCode in self.BUSY_ERROR_CODES:
+                                        self.tapo.logger.debugLog(
+                                            "Camera is busy with another stream "
+                                            f"({responseCode})."
+                                        )
+                                        busyCode = responseCode
+                                        break
                                     if (
                                         self.method == "download"
                                         and json_data.get("type") == "response"
@@ -329,6 +346,17 @@ class Downloader:
                                 await stream.aclose()
                             except (AttributeError, RuntimeError, StopAsyncIteration):
                                 pass
+                    if busyCode is not None:
+                        currentAction = "Camera busy"
+                        yield {
+                            "currentAction": currentAction,
+                            "fileName": fileName,
+                            "progress": 0,
+                            "total": 0,
+                            "errorCode": busyCode,
+                        }
+                        downloading = False
+                        continue
                     if unsupported:
                         self.method = "playback"
                         continue
