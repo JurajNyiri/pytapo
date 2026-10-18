@@ -47,8 +47,8 @@ class HttpMediaSession:
         self.cloud_password = cloud_password
         self.super_secret_key = super_secret_key
         # Keep the transport-provided value as a fallback/API value, but do not
-        # hash the media password yet. Port 8800 advertises its own hashing
-        # scheme in WWW-Authenticate and is authoritative for media auth.
+        # hash the media password yet. Port 8800 advertises its own preferred
+        # hashing scheme in WWW-Authenticate.
         self.encryptionMethod = encryptionMethod
         self.hashed_password = None
         self.port = port
@@ -77,11 +77,14 @@ class HttpMediaSession:
 
     @staticmethod
     def _get_media_encryption_method(auth_data: Mapping[str, str]):
-        """Select the cloud-password hash required by port 8800.
+        """Select the first cloud-password hash to try on port 8800.
 
         Streamd advertises encrypt_type="3" when it expects
-        SHA256(cloud_password).hexdigest().upper(). Older media servers omit
-        encrypt_type and expect the legacy MD5-derived password.
+        SHA256(cloud_password).hexdigest().upper(). Some firmware advertises
+        this but only accepts MD5, so a 401 allows one MD5 retry. Older media
+        servers omit encrypt_type and expect the legacy MD5-derived password.
+        The challenge's algorithm="MD5" describes HTTP Digest, not this
+        password prehash.
         """
         if auth_data.get("encrypt_type") == "3":
             return EncryptionMethod.SHA256
@@ -99,6 +102,22 @@ class HttpMediaSession:
         return self
 
     async def start(self):
+        try:
+            await self._start()
+        except HttpStatusCodeException as exc:
+            if (
+                exc.status_code != 401
+                or self.encryptionMethod != EncryptionMethod.SHA256
+            ):
+                raise
+            logger.debug(
+                "Media stream rejected SHA256 authentication; retrying with MD5"
+            )
+            # The rejected connection may have a response body or be closed
+            # by the camera. Obtain a fresh challenge on a new connection.
+            await self._start(EncryptionMethod.MD5)
+
+    async def _start(self, encryption_method=None):
         req_line = f"POST /stream{self.query_params_str} HTTP/1.1".encode()
         headers = {
             b"Content-Type": "multipart/mixed;boundary={}".format(
@@ -142,12 +161,16 @@ class HttpMediaSession:
             # Control transport and media authentication are independent. In
             # particular, a TPAP/V4 camera can still advertise encrypt_type="3"
             # on port 8800. Select the hash from the media challenge itself.
-            self.encryptionMethod = self._get_media_encryption_method(self._auth_data)
+            self.encryptionMethod = (
+                encryption_method
+                if encryption_method is not None
+                else self._get_media_encryption_method(self._auth_data)
+            )
             self.hashed_password = pwd_digest(
                 self.cloud_password.encode(), self.encryptionMethod
             ).decode()
             logger.debug(
-                "Media stream password hashing method selected from challenge: %s",
+                "Media stream password hashing method: %s",
                 self.encryptionMethod,
             )
 
@@ -243,6 +266,7 @@ class HttpMediaSession:
             # noinspection PyBroadException
             try:
                 self._writer.close()
+                await self._writer.wait_closed()
             except Exception:
                 pass
             self._started = False
