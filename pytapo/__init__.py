@@ -1257,6 +1257,30 @@ class Tapo:
             {"smart_track": {"name": "smart_track_info"}},
         )
 
+    def getNightlightStatus(self):
+        return self.executeFunction(
+            "getNightlightStatus",
+            {"nightlight": {"get_nightlight_status": 0}},
+        )
+
+    def manualNightlightOp(self, enabled: bool):
+        return self.executeFunction(
+            "manualNightlightOp",
+            {
+                "nightlight": {
+                    "manual_nightlight_op": {"state": "on" if enabled else "off"}
+                }
+            },
+        )
+
+    def setNightlightConfig(self, intensity: int):
+        if type(intensity) is not int or not 0 <= intensity <= 100:
+            raise ValueError("Nightlight intensity must be an integer between 0 and 100")
+        return self.executeFunction(
+            "setNightlightConfig",
+            {"nightlight": {"config": {"intensity": intensity}}},
+        )
+
     def getWhitelampConfig(self, chn_id: list = None):
         params = {"image": {"name": ["switch"]}}
         if chn_id:
@@ -2768,6 +2792,10 @@ class Tapo:
                         {
                             "method": "getWhitelampCapability",
                             "params": {"image_capability": {"name": "white_lamp"}},
+                        },
+                        {
+                            "method": "getNightlightStatus",
+                            "params": {"nightlight": {"get_nightlight_status": 0}},
                         },
                         {
                             "method": "getMsgPushConfig",
