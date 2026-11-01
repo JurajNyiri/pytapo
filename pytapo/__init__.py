@@ -120,6 +120,7 @@ class Tapo:
         self.superSecretKey = superSecretKey
         self.userID = False
         self.childID = childID
+        self.hubRecordDownload = None
         self.timeCorrection = False
         if streamPort is None:
             self.streamPort = 8800
@@ -317,10 +318,24 @@ class Tapo:
                     )
                 )
 
-    def getMediaSession(self, stream_type: StreamType = None, start_time=""):
+    def getMediaSession(
+        self, stream_type: StreamType = None, start_time="", media_type=0
+    ):
         query_params = {}
         if self.childID is not None:
-            if stream_type == StreamType.Download:
+            if (
+                stream_type == StreamType.Download
+                and media_type in (0, 2)
+                and self.hubRecordDownload
+            ):
+                # recordings stored on the hub, cached by getRecordings
+                query_params = {
+                    "camera_mac": self.getChildMAC(),
+                    "type": "download",
+                    "playerId": self.playerID,
+                    "media_type": media_type,
+                }
+            elif stream_type == StreamType.Download:
                 query_params = {
                     "deviceId": self.childID,
                     "playerId": self.playerID,
@@ -345,6 +360,28 @@ class Tapo:
             port=self.streamPort,
             query_params=query_params,
         )  # pragma: no cover
+
+    def getChildMAC(self):
+        basicInfo = self.basicInfo
+        if isinstance(basicInfo, list):  # set by getMost
+            basicInfo = basicInfo[0] or {}
+        mac = basicInfo.get("device_info", {}).get("basic_info", {}).get("mac", "")
+        return mac.replace("-", "").upper()
+
+    def isHubRecordDownload(self):
+        if self.hubRecordDownload is None:
+            try:
+                components = self.executeFunction(
+                    "getAppComponentList",
+                    {"app_component": {"name": "app_component_list"}},
+                )["app_component"]["app_component_list"]
+            except Exception as err:
+                self.logger.debugLog(f"Failed to get component list: {err}")
+                return False
+            self.hubRecordDownload = any(
+                component["name"] == "recordDownload" for component in components
+            )
+        return self.hubRecordDownload
 
     def getChildDevices(self):
         return self.executeFunction(
@@ -1501,9 +1538,7 @@ class Tapo:
                     raise err
         return self.userID
 
-    def getRecordingsList(self, start_date="20000101", end_date=None):
-        if end_date is None:
-            end_date = datetime.today().strftime("%Y%m%d")
+    def _searchDateWithVideo(self, start_date, end_date):
         result = self.executeFunction(
             "searchDateWithVideo",
             {
@@ -1518,7 +1553,27 @@ class Tapo:
         )
         if "playback" not in result:
             raise Exception("Video playback is not supported by this camera")
-        return result["playback"]["search_results"]
+        return result["playback"].get("search_results", [])
+
+    def getRecordingsList(self, start_date="20000101", end_date=None):
+        if end_date is None:
+            end_date = datetime.today().strftime("%Y%m%d")
+        if self.childID is None:
+            return self._searchDateWithVideo(start_date, end_date)
+
+        # hubs give up on long searches and stay busy for a minute,
+        # search one year at a time until a year without recordings
+        self.isHubRecordDownload()
+        lastYear = int(end_date[:4])
+        results = []
+        for year in range(lastYear, int(start_date[:4]) - 1, -1):
+            found = self._searchDateWithVideo(
+                max(f"{year}0101", start_date), min(f"{year}1231", end_date)
+            )
+            if not found and year < lastYear:
+                break
+            results = found + results
+        return results
 
     def getRecordingsUTC(
         self, start_time, end_time, start_index=0, end_index=999999999, retry=False
@@ -1564,6 +1619,7 @@ class Tapo:
 
     def getRecordings(self, date, start_index=0, end_index=999999999, retry=False):
         if self.childID is not None:
+            self.isHubRecordDownload()  # for getMediaSession
             date_object = datetime.strptime(date, "%Y%m%d")
             start_time = int(date_object.timestamp())
             end_time = int(
