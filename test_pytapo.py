@@ -837,6 +837,50 @@ def test_startStopManualAlarm():
     assert result["error_code"] == 0
 
 
+def test_music():
+    tapo = Tapo(host, user, password)
+    original = tapo.getMusicConfig()
+    assert original["play_state"] in ("Playing", "Pause")
+
+    music_list = tapo.getMusicList()["music_list"]
+    assert len(music_list) == original["songnum"]
+    assert "music" in tapo.getMusicCapability()
+    assert tapo.getMost()["getMusicConfig"][0]["play_state"] in ("Playing", "Pause")
+
+    try:
+        tapo.setMusicState(True, original["songindex"])
+        time.sleep(2)
+        assert tapo.getMusicConfig()["play_state"] == "Playing"
+
+        tapo.setMusicConfig(volume=original["volume"])
+        assert tapo.getMusicConfig()["volume"] == original["volume"]
+
+        playMode = 1 if original["playmode"] == 0 else 0
+        tapo.setMusicConfig(playMode=playMode)
+        assert tapo.getMusicConfig()["playmode"] == playMode
+
+        tapo.setMusicConfig(timeoutPeriod=300)
+        assert tapo.getMusicConfig()["timeoutperiod"] == 300
+
+        tapo.setMusicState(False)
+        time.sleep(2)
+        assert tapo.getMusicConfig()["play_state"] == "Pause"
+    finally:
+        tapo.setMusicConfig(
+            volume=original["volume"],
+            playMode=original["playmode"],
+            timeoutPeriod=original["timeoutperiod"],
+        )
+        tapo.setMusicState(original["play_state"] == "Playing")
+
+    with pytest.raises(ValueError):
+        tapo.setMusicConfig()
+    with pytest.raises(ValueError):
+        tapo.setMusicConfig(volume=101)
+    with pytest.raises(ValueError):
+        tapo.setMusicState(True, -1)
+
+
 def test_reboot():
     tapo = Tapo(host, user, password)
     result = tapo.reboot()
