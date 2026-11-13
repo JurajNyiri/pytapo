@@ -2858,6 +2858,14 @@ class Tapo:
                             "params": {"music": {"get_music_config": 0}},
                         },
                         {
+                            "method": "getMusicList",
+                            "params": {"music": {"get_music_list": 0}},
+                        },
+                        {
+                            "method": "getMusicCapability",
+                            "params": {"music": {"name": "capability"}},
+                        },
+                        {
                             "method": "getMsgPushConfig",
                             "params": {"msg_push": {"name": ["chn1_msg_push_info"]}},
                         },

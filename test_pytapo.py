@@ -845,7 +845,11 @@ def test_music():
     music_list = tapo.getMusicList()["music_list"]
     assert len(music_list) == original["songnum"]
     assert "music" in tapo.getMusicCapability()
-    assert tapo.getMost()["getMusicConfig"][0]["play_state"] in ("Playing", "Pause")
+
+    most = tapo.getMost()
+    assert most["getMusicConfig"][0]["play_state"] in ("Playing", "Pause")
+    assert most["getMusicList"][0]["music_list"] == music_list
+    assert "capability" in most["getMusicCapability"][0]["music"]
 
     try:
         tapo.setMusicState(True, original["songindex"])
