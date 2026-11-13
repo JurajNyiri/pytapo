@@ -1281,6 +1281,62 @@ class Tapo:
             {"nightlight": {"config": {"intensity": intensity}}},
         )
 
+    def getMusicConfig(self):
+        return self.executeFunction(
+            "getMusicConfig",
+            {"music": {"get_music_config": 0}},
+        )
+
+    def getMusicList(self):
+        return self.executeFunction(
+            "getMusicList",
+            {"music": {"get_music_list": 0}},
+        )
+
+    def getMusicCapability(self):
+        return self.executeFunction(
+            "getMusicCapability",
+            {"music": {"name": "capability"}},
+        )
+
+    def setMusicState(self, play: bool, songIndex: int = None):
+        state = {"state": 1 if play else 2}
+        if songIndex is not None:
+            if type(songIndex) is not int or songIndex < 0:
+                raise ValueError("Song index must be a non-negative integer")
+            state["songindex"] = songIndex
+        return self.executeFunction(
+            "setMusicState",
+            {"music": {"set_music_play_state": state}},
+        )
+
+    def setMusicConfig(
+        self, volume: int = None, playMode: int = None, timeoutPeriod: int = None
+    ):
+        config = {}
+        if volume is not None:
+            if type(volume) is not int or not 0 <= volume <= 100:
+                raise ValueError("Music volume must be an integer between 0 and 100")
+            config["volume"] = volume
+        if playMode is not None:
+            if playMode not in (0, 1):
+                raise ValueError(
+                    "Music play mode must be 0 (repeat song) or 1 (repeat playlist)"
+                )
+            config["playmode"] = playMode
+        if timeoutPeriod is not None:
+            if type(timeoutPeriod) is not int or timeoutPeriod < 0:
+                raise ValueError(
+                    "Music timeout period must be a non-negative integer in seconds"
+                )
+            config["timeoutperiod"] = timeoutPeriod
+        if not config:
+            raise ValueError("At least one music config value must be set")
+        return self.executeFunction(
+            "setMusicConfig",
+            {"music": {"config": config}},
+        )
+
     def getWhitelampConfig(self, chn_id: list = None):
         params = {"image": {"name": ["switch"]}}
         if chn_id:
@@ -2796,6 +2852,18 @@ class Tapo:
                         {
                             "method": "getNightlightStatus",
                             "params": {"nightlight": {"get_nightlight_status": 0}},
+                        },
+                        {
+                            "method": "getMusicConfig",
+                            "params": {"music": {"get_music_config": 0}},
+                        },
+                        {
+                            "method": "getMusicList",
+                            "params": {"music": {"get_music_list": 0}},
+                        },
+                        {
+                            "method": "getMusicCapability",
+                            "params": {"music": {"name": "capability"}},
                         },
                         {
                             "method": "getMsgPushConfig",
