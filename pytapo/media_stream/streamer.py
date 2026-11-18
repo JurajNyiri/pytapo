@@ -2,7 +2,7 @@ import json
 import os
 import asyncio
 import subprocess
-from ._utils import StreamType
+from ._utils import StreamType, media_output_path
 
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
@@ -140,6 +140,9 @@ class Streamer:
         self.audio_rate = audio_rate
 
     async def start(self):
+        outputPath = None
+        if self.mode == "hls":
+            outputPath = media_output_path(self.outputDirectory, self.fileName)
         self.currentAction = "FFMpeg Starting"
 
         if self.mode == "hls":
@@ -222,7 +225,7 @@ class Streamer:
                 f"{HLS_LIST_SIZE}",
                 "-hls_flags",
                 HLS_FLAGS,
-                os.path.join(self.outputDirectory, self.fileName),
+                outputPath,
             ]
         else:
             cmd += [

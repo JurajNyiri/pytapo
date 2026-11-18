@@ -1,6 +1,7 @@
 import hashlib
 import os
 from enum import Enum
+from pathlib import Path, PureWindowsPath
 
 from ..const import EncryptionMethod
 
@@ -10,6 +11,23 @@ from typing import Mapping, Tuple, Optional
 class StreamType(Enum):
     Stream = "Stream"
     Download = "Download"
+
+
+def media_output_path(output_directory, file_name):
+    """Keep a caller-provided filename inside the selected output directory."""
+    if (
+        not isinstance(file_name, str)
+        or not file_name
+        or file_name in (".", "..")
+        or any(character in file_name for character in ("/", "\\", "\x00"))
+        or PureWindowsPath(file_name).drive
+    ):
+        raise ValueError("fileName must be a single filename")
+    directory = Path(output_directory).resolve()
+    path = Path(os.path.abspath(os.path.join(output_directory, file_name)))
+    if not path.resolve().is_relative_to(directory):
+        raise ValueError("fileName escapes outputDirectory")
+    return str(path)
 
 
 def pwd_digest(

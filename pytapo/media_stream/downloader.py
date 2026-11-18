@@ -9,7 +9,7 @@ from datetime import datetime
 from json import JSONDecodeError
 from pytapo import Tapo
 from .convert import Convert
-from ._utils import StreamType
+from ._utils import StreamType, media_output_path
 
 
 class Downloader:
@@ -155,11 +155,11 @@ class Downloader:
             )
             segmentLength = self.endTime - self.startTime
             if self.fileName is None:
-                fileName = (
-                    self.outputDirectory + str(dateStart) + "-" + dateEnd + "." + self.output
-                )
+                outputName = str(dateStart) + "-" + dateEnd + "." + self.output
             else:
-                fileName = self.outputDirectory + self.fileName
+                outputName = self.fileName
+            media_output_path(self.outputDirectory, outputName)
+            fileName = os.path.join(self.outputDirectory, outputName)
             if (
                 datetime.now().timestamp()
                 - self.FRESH_RECORDING_TIME_SECONDS

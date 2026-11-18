@@ -6,7 +6,7 @@ import os
 import re
 import asyncio
 import subprocess
-from ._utils import StreamType
+from ._utils import StreamType, media_output_path
 from datetime import datetime
 
 HLS_TIME = 1
@@ -105,6 +105,12 @@ class DownloaderV2:
         self.audio_rate = audio_rate
 
     async def start(self):
+        outputPath = None
+        if self.mode in ("hls", "mp4"):
+            media_output_path(self.outputDirectory, self.fileName)
+            if self.mode == "mp4" and not self.fileName.endswith(".mp4"):
+                self.fileName = os.path.splitext(self.fileName)[0] + ".mp4"
+            outputPath = media_output_path(self.outputDirectory, self.fileName)
         if (
             datetime.now().timestamp()
             - self.FRESH_RECORDING_TIME_SECONDS
@@ -198,15 +204,13 @@ class DownloaderV2:
                 f"{HLS_LIST_SIZE}",
                 "-hls_flags",
                 HLS_FLAGS,
-                os.path.join(self.outputDirectory, self.fileName),
+                outputPath,
             ]
         elif self.mode == "mp4":
-            if not self.fileName.endswith(".mp4"):
-                self.fileName = os.path.splitext(self.fileName)[0] + ".mp4"
             cmd += [
                 "-f",
                 self.ff_args.get("-f", "mp4"),
-                os.path.join(self.outputDirectory, self.fileName),
+                outputPath,
             ]
             if self.overwriteFiles is None or self.overwriteFiles:
                 cmd += ["-y"]

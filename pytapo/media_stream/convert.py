@@ -59,28 +59,58 @@ class Convert:
                 await file.write(self.writer.getvalue())
             return
         if method == "ffmpeg":
-            tempVideoFileLocation = fileLocation + ".ts"
-            async with aiofiles.open(tempVideoFileLocation, "wb") as file:
-                await file.write(self.writer.getvalue())
+            # Keep relative filenames from being interpreted as FFmpeg options or URLs.
+            fileLocation = os.path.abspath(fileLocation)
             audio_format = self._get_audio_format()
             audio_rate = self._get_audio_rate()
-            tempAudioFileLocation = f"{fileLocation}.{audio_format}"
-            async with aiofiles.open(tempAudioFileLocation, "wb") as file:
-                await file.write(self.audioWriter.getvalue())
+            with tempfile.TemporaryDirectory(
+                prefix=".pytapo-", dir=os.path.dirname(fileLocation)
+            ) as temporaryDirectory:
+                tempVideoFileLocation = os.path.join(temporaryDirectory, "video.ts")
+                tempAudioFileLocation = os.path.join(
+                    temporaryDirectory, "audio." + audio_format
+                )
+                async with aiofiles.open(tempVideoFileLocation, "wb") as file:
+                    await file.write(self.writer.getvalue())
+                async with aiofiles.open(tempAudioFileLocation, "wb") as file:
+                    await file.write(self.audioWriter.getvalue())
 
-            cmd = 'ffmpeg -ss 00:00:00 -i "{inputVideoFile}" -f {audioFormat} -ar {audioRate} -i "{inputAudioFile}" -t {videoLength} -y -c:v copy -c:a aac -map 0:v -map 1:a:0 "{outputFile}" >{devnull} 2>&1'.format(
-                inputVideoFile=tempVideoFileLocation,
-                inputAudioFile=tempAudioFileLocation,
-                outputFile=fileLocation,
-                videoLength=str(datetime.timedelta(seconds=fileLength)),
-                devnull=os.devnull,
-                audioFormat=audio_format,
-                audioRate=audio_rate,
-            )
-            os.system(cmd)
-
-            os.remove(tempVideoFileLocation)
-            os.remove(tempAudioFileLocation)
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-ss",
+                        "00:00:00",
+                        "-f",
+                        "mpegts",
+                        "-protocol_whitelist",
+                        "file",
+                        "-i",
+                        tempVideoFileLocation,
+                        "-f",
+                        audio_format,
+                        "-ar",
+                        str(audio_rate),
+                        "-protocol_whitelist",
+                        "file",
+                        "-i",
+                        tempAudioFileLocation,
+                        "-t",
+                        str(datetime.timedelta(seconds=fileLength)),
+                        "-y",
+                        "-c:v",
+                        "copy",
+                        "-c:a",
+                        "aac",
+                        "-map",
+                        "0:v",
+                        "-map",
+                        "1:a:0",
+                        fileLocation,
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True,
+                )
         else:
             raise Exception("Method not supported")
 
@@ -114,6 +144,10 @@ class Convert:
                     "format=duration",
                     "-of",
                     "default=noprint_wrappers=1:nokey=1",
+                    "-f",
+                    "mpegts",
+                    "-protocol_whitelist",
+                    "file",
                     tmp_name,
                 ],
                 stdout=subprocess.PIPE,
