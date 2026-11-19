@@ -1,9 +1,9 @@
 import asyncio
-import aiofiles
 import json
 import os
 import hashlib
 import math
+import threading
 import time
 from datetime import datetime
 from json import JSONDecodeError
@@ -106,11 +106,29 @@ class Downloader:
         return {"type": "request", "seq": 1, "params": params}
 
     async def md5(self, fileName):
-        if os.path.isfile(fileName):
-            async with aiofiles.open(fileName, "rb") as file:
-                contents = await file.read()
-            return hashlib.md5(contents).hexdigest()
-        return False
+        stop = threading.Event()
+        try:
+            return await asyncio.to_thread(self._md5, fileName, stop)
+        except asyncio.CancelledError:
+            # A thread cannot be interrupted; it stops after the current block.
+            # Not waiting for it: a read on an unreachable network share may
+            # never return and must not block the cancellation.
+            stop.set()
+            raise
+
+    @staticmethod
+    def _md5(fileName, stop):
+        if not os.path.isfile(fileName):
+            return False
+        digest = hashlib.md5()
+        with open(fileName, "rb") as file:
+            # 1 MiB: at least one full read request on NFS (rsize <= 1 MiB) and
+            # CIFS (bsize 1 MiB); local filesystems read ahead on their own.
+            for block in iter(lambda: file.read(1024 * 1024), b""):
+                if stop.is_set():
+                    return False
+                digest.update(block)
+        return digest.hexdigest()
 
     async def _get_audio_sample_rate(self):
         try:
@@ -174,7 +192,7 @@ class Downloader:
                     "total": 0,
                 }
                 downloading = False
-            elif os.path.isfile(fileName):
+            elif await asyncio.to_thread(os.path.isfile, fileName):
                 currentAction = "Skipping"
                 yield {
                     "currentAction": currentAction,
