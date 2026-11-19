@@ -1,8 +1,79 @@
-"""Offline tests: media conversion must not block the event loop and must clean up on cancellation."""
+"""Offline tests: media conversion must not block the event loop and must clean up on cancellation.
+
+ffmpeg/ffprobe are replaced by small fake executables on PATH.
+"""
 
 import asyncio
+import os
+import stat
+import sys
+import time
 
+import pytest
+
+from pytapo.media_stream.convert import Convert
 from pytapo.media_stream.downloader import Downloader
+
+FAKE = """#!{python}
+import os, sys, time
+pidfile = os.environ.get("FAKE_PIDFILE")
+if pidfile:
+    with open(pidfile, "w") as f:
+        f.write(str(os.getpid()))
+time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
+if os.path.basename(sys.argv[0]) == "ffprobe":
+    print(os.environ.get("FAKE_LENGTH", "12.5"))
+else:
+    open(sys.argv[-1], "wb").close()
+sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
+"""
+
+
+@pytest.fixture
+def fake_ffmpeg(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name in ("ffmpeg", "ffprobe"):
+        exe = bindir / name
+        exe.write_text(FAKE.format(python=sys.executable))
+        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("FAKE_PIDFILE", str(tmp_path / "pid"))
+    return tmp_path
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def _max_loop_gap(coro):
+    """Run coro and measure the longest time the event loop could not run a ticker."""
+    gaps = []
+
+    async def ticker():
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(0.01)
+            now = time.monotonic()
+            gaps.append(now - last)
+            last = now
+
+    t = asyncio.ensure_future(ticker())
+    try:
+        result = await coro
+    finally:
+        t.cancel()
+    return result, max(gaps or [0])
+
+
+def _converter():
+    c = Convert()
+    c.write(b"\x47" * 188, b"\x00" * 160)
+    return c
 
 
 def test_md5_in_blocks_and_missing_file(tmp_path):
@@ -58,3 +129,47 @@ def test_md5_stops_after_cancel(tmp_path, monkeypatch):
     time.sleep(0.3)
     assert len(blocks) <= 3  # of 40
     assert threading.main_thread().name not in blocks
+
+
+def _no_temp_dirs(path):
+    return not [p for p in os.listdir(path) if p.startswith(".pytapo-")]
+
+
+def test_save_does_not_block_the_event_loop(fake_ffmpeg, monkeypatch):
+    monkeypatch.setenv("FAKE_SLEEP", "0.5")
+    out = fake_ffmpeg / "out.mp4"
+    _, gap = asyncio.run(_max_loop_gap(_converter().save(str(out), 10)))
+    assert gap < 0.2
+    assert out.exists()
+    assert _no_temp_dirs(fake_ffmpeg)
+
+
+def test_save_raises_when_ffmpeg_fails(fake_ffmpeg, monkeypatch):
+    import subprocess
+
+    monkeypatch.setenv("FAKE_EXIT", "1")
+    with pytest.raises(subprocess.CalledProcessError):
+        asyncio.run(_converter().save(str(fake_ffmpeg / "out.mp4"), 10))
+    assert _no_temp_dirs(fake_ffmpeg)
+
+
+@pytest.mark.parametrize("cancels", [1, 2])
+def test_save_cancelled_kills_ffmpeg_and_cleans_up(fake_ffmpeg, monkeypatch, cancels):
+    """Unload and the media sync watchdog may both cancel the same task."""
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    pidfile = fake_ffmpeg / "pid"
+
+    async def run():
+        task = asyncio.ensure_future(_converter().save(str(fake_ffmpeg / "out.mp4"), 10))
+        while not pidfile.exists() or not pidfile.read_text():
+            await asyncio.sleep(0.02)
+        for _ in range(cancels):
+            task.cancel()
+            await asyncio.sleep(0)
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return int(pidfile.read_text())
+
+    pid = asyncio.run(run())
+    assert not _alive(pid)
+    assert _no_temp_dirs(fake_ffmpeg)

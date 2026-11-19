@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import io
 import subprocess
@@ -11,6 +12,58 @@ from rtp import PayloadType
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
+
+
+async def _wait_ignoring_cancel(future):
+    """Wait until future is done even if the calling task is cancelled meanwhile.
+
+    Returns True if a cancellation was received while waiting.
+    """
+    cancelled = False
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancelled = True
+    return cancelled
+
+
+async def _cleanup(func, *args):
+    """Run a blocking cleanup in a thread and wait for it to finish, even if
+    the task is cancelled meanwhile; the cancellation is passed on afterwards."""
+    if await _wait_ignoring_cancel(asyncio.ensure_future(asyncio.to_thread(func, *args))):
+        raise asyncio.CancelledError
+
+
+async def _run_process(args, capture=False):
+    """Run an executable without blocking the event loop.
+
+    If the awaiting task is cancelled, the process is killed and reaped before
+    CancelledError propagates, also when the task is cancelled again meanwhile.
+    Returns (returncode, stdout or None).
+    """
+    start = asyncio.ensure_future(
+        asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE if capture else asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.STDOUT if capture else asyncio.subprocess.DEVNULL,
+        )
+    )
+    process = None
+    try:
+        process = await asyncio.shield(start)
+        stdout, _ = await process.communicate()
+    except asyncio.CancelledError:
+        if process is None:
+            await _wait_ignoring_cancel(start)
+            if start.cancelled() or start.exception() is not None:
+                raise
+            process = start.result()
+        if process.returncode is None:
+            process.kill()
+        await _wait_ignoring_cancel(asyncio.ensure_future(process.wait()))
+        raise
+    return process.returncode, stdout
 
 
 class Convert:
@@ -63,9 +116,10 @@ class Convert:
             fileLocation = os.path.abspath(fileLocation)
             audio_format = self._get_audio_format()
             audio_rate = self._get_audio_rate()
-            with tempfile.TemporaryDirectory(
-                prefix=".pytapo-", dir=os.path.dirname(fileLocation)
-            ) as temporaryDirectory:
+            temporaryDirectory = await asyncio.to_thread(
+                tempfile.mkdtemp, prefix=".pytapo-", dir=os.path.dirname(fileLocation)
+            )
+            try:
                 tempVideoFileLocation = os.path.join(temporaryDirectory, "video.ts")
                 tempAudioFileLocation = os.path.join(
                     temporaryDirectory, "audio." + audio_format
@@ -75,7 +129,7 @@ class Convert:
                 async with aiofiles.open(tempAudioFileLocation, "wb") as file:
                     await file.write(self.audioWriter.getvalue())
 
-                subprocess.run(
+                args = (
                     [
                         "ffmpeg",
                         "-ss",
@@ -106,11 +160,13 @@ class Convert:
                         "-map",
                         "1:a:0",
                         fileLocation,
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=True,
+                    ]
                 )
+                returncode, _ = await _run_process(args)
+                if returncode != 0:
+                    raise subprocess.CalledProcessError(returncode, args)
+            finally:
+                await _cleanup(shutil.rmtree, temporaryDirectory, True)
         else:
             raise Exception("Method not supported")
 
