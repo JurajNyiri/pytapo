@@ -250,7 +250,7 @@ class Downloader:
                                 )
                                 now = time.time()
                                 if now - self._last_progress_time >= self.progressInterval:
-                                    detectedLength = convert.getLength()
+                                    detectedLength = await convert.getLengthAsync()
                                     self._last_progress_time = now
                                     if detectedLength is False:
                                         yield {
@@ -273,7 +273,7 @@ class Downloader:
                                     >= segmentLength  # fix for the latest latest recording
                                 ):
                                     if detectedLength == 0:
-                                        detectedLength = convert.getLength()
+                                        detectedLength = await convert.getLengthAsync()
                                         if detectedLength is False:
                                             detectedLength = 0
                                     downloadedFull = True
@@ -334,7 +334,7 @@ class Downloader:
                                         self.tapo.logger.debugLog(
                                             "Received json notification about finished stream."
                                         )
-                                        detectedLength = convert.getLength(exact=True)
+                                        detectedLength = await convert.getLengthAsync(exact=True)
                                         if (
                                             not math.isfinite(detectedLength)
                                             or detectedLength <= 0
@@ -390,7 +390,7 @@ class Downloader:
                             }
                             retry = True
                         else:
-                            detectedLength = convert.getLength(exact=True)
+                            detectedLength = await convert.getLengthAsync(exact=True)
                             if (
                                 math.isfinite(detectedLength)
                                 and detectedLength > 0
