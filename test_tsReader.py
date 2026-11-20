@@ -100,3 +100,26 @@ def test_streams_of_every_program_are_registered():
         0x54: 0x91,
         0x64: 0x24,
     }
+
+
+def test_buffer_types_and_resync():
+    """bytes, bytearray and memoryview give the same packets, also after junk before a packet."""
+    stream = (
+        b"\x00\x13junk"
+        + pat([(1, 0x1000)])
+        + pmt(0x1000, [(0x90, 0x101)])
+        + ts_packet(0x1FFF, b"")  # null packet
+        + g711_pes(0x101, SAMPLES)
+    )
+    expected = [(p.payloadType, p.payload) for p in read_all(stream)]
+    assert expected == [(PayloadType.PCMA, SAMPLES)]
+    for kind in (bytearray, memoryview):
+        assert [(p.payloadType, p.payload) for p in read_all(kind(stream))] == expected
+
+
+def test_payload_is_independent_of_the_buffer():
+    """A packet must not change when the buffer it came from is reused."""
+    stream = bytearray(pat([(1, 0x1000)]) + pmt(0x1000, [(0x90, 0x101)]) + g711_pes(0x101, SAMPLES))
+    pkt = read_all(stream)[0]
+    stream[:] = b"\x00" * len(stream)
+    assert pkt.payload == SAMPLES
