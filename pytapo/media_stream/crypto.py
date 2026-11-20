@@ -81,10 +81,10 @@ class AESHelper:
         self._cipher = AES.new(self.key, AES.MODE_CBC, iv=self.iv)
 
     def decrypt(self, data: bytes) -> bytes:
-        # Cipher IV needs to be refreshed after every decrypt
-        self.refresh()
-        decryptedData = unpad(self._cipher.decrypt(data), 16, style="pkcs7")
-        return decryptedData
+        # Every message starts with the same IV. A cipher of its own per call
+        # also lets decrypt run in a worker thread while encrypt runs on the loop.
+        cipher = AES.new(self.key, AES.MODE_CBC, iv=self.iv)
+        return unpad(cipher.decrypt(data), 16, style="pkcs7")
 
     def encrypt(self, data: bytes) -> bytes:
         # todo: maybe refresh is not needed?
