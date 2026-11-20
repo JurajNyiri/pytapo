@@ -261,8 +261,8 @@ class HttpMediaSession:
                 self._device_response_handler_loop()
             )
 
-        except Exception:
-            # Close socket in case of issues during setup
+        except BaseException:
+            # Close the socket on cancellation as well as authentication errors.
             # noinspection PyBroadException
             try:
                 self._writer.close()
@@ -449,6 +449,20 @@ class HttpMediaSession:
             )
 
             await queue.put(response_obj)
+
+    async def send_audio(self, data: bytes, session: int):
+        """Write a speaker MPEG-TS chunk without waiting for a response."""
+        if not self._started or session not in self._sessions:
+            raise RuntimeError("Media session is not open")
+        headers = {
+            b"Content-Type": b"audio/mp2t",
+            b"X-If-Encrypt": b"0",
+            b"X-Session-Id": str(session).encode(),
+            b"Content-Length": str(len(data)).encode(),
+        }
+        await self._send_http_request(b"--" + self.client_boundary, headers)
+        self._writer.write(data)
+        await self._writer.drain()
 
     async def transceive(
         self,

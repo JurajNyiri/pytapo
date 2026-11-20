@@ -110,6 +110,12 @@ You can tune the download behavior with the following `Downloader` parameters:
 - `progressInterval`: Minimum time in seconds between progress updates (default `1.0`). Increasing this value reduces CPU overhead because the library no longer runs an `ffprobe` subprocess on every chunk just to report progress. Use `progressInterval=0` to restore the previous per-chunk behavior.
 - `stall_timeout`: Seconds to wait for data before treating the stream as stalled and retrying (default `120`).
 
+## Two-way audio and native WebRTC
+
+Use `pytapo.media_stream.talk.Talk` as an async context manager and call `await talk.write(audio)` with paced mono G.711 A-law audio at 8 kHz. A configured cloud password is required.
+
+For native WebRTC, install `pytapo[webrtc]` and use `pytapo.media_stream.webrtc.WebRTCSession`: call `answer(offer_sdp)`, forward ICE candidates with `add_candidate(candidate)`, and call `close()` when the viewer leaves. Direct streaming requires FFmpeg.
+
 ## Contributions:
 
 Contributions to pytapo are welcomed.

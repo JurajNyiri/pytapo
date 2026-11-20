@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pytapo",
-    version="3.4.33",
+    version="3.4.34",
     author="Juraj Nyíri",
     author_email="juraj.nyiri@gmail.com",
     description="Python library for communication with Tapo Cameras",
@@ -15,6 +15,7 @@ setuptools.setup(
     url="https://github.com/JurajNyiri/pytapo",
     packages=setuptools.find_packages(),
     install_requires=["requests", "urllib3", "pycryptodome", "rtp", "python-kasa"],
+    extras_require={"webrtc": ["aiortc>=1.16.0,<2"]},
     tests_require=["pytest", "pytest-asyncio", "mock"],
     classifiers=[
         "Programming Language :: Python :: 3",

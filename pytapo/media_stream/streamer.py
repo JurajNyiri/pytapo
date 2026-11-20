@@ -50,6 +50,7 @@ class Streamer:
         self.outputDirectory = outputDirectory
         self.window_size = int(window_size) if window_size else 50
         self.stream_task = None
+        self.streamProcess = None
         self.quality = quality
         self.running = False
         self.logLevel = logLevel
@@ -139,7 +140,7 @@ class Streamer:
         self.audio_format = audio_format
         self.audio_rate = audio_rate
 
-    async def start(self):
+    async def start(self, stdout=subprocess.PIPE):
         outputPath = None
         if self.mode == "hls":
             outputPath = media_output_path(self.outputDirectory, self.fileName)
@@ -182,6 +183,10 @@ class Streamer:
             self.audio_r, self.audio_w = os.pipe()
             pass_fds = (self.audio_r,)
             cmd += [
+                "-probesize",
+                "32",
+                "-analyzeduration",
+                "1",
                 "-f",
                 self.audio_format or "alaw",
                 "-ar",
@@ -237,7 +242,7 @@ class Streamer:
         self.streamProcess = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
+            stdout=stdout,
             stderr=subprocess.PIPE,
             pass_fds=pass_fds,
             # ffmpeg can emit very long stderr lines (a single warning/error with
@@ -258,7 +263,7 @@ class Streamer:
             self.stream_task = asyncio.create_task(self._stream_to_ffmpeg())
 
         read_fd = None
-        if self.mode == "pipe":
+        if self.mode == "pipe" and stdout == subprocess.PIPE:
             read_fd = self.streamProcess.stdout._transport.get_extra_info(
                 "pipe"
             ).fileno()
@@ -390,6 +395,9 @@ class Streamer:
         finally:
             # ffmpeg waits for the audio input to end before it exits, also on SIGTERM.
             self._close_audio_pipe()
+            if self.audio_r is not None:
+                os.close(self.audio_r)
+                self.audio_r = None
             if self.streamProcess:
                 try:
                     self.streamProcess.terminate()
