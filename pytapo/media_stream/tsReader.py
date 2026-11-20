@@ -18,7 +18,9 @@ class TSReader:
     def setBuffer(self, body):
         # Accept any bytes-like buffer (bytes, bytearray, memoryview) to avoid
         # the cost of converting each response to a Python list in the hot path.
-        self.b = body
+        # A memoryview makes dropping a read packet in sync() a zero-copy slice;
+        # slicing bytes would copy the rest of the buffer for every packet.
+        self.b = memoryview(body)
         self.i = 0
         self.s = self.PacketSize
 
@@ -160,7 +162,8 @@ class TSReader:
         return None
 
     def Bytes(self):
-        return self.b[self.i : self.PacketSize]
+        # PES keeps and concatenates payloads, so hand out a copy, not a view.
+        return bytes(self.b[self.i : self.PacketSize])
 
     def sync(self):
         # drop previous readed packet

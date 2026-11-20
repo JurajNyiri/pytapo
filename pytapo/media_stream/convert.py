@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import io
 import subprocess
@@ -11,6 +12,92 @@ from rtp import PayloadType
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
+
+
+async def _wait_ignoring_cancel(future):
+    """Wait until future is done even if the calling task is cancelled meanwhile.
+
+    Returns True if a cancellation was received while waiting.
+    """
+    cancelled = False
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancelled = True
+    return cancelled
+
+
+async def _cleanup(func, *args):
+    """Run a blocking cleanup in a thread and wait for it to finish, even if
+    the task is cancelled meanwhile; the cancellation is passed on afterwards."""
+    if await _wait_ignoring_cancel(asyncio.ensure_future(asyncio.to_thread(func, *args))):
+        raise asyncio.CancelledError
+
+
+async def _to_thread_to_end(func, *args, **kwargs):
+    """Run a blocking call in a thread and wait for it to finish, even if the
+    task is cancelled meanwhile, so that the caller learns what it created.
+
+    Returns (result, cancelled); the caller cleans up and passes the
+    cancellation on. If the call failed, its exception is raised, or
+    CancelledError if the task was cancelled meanwhile.
+    """
+    future = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+    cancelled = await _wait_ignoring_cancel(future)
+    if cancelled and future.exception() is not None:
+        raise asyncio.CancelledError
+    return future.result(), cancelled
+
+
+async def _run_process(args, capture=False):
+    """Run an executable without blocking the event loop.
+
+    If the awaiting task is cancelled, the process is killed and reaped before
+    CancelledError propagates, also when the task is cancelled again meanwhile.
+    Returns (returncode, stdout or None).
+    """
+    start = asyncio.ensure_future(
+        asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE if capture else asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.STDOUT if capture else asyncio.subprocess.DEVNULL,
+        )
+    )
+    process = None
+    try:
+        process = await asyncio.shield(start)
+        stdout, _ = await process.communicate()
+    except asyncio.CancelledError:
+        if process is None:
+            await _wait_ignoring_cancel(start)
+            if start.cancelled() or start.exception() is not None:
+                raise
+            process = start.result()
+        if process.returncode is None:
+            process.kill()
+        await _wait_ignoring_cancel(asyncio.ensure_future(process.wait()))
+        raise
+    return process.returncode, stdout
+
+
+def _write_temporary_file(data):
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        # Closing the file flushes buffered data before ffprobe reads it.
+        with tmp:
+            tmp.write(data)
+    except BaseException:
+        _remove_file(tmp.name)
+        raise
+    return tmp.name
+
+
+def _remove_file(name):
+    try:
+        os.unlink(name)
+    except OSError:
+        pass
 
 
 class Convert:
@@ -63,9 +150,12 @@ class Convert:
             fileLocation = os.path.abspath(fileLocation)
             audio_format = self._get_audio_format()
             audio_rate = self._get_audio_rate()
-            with tempfile.TemporaryDirectory(
-                prefix=".pytapo-", dir=os.path.dirname(fileLocation)
-            ) as temporaryDirectory:
+            temporaryDirectory, cancelled = await _to_thread_to_end(
+                tempfile.mkdtemp, prefix=".pytapo-", dir=os.path.dirname(fileLocation)
+            )
+            try:
+                if cancelled:
+                    raise asyncio.CancelledError
                 tempVideoFileLocation = os.path.join(temporaryDirectory, "video.ts")
                 tempAudioFileLocation = os.path.join(
                     temporaryDirectory, "audio." + audio_format
@@ -75,7 +165,7 @@ class Convert:
                 async with aiofiles.open(tempAudioFileLocation, "wb") as file:
                     await file.write(self.audioWriter.getvalue())
 
-                subprocess.run(
+                args = (
                     [
                         "ffmpeg",
                         "-ss",
@@ -106,11 +196,19 @@ class Convert:
                         "-map",
                         "1:a:0",
                         fileLocation,
-                    ],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=True,
+                    ]
                 )
+                try:
+                    returncode, _ = await _run_process(args)
+                except asyncio.CancelledError:
+                    # ffmpeg was killed and may have left an incomplete file,
+                    # which the downloader would take as done next time.
+                    await _cleanup(_remove_file, fileLocation)
+                    raise
+                if returncode != 0:
+                    raise subprocess.CalledProcessError(returncode, args)
+            finally:
+                await _cleanup(shutil.rmtree, temporaryDirectory, True)
         else:
             raise Exception("Method not supported")
 
@@ -125,52 +223,99 @@ class Convert:
         else:
             return self.addedChunks / 2
 
+    # The length can be determined blocking (calculateLength/getLength, kept
+    # for backward compatibility) or without blocking the event loop
+    # (calculateLengthAsync/getLengthAsync). The helpers below hold the logic
+    # both variants share, so they only differ in how ffprobe is run.
+
+    @staticmethod
+    def _ffprobe_args(fileName):
+        return [
+            "ffprobe",
+            "-v",
+            "fatal",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            "-f",
+            "mpegts",
+            "-protocol_whitelist",
+            "file",
+            fileName,
+        ]
+
+    def _store_length(self, detectedLength, data):
+        """Remember a length measured by ffprobe for the buffer contents data."""
+        self.known_lengths[self.addedChunks] = detectedLength
+        self.lengthLastCalculatedAtChunk = self.addedChunks
+        # Cache the bytes-per-second ratio so cheap estimates can be
+        # used between ffprobe calls instead of spawning a subprocess
+        # for every progress update.
+        if detectedLength and detectedLength > 0:
+            self._cached_bytes_per_second = len(data) / detectedLength
+
+    def _needs_probe(self):
+        """Whether getLength has to run ffprobe instead of estimating."""
+        if self._should_recalculate_length():
+            return True
+        return bool(self.known_lengths) and list(self.known_lengths.values())[-1] == 0
+
+    def _estimate(self, use_cached_ratio):
+        """Length estimated from earlier measurements, or False."""
+        # Prefer a bytes-per-second estimate once a ratio has been cached,
+        # as it avoids the chunk-count assumption when bitrate changes.
+        if use_cached_ratio and self._cached_bytes_per_second:
+            return len(self.writer.getvalue()) / self._cached_bytes_per_second
+        if self.known_lengths:
+            lastKnownChunk = list(self.known_lengths)[-1]
+            bytesPerChunk = lastKnownChunk / self.known_lengths[lastKnownChunk]
+            return self.addedChunks / bytesPerChunk
+        return False
+
     # calculates real stream length, hard on processing since it has to go through all the frames
     def calculateLength(self):
         detectedLength = False
         tmp_name = None
         self._last_length_calc_time = time.time()
+        data = self.writer.getvalue()
         try:
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp_name = tmp.name
-                tmp.write(self.writer.getvalue())
-            # Closing the file flushes buffered data before ffprobe reads it.
+            tmp_name = _write_temporary_file(data)
             result = subprocess.run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "fatal",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    "-f",
-                    "mpegts",
-                    "-protocol_whitelist",
-                    "file",
-                    tmp_name,
-                ],
+                self._ffprobe_args(tmp_name),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
             detectedLength = float(result.stdout)
-            self.known_lengths[self.addedChunks] = detectedLength
-            self.lengthLastCalculatedAtChunk = self.addedChunks
-            # Cache the bytes-per-second ratio so cheap estimates can be
-            # used between ffprobe calls instead of spawning a subprocess
-            # for every progress update.
-            if detectedLength and detectedLength > 0:
-                self._cached_bytes_per_second = (
-                    len(self.writer.getvalue()) / detectedLength
-                )
+            self._store_length(detectedLength, data)
         except Exception as e:
             logger.debug("Could not calculate length from stream: %s", e)
         finally:
             if tmp_name is not None:
-                try:
-                    os.unlink(tmp_name)
-                except OSError:
-                    pass
+                _remove_file(tmp_name)
+        return detectedLength
+
+    async def calculateLengthAsync(self):
+        """calculateLength without blocking the event loop.
+
+        On cancellation ffprobe is killed and the temporary file removed.
+        """
+        detectedLength = False
+        tmp_name = None
+        self._last_length_calc_time = time.time()
+        data = self.writer.getvalue()
+        try:
+            tmp_name, cancelled = await _to_thread_to_end(_write_temporary_file, data)
+            if cancelled:
+                raise asyncio.CancelledError
+            _, stdout = await _run_process(self._ffprobe_args(tmp_name), capture=True)
+            detectedLength = float(stdout)
+            self._store_length(detectedLength, data)
+        except Exception as e:
+            logger.debug("Could not calculate length from stream: %s", e)
+        finally:
+            if tmp_name is not None:
+                await _cleanup(_remove_file, tmp_name)
         return detectedLength
 
     def _should_recalculate_length(self):
@@ -200,30 +345,23 @@ class Convert:
         # a progress estimate if that probe fails.
         if exact:
             return self.calculateLength()
-        lastKnownChunk = 0
-        lastKnownLength = 0
-        has_known_lengths = bool(self.known_lengths)
-        if has_known_lengths:
-            lastKnownChunk = list(self.known_lengths)[-1]
-            lastKnownLength = self.known_lengths[lastKnownChunk]
-        if self._should_recalculate_length() or (
-            has_known_lengths and lastKnownLength == 0
-        ):
+        if self._needs_probe():
             calculatedLength = self.calculateLength()
             if calculatedLength is not False:
                 return calculatedLength
-            elif has_known_lengths:
-                bytesPerChunk = lastKnownChunk / lastKnownLength
-                return self.addedChunks / bytesPerChunk
-        else:
-            # Prefer a bytes-per-second estimate once a ratio has been cached,
-            # as it avoids the chunk-count assumption when bitrate changes.
-            if self._cached_bytes_per_second:
-                return len(self.writer.getvalue()) / self._cached_bytes_per_second
-            if has_known_lengths:
-                bytesPerChunk = lastKnownChunk / lastKnownLength
-                return self.addedChunks / bytesPerChunk
-        return False
+            return self._estimate(use_cached_ratio=False)
+        return self._estimate(use_cached_ratio=True)
+
+    async def getLengthAsync(self, exact=False):
+        """getLength without blocking the event loop."""
+        if exact:
+            return await self.calculateLengthAsync()
+        if self._needs_probe():
+            calculatedLength = await self.calculateLengthAsync()
+            if calculatedLength is not False:
+                return calculatedLength
+            return self._estimate(use_cached_ratio=False)
+        return self._estimate(use_cached_ratio=True)
 
     def write(self, data: bytes, audioData: bytes, audioPayloadType=None, audioSampleRate=None):
         self.addedChunks += 1
