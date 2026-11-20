@@ -20,8 +20,11 @@ pidfile = os.environ.get("FAKE_PIDFILE")
 if pidfile:
     with open(pidfile, "w") as f:
         f.write(str(os.getpid()))
+ffprobe = os.path.basename(sys.argv[0]) == "ffprobe"
+if not ffprobe and os.environ.get("FAKE_WRITE_FIRST"):
+    open(sys.argv[-1], "wb").close()
 time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
-if os.path.basename(sys.argv[0]) == "ffprobe":
+if ffprobe:
     print(os.environ.get("FAKE_LENGTH", "12.5"))
 else:
     open(sys.argv[-1], "wb").close()
@@ -173,6 +176,96 @@ def test_save_cancelled_kills_ffmpeg_and_cleans_up(fake_ffmpeg, monkeypatch, can
     pid = asyncio.run(run())
     assert not _alive(pid)
     assert _no_temp_dirs(fake_ffmpeg)
+
+
+@pytest.mark.parametrize("cancels", [1, 2])
+def test_save_cancelled_removes_incomplete_output(fake_ffmpeg, monkeypatch, cancels):
+    """An incomplete file would be skipped as already downloaded next time."""
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    monkeypatch.setenv("FAKE_WRITE_FIRST", "1")
+    pidfile = fake_ffmpeg / "pid"
+    out = fake_ffmpeg / "out.mp4"
+
+    async def run():
+        task = asyncio.ensure_future(_converter().save(str(out), 10))
+        while not pidfile.exists() or not pidfile.read_text() or not out.exists():
+            await asyncio.sleep(0.02)
+        for _ in range(cancels):
+            task.cancel()
+            await asyncio.sleep(0)
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
+    assert not out.exists()
+    assert _no_temp_dirs(fake_ffmpeg)
+
+
+def _slow_in_thread(monkeypatch, owner, name):
+    """Make owner.name block its thread for a while; returns an event set when it starts."""
+    import threading
+
+    started = threading.Event()
+    original = getattr(owner, name)
+
+    def slow(*args, **kwargs):
+        started.set()
+        time.sleep(0.3)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(owner, name, slow)
+    return started
+
+
+async def _cancel_when(started, coro, cancels):
+    task = asyncio.ensure_future(coro)
+    while not started.is_set():
+        await asyncio.sleep(0.01)
+    for _ in range(cancels):
+        task.cancel()
+        await asyncio.sleep(0)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.parametrize("cancels", [1, 2])
+def test_save_cancelled_while_creating_temp_dir(fake_ffmpeg, monkeypatch, cancels):
+    """The directory created after the cancellation is removed as well."""
+    import tempfile
+
+    started = _slow_in_thread(monkeypatch, tempfile, "mkdtemp")
+    out = fake_ffmpeg / "out.mp4"
+    asyncio.run(_cancel_when(started, _converter().save(str(out), 10), cancels))
+    assert _no_temp_dirs(fake_ffmpeg)
+    assert not (fake_ffmpeg / "pid").exists()  # ffmpeg not started
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("cancels", [1, 2])
+def test_length_async_cancelled_while_writing_temp_file(fake_ffmpeg, monkeypatch, cancels):
+    """The file written after the cancellation is removed, ffprobe is not started."""
+    import tempfile
+
+    import pytapo.media_stream.convert as convert
+
+    tmpdir = fake_ffmpeg / "tmp"
+    tmpdir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmpdir))
+    started = _slow_in_thread(monkeypatch, convert, "_write_temporary_file")
+    asyncio.run(_cancel_when(started, _converter().getLengthAsync(exact=True), cancels))
+    assert list(tmpdir.iterdir()) == []
+    assert not (fake_ffmpeg / "pid").exists()
+
+
+def test_write_temporary_file_removed_on_error(tmp_path, monkeypatch):
+    import tempfile
+
+    from pytapo.media_stream.convert import _write_temporary_file
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with pytest.raises(TypeError):
+        _write_temporary_file("not bytes")
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_length_async_does_not_block_the_event_loop(fake_ffmpeg, monkeypatch):

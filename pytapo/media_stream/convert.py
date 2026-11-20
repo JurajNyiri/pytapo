@@ -35,6 +35,21 @@ async def _cleanup(func, *args):
         raise asyncio.CancelledError
 
 
+async def _to_thread_to_end(func, *args, **kwargs):
+    """Run a blocking call in a thread and wait for it to finish, even if the
+    task is cancelled meanwhile, so that the caller learns what it created.
+
+    Returns (result, cancelled); the caller cleans up and passes the
+    cancellation on. If the call failed, its exception is raised, or
+    CancelledError if the task was cancelled meanwhile.
+    """
+    future = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+    cancelled = await _wait_ignoring_cancel(future)
+    if cancelled and future.exception() is not None:
+        raise asyncio.CancelledError
+    return future.result(), cancelled
+
+
 async def _run_process(args, capture=False):
     """Run an executable without blocking the event loop.
 
@@ -67,10 +82,15 @@ async def _run_process(args, capture=False):
 
 
 def _write_temporary_file(data):
-    # Closing the file flushes buffered data before ffprobe reads it.
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(data)
-        return tmp.name
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        # Closing the file flushes buffered data before ffprobe reads it.
+        with tmp:
+            tmp.write(data)
+    except BaseException:
+        _remove_file(tmp.name)
+        raise
+    return tmp.name
 
 
 def _remove_file(name):
@@ -130,10 +150,12 @@ class Convert:
             fileLocation = os.path.abspath(fileLocation)
             audio_format = self._get_audio_format()
             audio_rate = self._get_audio_rate()
-            temporaryDirectory = await asyncio.to_thread(
+            temporaryDirectory, cancelled = await _to_thread_to_end(
                 tempfile.mkdtemp, prefix=".pytapo-", dir=os.path.dirname(fileLocation)
             )
             try:
+                if cancelled:
+                    raise asyncio.CancelledError
                 tempVideoFileLocation = os.path.join(temporaryDirectory, "video.ts")
                 tempAudioFileLocation = os.path.join(
                     temporaryDirectory, "audio." + audio_format
@@ -176,7 +198,13 @@ class Convert:
                         fileLocation,
                     ]
                 )
-                returncode, _ = await _run_process(args)
+                try:
+                    returncode, _ = await _run_process(args)
+                except asyncio.CancelledError:
+                    # ffmpeg was killed and may have left an incomplete file,
+                    # which the downloader would take as done next time.
+                    await _cleanup(_remove_file, fileLocation)
+                    raise
                 if returncode != 0:
                     raise subprocess.CalledProcessError(returncode, args)
             finally:
@@ -277,7 +305,9 @@ class Convert:
         self._last_length_calc_time = time.time()
         data = self.writer.getvalue()
         try:
-            tmp_name = await asyncio.to_thread(_write_temporary_file, data)
+            tmp_name, cancelled = await _to_thread_to_end(_write_temporary_file, data)
+            if cancelled:
+                raise asyncio.CancelledError
             _, stdout = await _run_process(self._ffprobe_args(tmp_name), capture=True)
             detectedLength = float(stdout)
             self._store_length(detectedLength, data)
