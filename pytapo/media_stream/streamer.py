@@ -246,6 +246,11 @@ class Streamer:
             limit=2**20,  # 1 MiB
         )
 
+        if self.audio_r is not None:
+            # ffmpeg has its own copy; ours would only leak.
+            os.close(self.audio_r)
+            self.audio_r = None
+
         asyncio.create_task(self._print_ffmpeg_logs(self.streamProcess.stderr))
 
         self.running = True
@@ -363,6 +368,13 @@ class Streamer:
         finally:
             self.running = False
             self.streamProcess.stdin.close()
+            self._close_audio_pipe()
+
+    def _close_audio_pipe(self):
+        """Close the write end of the audio pipe, so ffmpeg sees the end of the audio."""
+        if self.audio_w is not None:
+            os.close(self.audio_w)
+            self.audio_w = None
 
     async def stop(self):
         self.currentAction = "Stopping stream"
@@ -376,6 +388,8 @@ class Streamer:
                     pass
 
         finally:
+            # ffmpeg waits for the audio input to end before it exits, also on SIGTERM.
+            self._close_audio_pipe()
             if self.streamProcess:
                 try:
                     self.streamProcess.terminate()
