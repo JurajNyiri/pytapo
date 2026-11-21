@@ -10,7 +10,7 @@ import time
 import aiofiles
 from rtp import PayloadType
 
-from ._utils import run_file_io
+from ._utils import run_file_io, start_file_io
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -30,10 +30,25 @@ async def _wait_ignoring_cancel(future):
     return cancelled
 
 
+_background_cleanups = set()
+
+
 async def _cleanup(func, *args):
-    """Run a blocking cleanup in a file system thread and wait for it to finish, even if
-    the task is cancelled meanwhile; the cancellation is passed on afterwards."""
-    if await _wait_ignoring_cancel(asyncio.ensure_future(run_file_io(func, *args))):
+    """Run a blocking cleanup in a file system thread and wait for it to finish,
+    even if the task is cancelled meanwhile; the cancellation is passed on
+    afterwards.
+
+    Cancelled while still waiting for a free slot, it returns at once and the
+    cleanup runs in the background as soon as a slot is free.
+    """
+    try:
+        future = await start_file_io(func, *args)
+    except asyncio.CancelledError:
+        task = asyncio.ensure_future(run_file_io(func, *args))
+        _background_cleanups.add(task)
+        task.add_done_callback(_background_cleanups.discard)
+        raise
+    if await _wait_ignoring_cancel(future):
         raise asyncio.CancelledError
 
 
@@ -43,9 +58,11 @@ async def _to_thread_to_end(func, *args, **kwargs):
 
     Returns (result, cancelled); the caller cleans up and passes the
     cancellation on. If the call failed, its exception is raised, or
-    CancelledError if the task was cancelled meanwhile.
+    CancelledError if the task was cancelled meanwhile. Cancelled while still
+    waiting for a free slot, CancelledError is raised at once: nothing has
+    been created then.
     """
-    future = asyncio.ensure_future(run_file_io(func, *args, **kwargs))
+    future = await start_file_io(func, *args, **kwargs)
     cancelled = await _wait_ignoring_cancel(future)
     if cancelled and future.exception() is not None:
         raise asyncio.CancelledError

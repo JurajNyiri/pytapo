@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import hashlib
 import os
 import threading
@@ -17,15 +18,66 @@ from typing import Mapping, Tuple, Optional
 # these slots instead of a thread of the application's executor, and daemon
 # threads do not keep the interpreter from exiting.
 FILE_IO_THREADS = 2
-_file_io_limits = weakref.WeakKeyDictionary()
+_LIMIT_ATTRIBUTE = "_pytapo_file_io_limit"
+_file_io_limits = weakref.WeakKeyDictionary()  # loops without attribute support
 
 
-async def run_file_io(func, *args, **kwargs):
-    """Run a blocking file system call without blocking the event loop."""
-    loop = asyncio.get_running_loop()
-    limit = _file_io_limits.get(loop)
+class _FileIOLimit:
+    """Slots for file system threads of one event loop.
+
+    Unlike asyncio.Semaphore it keeps no reference to the loop while idle:
+    waiters are futures that are dropped once they are done.
+    """
+
+    def __init__(self, slots):
+        self._free = slots
+        self._waiters = collections.deque()
+
+    async def acquire(self):
+        if self._free > 0 and not self._waiters:
+            self._free -= 1
+            return
+        waiter = asyncio.get_running_loop().create_future()
+        self._waiters.append(waiter)
+        try:
+            await waiter
+        except asyncio.CancelledError:
+            if waiter.done() and not waiter.cancelled():
+                # the slot was granted just before the cancellation
+                self.release()
+            else:
+                self._waiters.remove(waiter)
+            raise
+
+    def release(self):
+        while self._waiters:
+            waiter = self._waiters.popleft()
+            if not waiter.done():
+                waiter.set_result(None)  # the slot passes on directly
+                return
+        self._free += 1
+
+
+def _file_io_limit(loop):
+    limit = getattr(loop, _LIMIT_ATTRIBUTE, None) or _file_io_limits.get(loop)
     if limit is None:
-        limit = _file_io_limits[loop] = asyncio.Semaphore(FILE_IO_THREADS)
+        limit = _FileIOLimit(FILE_IO_THREADS)
+        try:
+            setattr(loop, _LIMIT_ATTRIBUTE, limit)
+        except AttributeError:
+            _file_io_limits[loop] = limit
+    return limit
+
+
+async def start_file_io(func, *args, **kwargs):
+    """Wait for a free slot, start a blocking file system call in it and
+    return a future for its result.
+
+    Cancelling while waiting for the slot ends at once, nothing has started
+    then. The slot is only freed when the call has really returned.
+    """
+    loop = asyncio.get_running_loop()
+    limit = _file_io_limit(loop)
     await limit.acquire()
     future = loop.create_future()
 
@@ -35,7 +87,6 @@ async def run_file_io(func, *args, **kwargs):
                 future.set_result(result)
             else:
                 future.set_exception(error)
-        # The slot is only freed when the call has really returned.
         limit.release()
 
     def worker():
@@ -53,7 +104,15 @@ async def run_file_io(func, *args, **kwargs):
     except BaseException:
         limit.release()
         raise
-    return await future
+    return future
+
+
+async def run_file_io(func, *args, **kwargs):
+    """Run a blocking file system call without blocking the event loop.
+
+    Cancelling returns at once, also while the call is running.
+    """
+    return await (await start_file_io(func, *args, **kwargs))
 
 
 class StreamType(Enum):

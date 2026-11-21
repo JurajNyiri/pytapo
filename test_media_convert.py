@@ -389,3 +389,67 @@ def test_file_io_passes_errors_and_survives_a_closed_loop():
     finally:
         threading.excepthook = old_hook
     assert errors == []
+
+
+def test_file_io_cancel_while_queued_ends_at_once():
+    """A call still waiting for a slot can be cancelled at once, also where
+    Convert waits for a started call to finish."""
+    import threading
+
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+    from pytapo.media_stream.convert import _cleanup, _to_thread_to_end
+
+    release = threading.Event()
+    ran = []
+
+    def hanging():
+        release.wait(5)
+
+    async def run():
+        hung = [asyncio.ensure_future(run_file_io(hanging)) for _ in range(FILE_IO_THREADS)]
+        await asyncio.sleep(0.05)
+        queued = asyncio.ensure_future(_to_thread_to_end(ran.append, "created"))
+        cleanup = asyncio.ensure_future(_cleanup(ran.append, "cleaned"))
+        await asyncio.sleep(0.05)
+        for task in (queued, cleanup):
+            task.cancel()
+        done, _ = await asyncio.wait((queued, cleanup), timeout=0.5)
+        assert done == {queued, cleanup}
+        assert queued.cancelled() and cleanup.cancelled()
+        assert ran == []  # nothing has started
+        release.set()
+        await asyncio.gather(*hung)
+        for _ in range(50):  # the cleanup still runs once a slot is free
+            if ran:
+                break
+            await asyncio.sleep(0.02)
+        assert ran == ["cleaned"]
+
+    asyncio.run(run())
+
+
+def test_file_io_limit_does_not_keep_the_loop_alive():
+    import gc
+    import threading
+    import weakref
+
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+
+    release = threading.Event()
+
+    async def contend():
+        tasks = [
+            asyncio.ensure_future(run_file_io(release.wait, 5))
+            for _ in range(FILE_IO_THREADS + 2)
+        ]
+        await asyncio.sleep(0.05)
+        release.set()
+        await asyncio.gather(*tasks)
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(contend())
+    loop.close()
+    ref = weakref.ref(loop)
+    del loop
+    gc.collect()
+    assert ref() is None
