@@ -25,11 +25,14 @@ class Talk:
     """Send encoded mono A-law audio at 8 kHz to a camera's speaker.
 
     Use as an async context manager and pass each audio chunk to ``write``.
-    Audio must arrive at its playback rate; this class does not pace it.
+    Audio passed to ``write`` must arrive at its playback rate.
+    Playback sessions can supply an async ``on_interrupt`` callback so live
+    talk can stop them before taking the speaker.
     """
 
-    def __init__(self, tapo):
+    def __init__(self, tapo, *, on_interrupt=None):
         self.tapo = tapo
+        self._on_interrupt = on_interrupt
         self.session = None
         self.responses = None
         self.session_id = None
@@ -41,10 +44,21 @@ class Talk:
         # All entities for one camera share its controller and speaker.
         if not hasattr(self.tapo, "_talk_lock"):
             self.tapo._talk_lock = asyncio.Lock()
+        current = getattr(self.tapo, "_talk_session", None)
+        if (
+            self.tapo._talk_lock.locked()
+            and current is not None
+            and current._on_interrupt is not None
+            and self._on_interrupt is None
+        ):
+            # Live talk takes priority over media. Finish its cleanup even if
+            # the browser disconnects while waiting for the speaker.
+            await asyncio.shield(current._on_interrupt())
         if self.tapo._talk_lock.locked():
             raise RuntimeError("The camera speaker is already in use")
         await self.tapo._talk_lock.acquire()
         self._locked = True
+        self.tapo._talk_session = self
         try:
             self.session = await asyncio.to_thread(
                 self.tapo.getMediaSession, StreamType.Stream
@@ -121,6 +135,59 @@ class Talk:
         await self.session.send_audio(bytes(packets), self.session_id)
         self._samples += len(audio)
 
+    async def play(self, source, *, ffmpeg="ffmpeg"):
+        """Decode a file or URL with FFmpeg and send it at its playback rate.
+
+        Call inside an open Talk context. Cancelling playback stops FFmpeg;
+        the context manager owns the speaker connection.
+        """
+        if self.session_id is None:
+            raise RuntimeError("Talk session is not open")
+        start = asyncio.create_task(
+            asyncio.create_subprocess_exec(
+                ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-rw_timeout", "10000000", "-i", source,
+                "-vn", "-sn", "-dn",
+                # Give the camera speaker time to start before the clip.
+                "-af", "adelay=1000:all=1", "-ac", "1", "-ar", "8000",
+                "-c:a", "pcm_alaw", "-f", "alaw", "pipe:1",
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        )
+        process = None
+        try:
+            # Retain the process if cancellation arrives while it is starting.
+            process = await asyncio.shield(start)
+            loop = asyncio.get_running_loop()
+            deadline = loop.time()
+            samples = 0
+            while audio := await asyncio.wait_for(process.stdout.read(160), 15):
+                await asyncio.sleep(max(0, deadline - loop.time()))
+                await asyncio.wait_for(self.write(audio), 5)
+                samples += len(audio)
+                deadline = max(deadline + len(audio) / 8000, loop.time())
+            await asyncio.sleep(max(0, deadline - loop.time()))
+            code = await asyncio.wait_for(process.wait(), 5)
+            if code != 0 or not samples:
+                raise RuntimeError(
+                    f"FFmpeg could not decode the audio (exit code {code})"
+                )
+        finally:
+            if process is None:
+                process = await start
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(process.communicate(), 3)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.communicate()
+
     async def __aexit__(self, *args):
         await self.close()
 
@@ -135,5 +202,7 @@ class Talk:
                     await self.session.close()
             finally:
                 if self._locked:
+                    if getattr(self.tapo, "_talk_session", None) is self:
+                        self.tapo._talk_session = None
                     self.tapo._talk_lock.release()
                     self._locked = False
