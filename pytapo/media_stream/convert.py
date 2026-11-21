@@ -10,6 +10,8 @@ import time
 import aiofiles
 from rtp import PayloadType
 
+from ._utils import run_file_io
+
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
 
@@ -29,21 +31,21 @@ async def _wait_ignoring_cancel(future):
 
 
 async def _cleanup(func, *args):
-    """Run a blocking cleanup in a thread and wait for it to finish, even if
+    """Run a blocking cleanup in a file system thread and wait for it to finish, even if
     the task is cancelled meanwhile; the cancellation is passed on afterwards."""
-    if await _wait_ignoring_cancel(asyncio.ensure_future(asyncio.to_thread(func, *args))):
+    if await _wait_ignoring_cancel(asyncio.ensure_future(run_file_io(func, *args))):
         raise asyncio.CancelledError
 
 
 async def _to_thread_to_end(func, *args, **kwargs):
-    """Run a blocking call in a thread and wait for it to finish, even if the
+    """Run a blocking file system call and wait for it to finish, even if the
     task is cancelled meanwhile, so that the caller learns what it created.
 
     Returns (result, cancelled); the caller cleans up and passes the
     cancellation on. If the call failed, its exception is raised, or
     CancelledError if the task was cancelled meanwhile.
     """
-    future = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+    future = asyncio.ensure_future(run_file_io(func, *args, **kwargs))
     cancelled = await _wait_ignoring_cancel(future)
     if cancelled and future.exception() is not None:
         raise asyncio.CancelledError

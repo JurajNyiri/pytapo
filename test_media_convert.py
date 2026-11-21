@@ -323,3 +323,69 @@ def test_length_sync_and_async_estimate_alike(fake_ffmpeg):
         c.write(b"\x47" * 188, b"\x00" * 160)
     # Twice the data at the cached bytes-per-second ratio, without ffprobe.
     assert sync.getLength() == asyncio.run(asyn.getLengthAsync()) == 25.0
+
+
+def test_file_io_limits_threads_and_frees_slots_only_when_done():
+    """Calls hanging on an unreachable share occupy at most FILE_IO_THREADS threads."""
+    import threading
+
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+
+    release = threading.Event()
+    started = []
+
+    def hanging(n):
+        started.append(n)
+        release.wait(5)
+        return n
+
+    async def run():
+        tasks = [asyncio.ensure_future(run_file_io(hanging, n)) for n in range(FILE_IO_THREADS + 1)]
+        _, gap = await _max_loop_gap(asyncio.sleep(0.3))
+        assert gap < 0.2  # the event loop keeps running
+        assert len(started) == FILE_IO_THREADS
+        # Cancelling (twice) returns at once, but does not free the slots
+        for t in tasks[:FILE_IO_THREADS]:
+            t.cancel()
+            await asyncio.sleep(0)
+            t.cancel()
+        await asyncio.sleep(0.2)
+        assert all(t.cancelled() for t in tasks[:FILE_IO_THREADS])
+        assert len(started) == FILE_IO_THREADS
+        release.set()  # the hanging calls return: the waiting call runs
+        assert await tasks[-1] == FILE_IO_THREADS
+
+    asyncio.run(run())
+
+
+def test_file_io_passes_errors_and_survives_a_closed_loop():
+    import threading
+
+    from pytapo.media_stream._utils import run_file_io
+
+    def broken():
+        raise OSError("share unreachable")
+
+    async def raises():
+        with pytest.raises(OSError):
+            await run_file_io(broken)
+
+    asyncio.run(raises())
+
+    release = threading.Event()
+    errors = []
+    old_hook = threading.excepthook
+    threading.excepthook = lambda args: errors.append(args.exc_value)
+    try:
+
+        async def leave_running():
+            task = asyncio.ensure_future(run_file_io(release.wait, 5))
+            await asyncio.sleep(0.05)
+            task.cancel()
+
+        asyncio.run(leave_running())  # the loop is closed, the thread still runs
+        release.set()
+        time.sleep(0.2)
+    finally:
+        threading.excepthook = old_hook
+    assert errors == []

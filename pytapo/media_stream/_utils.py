@@ -1,11 +1,59 @@
+import asyncio
 import hashlib
 import os
+import threading
+import weakref
 from enum import Enum
 from pathlib import Path, PureWindowsPath
 
 from ..const import EncryptionMethod
 
 from typing import Mapping, Tuple, Optional
+
+
+# File system calls of the media code run in their own daemon threads, at most
+# FILE_IO_THREADS at a time per event loop. A call on an unreachable network
+# share (e.g. an NFS hard mount) can hang forever; this way it occupies one of
+# these slots instead of a thread of the application's executor, and daemon
+# threads do not keep the interpreter from exiting.
+FILE_IO_THREADS = 2
+_file_io_limits = weakref.WeakKeyDictionary()
+
+
+async def run_file_io(func, *args, **kwargs):
+    """Run a blocking file system call without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    limit = _file_io_limits.get(loop)
+    if limit is None:
+        limit = _file_io_limits[loop] = asyncio.Semaphore(FILE_IO_THREADS)
+    await limit.acquire()
+    future = loop.create_future()
+
+    def finish(result, error):
+        if not future.done():
+            if error is None:
+                future.set_result(result)
+            else:
+                future.set_exception(error)
+        # The slot is only freed when the call has really returned.
+        limit.release()
+
+    def worker():
+        try:
+            outcome = (func(*args, **kwargs), None)
+        except BaseException as error:  # handed to the awaiting task
+            outcome = (None, error)
+        try:
+            loop.call_soon_threadsafe(finish, *outcome)
+        except RuntimeError:
+            pass  # the event loop has been closed meanwhile
+
+    try:
+        threading.Thread(target=worker, name="pytapo-file-io", daemon=True).start()
+    except BaseException:
+        limit.release()
+        raise
+    return await future
 
 
 class StreamType(Enum):
