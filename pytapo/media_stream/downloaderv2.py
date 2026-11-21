@@ -6,7 +6,7 @@ import os
 import re
 import asyncio
 import subprocess
-from ._utils import StreamType, media_output_path
+from ._utils import StreamType, media_output_path, write_audio_frame
 from datetime import datetime
 
 HLS_TIME = 1
@@ -159,6 +159,7 @@ class DownloaderV2:
 
         if self.includeAudio:
             self.audio_r, self.audio_w = os.pipe()
+            os.set_blocking(self.audio_w, False)
             pass_fds = (self.audio_r,)
             cmd += [
                 "-f",
@@ -272,6 +273,7 @@ class DownloaderV2:
                                 os.close(self.audio_w)
                             except OSError:
                                 pass
+                            self.audio_w = None
                         self.running = False
                         self.currentAction = "Finished"
 
@@ -322,8 +324,10 @@ class DownloaderV2:
                         frame = self._audio_buffer[:160]
                         self._audio_buffer = self._audio_buffer[160:]
                         try:
-                            os.write(self.audio_w, frame)
-                        except OSError:
+                            if not await write_audio_frame(lambda: self.audio_w, frame):
+                                break
+                        except TimeoutError:
+                            self.running = False
                             break
 
                 # Video – re‑assemble & byte‑align to 188‑byte TS cells
