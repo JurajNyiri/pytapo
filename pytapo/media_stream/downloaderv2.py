@@ -6,12 +6,15 @@ import os
 import re
 import asyncio
 import subprocess
+import time
 from ._utils import StreamType, media_output_path
 from datetime import datetime
 
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
 HLS_FLAGS = "delete_segments+append_list"
+AUDIO_WRITE_TIMEOUT = 15.0
+AUDIO_WRITE_RETRY_INTERVAL = 0.01
 
 
 class DownloaderV2:
@@ -159,6 +162,7 @@ class DownloaderV2:
 
         if self.includeAudio:
             self.audio_r, self.audio_w = os.pipe()
+            os.set_blocking(self.audio_w, False)
             pass_fds = (self.audio_r,)
             cmd += [
                 "-f",
@@ -231,6 +235,10 @@ class DownloaderV2:
             pass_fds=pass_fds,
         )
 
+        if self.audio_r is not None:
+            os.close(self.audio_r)
+            self.audio_r = None
+
         asyncio.create_task(self._print_ffmpeg_logs(self.streamProcess.stderr))
 
         self.running = True
@@ -267,11 +275,12 @@ class DownloaderV2:
                         self._cut_done = True
                         if not self.streamProcess.stdin.is_closing():
                             self.streamProcess.stdin.close()
-                        if self.includeAudio and self.audio_w:
+                        if self.includeAudio and self.audio_w is not None:
                             try:
                                 os.close(self.audio_w)
                             except OSError:
                                 pass
+                            self.audio_w = None
                         self.running = False
                         self.currentAction = "Finished"
 
@@ -322,8 +331,10 @@ class DownloaderV2:
                         frame = self._audio_buffer[:160]
                         self._audio_buffer = self._audio_buffer[160:]
                         try:
-                            os.write(self.audio_w, frame)
-                        except OSError:
+                            if not await self._write_audio_frame(frame):
+                                break
+                        except TimeoutError:
+                            self.running = False
                             break
 
                 # Video – re‑assemble & byte‑align to 188‑byte TS cells
@@ -348,6 +359,29 @@ class DownloaderV2:
 
                 if not self.includeAudio:
                     await self.streamProcess.stdin.drain()
+
+    async def _write_audio_frame(self, frame):
+        """Yield while FFmpeg's audio pipe is full; stop after no progress."""
+        view = memoryview(frame)
+        deadline = time.monotonic() + AUDIO_WRITE_TIMEOUT
+        while view:
+            fd = self.audio_w
+            if fd is None:
+                return False
+            try:
+                written = os.write(fd, view)
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Timed out writing to audio pipe")
+                await asyncio.sleep(AUDIO_WRITE_RETRY_INTERVAL)
+                continue
+            except OSError:
+                return False
+            if written <= 0:
+                return False
+            view = view[written:]
+            deadline = time.monotonic() + AUDIO_WRITE_TIMEOUT
+        return True
 
     async def stop(self):
         self.currentAction = "Stopping stream"

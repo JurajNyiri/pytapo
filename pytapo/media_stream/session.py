@@ -102,6 +102,10 @@ class HttpMediaSession:
         return self
 
     async def start(self):
+        async with asyncio.timeout(CONNECTION_TIMEOUT):
+            await self._authenticate()
+
+    async def _authenticate(self):
         try:
             await self._start()
         except HttpStatusCodeException as exc:
@@ -265,8 +269,7 @@ class HttpMediaSession:
             # Close the socket on cancellation as well as authentication errors.
             # noinspection PyBroadException
             try:
-                self._writer.close()
-                await self._writer.wait_closed()
+                await self._close_writer()
             except Exception:
                 pass
             self._started = False
@@ -590,7 +593,9 @@ class HttpMediaSession:
                 if resp.mimetype == "video/mp2t":
                     # Off the event loop; responses of one stream are handled one
                     # after another, so tsReader is never used by two threads.
-                    pkt = await asyncio.to_thread(self._find_audio, tsReader, resp.plaintext)
+                    pkt = await asyncio.to_thread(
+                        self._find_audio, tsReader, resp.plaintext
+                    )
                     if pkt:
                         resp.audioPayload = pkt.payload
                         resp.audioPayloadType = pkt.payloadType
@@ -632,8 +637,7 @@ class HttpMediaSession:
                 pass
 
             # Close the writer
-            self._writer.close()
-            await self._writer.wait_closed()
+            await self._close_writer()
 
             # Drain all queues that were never fully consumed.
             # Any HttpMediaResponse objects sitting in these queues would
@@ -653,3 +657,13 @@ class HttpMediaSession:
                     except asyncio.QueueEmpty:
                         break
             self._sequence_numbers.clear()
+
+    async def _close_writer(self):
+        if self._writer is None:
+            return
+        self._writer.close()
+        try:
+            async with asyncio.timeout(3):
+                await self._writer.wait_closed()
+        except (TimeoutError, OSError):
+            self._writer.transport.abort()

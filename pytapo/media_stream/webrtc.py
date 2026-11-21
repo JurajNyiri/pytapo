@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import os
+import re
 import threading
 from collections import deque
+from functools import partial
 
 import av
 from aiortc import (
@@ -12,8 +14,9 @@ from aiortc import (
     RTCIceServer,
     RTCPeerConnection,
     RTCSessionDescription,
+    MediaStreamTrack,
 )
-from aiortc.contrib.media import MediaPlayer, MediaRelay
+from aiortc.contrib.media import MediaPlayer
 from aiortc.mediastreams import MediaStreamError
 from aiortc.rtp import RtcpByePacket
 from aiortc.sdp import candidate_from_sdp
@@ -22,6 +25,17 @@ from .streamer import Streamer
 from .talk import Talk
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _redact_credentials(record):
+    message = record.getMessage()
+    redacted = re.sub(r"((?:rtsps?|https?)://)[^/\s]*@", r"\1[REDACTED]@", message)
+    if redacted != message:
+        record.msg, record.args = redacted, ()
+    return True
+
+
+logging.getLogger("aiortc.contrib.media").addFilter(_redact_credentials)
 
 
 class _FrameQueue(asyncio.Queue):
@@ -101,7 +115,7 @@ class WebRTCSession:
         )
         self._answer_task = None
         self._player = None
-        self._relay = MediaRelay()
+        self._player_stops = []
         self._player_task = None
         self._pipe = None
         self._streamer = None
@@ -195,17 +209,15 @@ class WebRTCSession:
                     track._queue = _FrameQueue(
                         maxsize=2 if track.kind == "video" else 25
                     )
+                    # EOF and sender shutdown must not join the decoder thread
+                    # on HA's loop. Close both tracks together in the executor.
+                    self._player_stops.append(track.stop)
+                    track.stop = partial(MediaStreamTrack.stop, track)
             if self._player.video is None:
                 raise RuntimeError("Camera stream has no video track")
-            # Sender.stop() must not join the player's thread on the event loop:
-            # a Direct decoder can be waiting for data produced by that same loop.
-            self.peer.addTrack(
-                self._relay.subscribe(self._player.video, buffered=False)
-            )
+            self.peer.addTrack(self._player.video)
             if self._player.audio:
-                audio = self._relay.subscribe(self._player.audio)
-                audio._queue = _FrameQueue(maxsize=25)
-                self.peer.addTrack(audio)
+                self.peer.addTrack(self._player.audio)
             await self.peer.setLocalDescription(await self.peer.createAnswer())
             self._timeout_task = asyncio.create_task(self._connection_timeout())
             return self.peer.localDescription.sdp
@@ -313,12 +325,22 @@ class WebRTCSession:
                 except Exception:
                     pass
             if self._player:
+                stops = self._player_stops or [
+                    track.stop
+                    for track in (self._player.audio, self._player.video)
+                    if track
+                ]
                 for track in (self._player.audio, self._player.video):
                     if track:
                         if isinstance(track._queue, _FrameQueue):
                             track._queue.close()
-                        # MediaPlayer tracks share a worker owned by this event loop.
-                        track.stop()
+                        MediaStreamTrack.stop(track)
+
+                def stop_player():
+                    for stop in stops:
+                        stop()
+
+                await asyncio.to_thread(stop_player)
             if self._pipe:
                 self._pipe.close()
             await self.peer.close()

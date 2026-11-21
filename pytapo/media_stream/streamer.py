@@ -7,6 +7,7 @@ from ._utils import StreamType, media_output_path
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
 HLS_FLAGS = "delete_segments+append_list"
+MAX_VIDEO_BUFFER = 8 * 1024 * 1024
 
 
 class Streamer:
@@ -147,10 +148,14 @@ class Streamer:
         self.currentAction = "FFMpeg Starting"
 
         if self.mode == "hls":
-            os.makedirs(self.outputDirectory, exist_ok=True)
-            if self.removeFilesInOutputDirectory:
-                for f in os.listdir(self.outputDirectory):
-                    os.remove(os.path.join(self.outputDirectory, f))
+
+            def prepare_output():
+                os.makedirs(self.outputDirectory, exist_ok=True)
+                if self.removeFilesInOutputDirectory:
+                    for f in os.listdir(self.outputDirectory):
+                        os.remove(os.path.join(self.outputDirectory, f))
+
+            await asyncio.to_thread(prepare_output)
 
         if self.includeAudio:
             await self._init_audio_params()
@@ -181,6 +186,7 @@ class Streamer:
 
         if self.includeAudio:
             self.audio_r, self.audio_w = os.pipe()
+            os.set_blocking(self.audio_w, False)
             pass_fds = (self.audio_r,)
             cmd += [
                 "-probesize",
@@ -297,7 +303,9 @@ class Streamer:
 
     async def _stream_to_ffmpeg(self):
         try:
-            mediaSession = self.tapo.getMediaSession(StreamType.Stream)
+            mediaSession = await asyncio.to_thread(
+                self.tapo.getMediaSession, StreamType.Stream
+            )
             mediaSession.set_window_size(self.window_size)
             self.currentAction = "Streaming"
 
@@ -317,18 +325,6 @@ class Streamer:
                     if resp.mimetype != "video/mp2t":
                         continue
 
-                    # Audio - Flush complete 160‑byte A‑law frames (20 ms @ 8 kHz)
-                    if self.includeAudio and resp.audioPayload:
-                        self._audio_buffer += resp.audioPayload
-
-                        while len(self._audio_buffer) >= 160:
-                            frame = self._audio_buffer[:160]
-                            self._audio_buffer = self._audio_buffer[160:]
-                            try:
-                                os.write(self.audio_w, frame)
-                            except OSError:
-                                break
-
                     # Video – re‑assemble & byte‑align to 188‑byte TS cells
                     self._ts_buffer += resp.plaintext
 
@@ -342,12 +338,29 @@ class Streamer:
                         self._ts_buffer = self._ts_buffer[pos:]
 
                     # forward only full, correctly aligned 188‑byte packets
-                    while len(self._ts_buffer) >= 188:
-                        if self.streamProcess.stdin.is_closing():
-                            return
-                        packet = self._ts_buffer[:188]
-                        self._ts_buffer = self._ts_buffer[188:]
-                        self.streamProcess.stdin.write(packet)
+                    if self.streamProcess.stdin.is_closing():
+                        return
+                    size = len(self._ts_buffer) // 188 * 188
+                    if size:
+                        self.streamProcess.stdin.write(bytes(self._ts_buffer[:size]))
+                        del self._ts_buffer[:size]
+
+                    if self.includeAudio:
+                        # FFmpeg opens video before its separate raw-audio input.
+                        # Supply both without blocking the event loop on a full pipe.
+                        if resp.audioPayload:
+                            self._audio_buffer += resp.audioPayload
+                        size = len(self._audio_buffer) // 160 * 160
+                        if size:
+                            await self._write_audio(bytes(self._audio_buffer[:size]))
+                            del self._audio_buffer[:size]
+                        # Waiting for video drain before audio is available can
+                        # deadlock FFmpeg's input probing. Bound the buffer instead.
+                        if (
+                            self.streamProcess.stdin.transport.get_write_buffer_size()
+                            > MAX_VIDEO_BUFFER
+                        ):
+                            raise BrokenPipeError("FFmpeg is not consuming video")
 
                     if not self.includeAudio:
                         try:
@@ -375,6 +388,28 @@ class Streamer:
             self.streamProcess.stdin.close()
             self._close_audio_pipe()
 
+    async def _write_audio(self, data):
+        """Wait for pipe capacity without blocking HA's event loop."""
+        loop = asyncio.get_running_loop()
+        fd = self.audio_w
+        data = memoryview(data)
+        async with asyncio.timeout(5):
+            while data:
+                try:
+                    data = data[os.write(fd, data) :]
+                except BlockingIOError:
+                    ready = loop.create_future()
+
+                    def writable():
+                        if not ready.done():
+                            ready.set_result(None)
+
+                    loop.add_writer(fd, writable)
+                    try:
+                        await ready
+                    finally:
+                        loop.remove_writer(fd)
+
     def _close_audio_pipe(self):
         """Close the write end of the audio pipe, so ffmpeg sees the end of the audio."""
         if self.audio_w is not None:
@@ -399,9 +434,18 @@ class Streamer:
                 os.close(self.audio_r)
                 self.audio_r = None
             if self.streamProcess:
+                # A paused asyncio stdout reader can otherwise keep wait()
+                # pending even after FFmpeg exits. This stream is being stopped.
+                stdout = getattr(self.streamProcess, "stdout", None)
+                if stdout is not None:
+                    stdout._transport.close()
                 try:
                     self.streamProcess.terminate()
-                    await self.streamProcess.wait()
+                    try:
+                        await asyncio.wait_for(self.streamProcess.wait(), 3)
+                    except TimeoutError:
+                        self.streamProcess.kill()
+                        await self.streamProcess.wait()
                 except ProcessLookupError:
                     pass
                 except OSError:

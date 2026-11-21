@@ -1,4 +1,5 @@
 import json
+import asyncio
 import time
 from ..media_stream._utils import StreamType
 
@@ -51,7 +52,8 @@ async def getSnapshot(tapo, timeout=8):
 
 async def _snapshots(tapo, requests, timeout):
     """Yield one image (or None) per (media_type, start_time) on one session."""
-    mediaSession = tapo.getMediaSession(StreamType.Download)
+    mediaSession = await asyncio.to_thread(tapo.getMediaSession, StreamType.Download)
+    client_id = await asyncio.to_thread(tapo.getUserID)
     mediaSession.set_window_size(50)
     async with mediaSession:
         for seq, (mediaType, startTime) in enumerate(requests, start=1):
@@ -61,7 +63,7 @@ async def _snapshots(tapo, requests, timeout):
                     "seq": seq,
                     "params": {
                         "download": {
-                            "client_id": tapo.getUserID(),
+                            "client_id": client_id,
                             "channels": [0],
                             "media_type": mediaType,
                             "start_time": str(startTime),
