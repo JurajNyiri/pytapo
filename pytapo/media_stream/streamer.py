@@ -2,7 +2,7 @@ import json
 import os
 import asyncio
 import subprocess
-from ._utils import StreamType, media_output_path
+from ._utils import StreamType, media_output_path, write_audio_frame
 
 HLS_TIME = 1
 HLS_LIST_SIZE = 3
@@ -181,6 +181,7 @@ class Streamer:
 
         if self.includeAudio:
             self.audio_r, self.audio_w = os.pipe()
+            os.set_blocking(self.audio_w, False)
             pass_fds = (self.audio_r,)
             cmd += [
                 "-probesize",
@@ -324,9 +325,7 @@ class Streamer:
                         while len(self._audio_buffer) >= 160:
                             frame = self._audio_buffer[:160]
                             self._audio_buffer = self._audio_buffer[160:]
-                            try:
-                                os.write(self.audio_w, frame)
-                            except OSError:
+                            if not await write_audio_frame(lambda: self.audio_w, frame):
                                 break
 
                     # Video – re‑assemble & byte‑align to 188‑byte TS cells

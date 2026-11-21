@@ -1,11 +1,40 @@
+import asyncio
 import hashlib
 import os
+import time
 from enum import Enum
 from pathlib import Path, PureWindowsPath
 
 from ..const import EncryptionMethod
 
-from typing import Mapping, Tuple, Optional
+from typing import Callable, Mapping, Tuple, Optional
+
+AUDIO_WRITE_TIMEOUT = 15.0
+AUDIO_WRITE_RETRY_INTERVAL = 0.01
+
+
+# Write one audio frame to a non-blocking pipe fd, yielding while the pipe is full.
+async def write_audio_frame(get_fd: Callable[[], Optional[int]], frame: bytes) -> bool:
+    view = memoryview(frame)
+    deadline = time.monotonic() + AUDIO_WRITE_TIMEOUT
+    while view:
+        fd = get_fd()
+        if fd is None:
+            return False
+        try:
+            written = os.write(fd, view)
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Timed out writing to audio pipe")
+            await asyncio.sleep(AUDIO_WRITE_RETRY_INTERVAL)
+            continue
+        except OSError:
+            return False
+        if written <= 0:
+            return False
+        view = view[written:]
+        deadline = time.monotonic() + AUDIO_WRITE_TIMEOUT
+    return True
 
 
 class StreamType(Enum):
