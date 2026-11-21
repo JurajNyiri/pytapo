@@ -16,7 +16,7 @@ from aiortc import (
     RTCSessionDescription,
     MediaStreamTrack,
 )
-from aiortc.contrib.media import MediaPlayer
+from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.mediastreams import MediaStreamError
 from aiortc.rtp import RtcpByePacket
 from aiortc.sdp import candidate_from_sdp
@@ -82,8 +82,178 @@ class _FrameQueue(asyncio.Queue):
         super().put_nowait(None)
 
 
+class _SharedSource:
+    """One camera input, retained until its last WebRTC viewer leaves."""
+
+    def __init__(self, session, sources, key):
+        self.tapo = session.tapo
+        self.source = session.source
+        self.quality = session.quality
+        self.video_stream = session.video_stream
+        self.ff_args = dict(session.ff_args)
+        self.rtsp_transport = session.rtsp_transport
+        self.player = None
+        self.streamer = None
+        self.pipe = None
+        self._sources = sources
+        self._key = key
+        self._sessions = set()
+        self._relay = MediaRelay()
+        self._open_task = None
+        self._player_task = None
+        self._player_stops = []
+        self._close_task = None
+        self._closing = False
+        self._close_complete = asyncio.Event()
+
+    @classmethod
+    async def acquire(cls, session):
+        sources = getattr(session.tapo, "_webrtc_sources", None)
+        if sources is None:
+            sources = session.tapo._webrtc_sources = {}
+        key = (
+            asyncio.get_running_loop(),
+            session.source,
+            session.quality,
+            session.video_stream,
+            tuple(sorted(session.ff_args.items())),
+            session.rtsp_transport,
+        )
+        while True:
+            media = sources.get(key)
+            if media is None:
+                media = sources[key] = cls(session, sources, key)
+            if media._closing:
+                await media._close_complete.wait()
+                continue
+            media._sessions.add(session)
+            session._media = media
+            if media._open_task is None:
+                media._open_task = asyncio.create_task(media._open())
+            # One cancelled viewer must not cancel startup for other viewers.
+            await asyncio.shield(media._open_task)
+            return media
+
+    async def _open(self):
+        if self.source is None:
+            read_fd, write_fd = os.pipe()
+            self.pipe = os.fdopen(read_fd, "rb", buffering=0)
+            self.streamer = Streamer(
+                self.tapo,
+                quality=self.quality,
+                includeAudio=True,
+                logFunction=lambda message: _LOGGER.debug("%s", message),
+                ff_args={"-map-video": f"0:v:{self.video_stream}", **self.ff_args},
+            )
+            try:
+                await self.streamer.start(stdout=write_fd)
+            finally:
+                os.close(write_fd)
+            source = self.pipe
+            options = {"probesize": "500000", "analyzeduration": "1000000"}
+        else:
+            source = self.source
+            options = {"rtsp_transport": self.rtsp_transport}
+        if self.pipe or str(source).startswith(("rtsp://", "rtsps://")):
+            options["use_wallclock_as_timestamps"] = "1"
+        self._player_task = asyncio.create_task(
+            asyncio.to_thread(
+                MediaPlayer,
+                source,
+                format="mpegts" if self.pipe else None,
+                options=options,
+                timeout=(10, 5),
+            )
+        )
+        self.player = await asyncio.wait_for(asyncio.shield(self._player_task), 15)
+        if self.pipe:
+            self.player._throttle_playback = False
+        for track in (self.player.video, self.player.audio):
+            if track:
+                track._queue = _FrameQueue(maxsize=2 if track.kind == "video" else 25)
+                # EOF must not join the decoder on the event loop. The source
+                # owns the original stops and runs them together in an executor.
+                self._player_stops.append(track.stop)
+                track.stop = partial(MediaStreamTrack.stop, track)
+                track.on("ended", self._ended)
+        if self.player.video is None:
+            raise RuntimeError("Camera stream has no video track")
+
+    def _ended(self):
+        if not self._closing:
+            self._closing = True
+            for session in tuple(self._sessions):
+                asyncio.create_task(session.close())
+
+    def subscribe(self, track):
+        proxy = self._relay.subscribe(track, buffered=track.kind == "audio")
+        if track.kind == "audio":
+            proxy._queue = _FrameQueue(maxsize=25)
+        return proxy
+
+    async def release(self, session):
+        self._sessions.discard(session)
+        if self._sessions:
+            return
+        self._closing = True
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._close())
+        await asyncio.shield(self._close_task)
+
+    async def _close(self):
+        try:
+            if self._open_task is not None:
+                self._open_task.cancel()
+                await asyncio.gather(self._open_task, return_exceptions=True)
+            # aiortc 1.16 has no relay close method. Stop its readers before
+            # ending the player, including readers pacing a file by timestamp.
+            tasks = list(self._relay._MediaRelay__tasks.values())
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._relay._MediaRelay__tasks.clear()
+            self._relay._MediaRelay__proxies.clear()
+            if self.streamer is not None:
+                try:
+                    async with asyncio.timeout(3):
+                        await self.streamer.stop()
+                except Exception:
+                    process = getattr(self.streamer, "streamProcess", None)
+                    if process is not None and process.returncode is None:
+                        process.kill()
+                        await process.wait()
+            if self._player_task is not None and self.player is None:
+                try:
+                    self.player = await self._player_task
+                except Exception:
+                    pass
+            if self.player:
+                stops = self._player_stops or [
+                    track.stop
+                    for track in (self.player.audio, self.player.video)
+                    if track
+                ]
+                for track in (self.player.audio, self.player.video):
+                    if track:
+                        if isinstance(track._queue, _FrameQueue):
+                            track._queue.close()
+                        MediaStreamTrack.stop(track)
+
+                def stop_player():
+                    for stop in stops:
+                        stop()
+
+                await asyncio.to_thread(stop_player)
+            if self.pipe:
+                self.pipe.close()
+        finally:
+            if self._sources.get(self._key) is self:
+                del self._sources[self._key]
+            self._close_complete.set()
+
+
 class WebRTCSession:
-    """One browser connection, using RTSP or the existing direct streamer."""
+    """One browser connection, using a shared RTSP or Direct input."""
 
     def __init__(
         self,
@@ -114,11 +284,8 @@ class WebRTCSession:
             )
         )
         self._answer_task = None
-        self._player = None
-        self._player_stops = []
-        self._player_task = None
-        self._pipe = None
-        self._streamer = None
+        self._media = None
+        self._tracks = []
         self._audio_task = None
         self._timeout_task = None
         self._candidates = []
@@ -166,58 +333,12 @@ class WebRTCSession:
             for candidate in self._candidates:
                 await self.peer.addIceCandidate(candidate)
             self._candidates.clear()
-            if self.source is None:
-                read_fd, write_fd = os.pipe()
-                self._pipe = os.fdopen(read_fd, "rb", buffering=0)
-                self._streamer = Streamer(
-                    self.tapo,
-                    quality=self.quality,
-                    includeAudio=True,
-                    logFunction=lambda message: _LOGGER.debug("%s", message),
-                    ff_args={"-map-video": f"0:v:{self.video_stream}", **self.ff_args},
-                )
-                try:
-                    await self._streamer.start(stdout=write_fd)
-                finally:
-                    os.close(write_fd)
-                source = self._pipe
-                options = {"probesize": "500000", "analyzeduration": "1000000"}
-            else:
-                source = self.source
-                options = {"rtsp_transport": self.rtsp_transport}
-            if self._pipe or str(source).startswith(("rtsp://", "rtsps://")):
-                # Match HA's stream path: camera timestamps can jump backwards.
-                options["use_wallclock_as_timestamps"] = "1"
-            self._player_task = asyncio.create_task(
-                asyncio.to_thread(
-                    MediaPlayer,
-                    source,
-                    format="mpegts" if self._pipe else None,
-                    options=options,
-                    timeout=(10, 5),
-                )
-            )
-            self._player = await asyncio.wait_for(asyncio.shield(self._player_task), 15)
-            if self._pipe:
-                # This MPEG-TS pipe is live, rather than a file to pace by PTS.
-                self._player._throttle_playback = False
-            # aiortc 1.16's player queues are unbounded, and its worker does not
-            # wait for put() to finish. A bounded Queue alone would leave pending
-            # put coroutines holding frames when an encoder or viewer falls behind.
-            for track in (self._player.video, self._player.audio):
+            media = await _SharedSource.acquire(self)
+            for track in (media.player.video, media.player.audio):
                 if track:
-                    track._queue = _FrameQueue(
-                        maxsize=2 if track.kind == "video" else 25
-                    )
-                    # EOF and sender shutdown must not join the decoder thread
-                    # on HA's loop. Close both tracks together in the executor.
-                    self._player_stops.append(track.stop)
-                    track.stop = partial(MediaStreamTrack.stop, track)
-            if self._player.video is None:
-                raise RuntimeError("Camera stream has no video track")
-            self.peer.addTrack(self._player.video)
-            if self._player.audio:
-                self.peer.addTrack(self._player.audio)
+                    proxy = media.subscribe(track)
+                    self._tracks.append(proxy)
+                    self.peer.addTrack(proxy)
             await self.peer.setLocalDescription(await self.peer.createAnswer())
             self._timeout_task = asyncio.create_task(self._connection_timeout())
             return self.peer.localDescription.sdp
@@ -288,7 +409,7 @@ class WebRTCSession:
             await self.close()
 
     async def close(self):
-        """Release the media process, pipe, speaker session and WebRTC peer."""
+        """Release this viewer; the last viewer also closes the camera input."""
         if self._closed:
             # Cancelled media tasks must not wait for the closer awaiting them.
             if asyncio.current_task() not in (
@@ -300,50 +421,27 @@ class WebRTCSession:
                 await self._close_complete.wait()
             return
         self._closed = True
-        self._closing_task = asyncio.current_task()
+        self._closing_task = asyncio.create_task(self._close(asyncio.current_task()))
+        # A cancelled websocket/unload caller must not orphan a shared input.
+        await asyncio.shield(self._closing_task)
+
+    async def _close(self, caller):
         try:
             tasks = [
                 task
                 for task in (self._answer_task, self._audio_task, self._timeout_task)
-                if task is not None and task is not asyncio.current_task()
+                if task is not None and task is not caller
             ]
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            if self._streamer is not None:
-                try:
-                    async with asyncio.timeout(3):
-                        await self._streamer.stop()
-                except Exception:
-                    process = getattr(self._streamer, "streamProcess", None)
-                    if process is not None and process.returncode is None:
-                        process.kill()
-                        await process.wait()
-            if self._player_task is not None and self._player is None:
-                try:
-                    self._player = await self._player_task
-                except Exception:
-                    pass
-            if self._player:
-                stops = self._player_stops or [
-                    track.stop
-                    for track in (self._player.audio, self._player.video)
-                    if track
-                ]
-                for track in (self._player.audio, self._player.video):
-                    if track:
-                        if isinstance(track._queue, _FrameQueue):
-                            track._queue.close()
-                        MediaStreamTrack.stop(track)
-
-                def stop_player():
-                    for stop in stops:
-                        stop()
-
-                await asyncio.to_thread(stop_player)
-            if self._pipe:
-                self._pipe.close()
+            for track in self._tracks:
+                track.stop()
+                if isinstance(track._queue, _FrameQueue):
+                    track._queue.close()
             await self.peer.close()
+            if self._media is not None:
+                await self._media.release(self)
             if self.on_close:
                 self.on_close()
         finally:

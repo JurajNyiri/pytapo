@@ -114,7 +114,7 @@ You can tune the download behavior with the following `Downloader` parameters:
 
 Use `pytapo.media_stream.talk.Talk` as an async context manager and call `await talk.write(audio)` with paced mono G.711 A-law audio at 8 kHz. A configured cloud password is required.
 
-For native WebRTC, install `pytapo[webrtc]` and use `pytapo.media_stream.webrtc.WebRTCSession`: call `answer(offer_sdp)`, forward ICE candidates with `add_candidate(candidate)`, and call `close()` when the viewer leaves. Direct streaming requires FFmpeg.
+For native WebRTC, install `pytapo[webrtc]` and use `pytapo.media_stream.webrtc.WebRTCSession`: call `answer(offer_sdp)`, forward ICE candidates with `add_candidate(candidate)`, and call `close()` when the viewer leaves. Sessions using the same controller and stream settings share their camera input; the last `close()` releases it. Direct streaming requires FFmpeg.
 
 ## Contributions:
 
