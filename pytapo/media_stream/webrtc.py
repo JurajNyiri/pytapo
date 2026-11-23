@@ -19,7 +19,7 @@ from aiortc import (
 from aiortc.contrib.media import MediaPlayer, MediaRelay
 from aiortc.mediastreams import MediaStreamError
 from aiortc.rtp import RtcpByePacket
-from aiortc.sdp import candidate_from_sdp
+from aiortc.sdp import SessionDescription, candidate_from_sdp
 
 from .streamer import Streamer
 from .talk import Talk
@@ -333,12 +333,22 @@ class WebRTCSession:
             for candidate in self._candidates:
                 await self.peer.addIceCandidate(candidate)
             self._candidates.clear()
-            media = await _SharedSource.acquire(self)
-            for track in (media.player.video, media.player.audio):
-                if track:
-                    proxy = media.subscribe(track)
-                    self._tracks.append(proxy)
-                    self.peer.addTrack(proxy)
+            # Adding a track absent from the offer creates an unnegotiated
+            # transceiver. A microphone-only offer also needs no camera input.
+            receive_kinds = {
+                media.kind
+                for media in SessionDescription.parse(offer_sdp).media
+                if media.kind in ("audio", "video")
+                and media.port != 0
+                and media.direction in (None, "recvonly", "sendrecv")
+            }
+            if receive_kinds:
+                media = await _SharedSource.acquire(self)
+                for track in (media.player.video, media.player.audio):
+                    if track and track.kind in receive_kinds:
+                        proxy = media.subscribe(track)
+                        self._tracks.append(proxy)
+                        self.peer.addTrack(proxy)
             await self.peer.setLocalDescription(await self.peer.createAnswer())
             self._timeout_task = asyncio.create_task(self._connection_timeout())
             return self.peer.localDescription.sdp
