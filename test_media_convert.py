@@ -175,21 +175,39 @@ def test_save_cancelled_kills_ffmpeg_and_cleans_up(fake_ffmpeg, monkeypatch, can
 
     pid = asyncio.run(run())
     assert not _alive(pid)
-    assert _no_temp_dirs(fake_ffmpeg)
+    _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))
+
+
+def _temp_outputs(path):
+    return [
+        os.path.join(path, d, f)
+        for d in os.listdir(path)
+        if d.startswith(".pytapo-")
+        for f in os.listdir(os.path.join(path, d))
+        if f.startswith("output")
+    ]
+
+
+def _wait_until(condition, timeout=5):
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
 
 
 @pytest.mark.parametrize("cancels", [1, 2])
-def test_save_cancelled_removes_incomplete_output(fake_ffmpeg, monkeypatch, cancels):
-    """An incomplete file would be skipped as already downloaded next time."""
+def test_save_cancelled_leaves_no_incomplete_output(fake_ffmpeg, monkeypatch, cancels):
+    """An incomplete file would be skipped as already downloaded next time:
+    ffmpeg writes into the temporary directory, fileLocation never appears."""
     monkeypatch.setenv("FAKE_SLEEP", "30")
     monkeypatch.setenv("FAKE_WRITE_FIRST", "1")
-    pidfile = fake_ffmpeg / "pid"
     out = fake_ffmpeg / "out.mp4"
 
     async def run():
         task = asyncio.ensure_future(_converter().save(str(out), 10))
-        while not pidfile.exists() or not pidfile.read_text() or not out.exists():
+        while not _temp_outputs(fake_ffmpeg):
             await asyncio.sleep(0.02)
+        assert not out.exists()
         for _ in range(cancels):
             task.cancel()
             await asyncio.sleep(0)
@@ -198,7 +216,118 @@ def test_save_cancelled_removes_incomplete_output(fake_ffmpeg, monkeypatch, canc
 
     asyncio.run(run())
     assert not out.exists()
+    _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))
+
+
+def test_save_failed_ffmpeg_leaves_no_output(fake_ffmpeg, monkeypatch):
+    import subprocess
+
+    monkeypatch.setenv("FAKE_EXIT", "1")  # the fake writes its output, then fails
+    out = fake_ffmpeg / "out.mp4"
+    with pytest.raises(subprocess.CalledProcessError):
+        asyncio.run(_converter().save(str(out), 10))
+    assert not out.exists()
     assert _no_temp_dirs(fake_ffmpeg)
+
+
+def _hang_all_slots(release):
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+
+    return [
+        asyncio.ensure_future(run_file_io(release.wait, 10))
+        for _ in range(FILE_IO_THREADS)
+    ]
+
+
+@pytest.mark.parametrize("cancels", [1, 2])
+def test_save_cancelled_with_all_slots_hung_returns_at_once(fake_ffmpeg, monkeypatch, cancels):
+    """Review on #241: the cleanup after the cancellation must not wait for a slot."""
+    import threading
+
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    monkeypatch.setenv("FAKE_WRITE_FIRST", "1")
+    out = fake_ffmpeg / "out.mp4"
+    release = threading.Event()
+
+    async def run():
+        task = asyncio.ensure_future(_converter().save(str(out), 10))
+        while not _temp_outputs(fake_ffmpeg):
+            await asyncio.sleep(0.02)
+        hung = _hang_all_slots(release)
+        await asyncio.sleep(0.05)
+        for _ in range(cancels):
+            task.cancel()
+            await asyncio.sleep(0)
+        done, _ = await asyncio.wait({task}, timeout=2)
+        assert done == {task} and task.cancelled()
+        # the temporary directory is removed while the slots still hang
+        while not _no_temp_dirs(fake_ffmpeg):
+            await asyncio.sleep(0.02)
+        release.set()
+        await asyncio.gather(*hung)
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
+    assert not out.exists()
+
+
+def test_save_cancelled_at_loop_shutdown_still_cleans_up(fake_ffmpeg, monkeypatch):
+    """Review on #241: asyncio.run() cancels the save at its end; the cleanup
+    must not be a task of the loop that is shutting down."""
+    import threading
+
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    monkeypatch.setenv("FAKE_WRITE_FIRST", "1")
+    out = fake_ffmpeg / "out.mp4"
+    release = threading.Event()
+
+    async def run():
+        asyncio.ensure_future(_converter().save(str(out), 10))
+        while not _temp_outputs(fake_ffmpeg):
+            await asyncio.sleep(0.02)
+        _hang_all_slots(release)
+        await asyncio.sleep(0.05)
+        # return without awaiting: asyncio.run() cancels the remaining tasks
+
+    try:
+        asyncio.run(run())
+        _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))  # slots still hung
+    finally:
+        release.set()
+    assert not out.exists()
+
+
+def test_length_async_cancelled_with_all_slots_hung_returns_at_once(fake_ffmpeg, monkeypatch):
+    import tempfile
+    import threading
+
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    tmpdir = fake_ffmpeg / "tmp"
+    tmpdir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmpdir))
+    pidfile = fake_ffmpeg / "pid"
+    release = threading.Event()
+
+    async def run():
+        task = asyncio.ensure_future(_converter().getLengthAsync(exact=True))
+        while not pidfile.exists() or not pidfile.read_text():
+            await asyncio.sleep(0.02)
+        hung = _hang_all_slots(release)
+        await asyncio.sleep(0.05)
+        task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=2)
+        assert done == {task} and task.cancelled()
+        while list(tmpdir.iterdir()):
+            await asyncio.sleep(0.02)
+        release.set()
+        await asyncio.gather(*hung)
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
 
 
 def _slow_in_thread(monkeypatch, owner, name):
@@ -236,7 +365,7 @@ def test_save_cancelled_while_creating_temp_dir(fake_ffmpeg, monkeypatch, cancel
     started = _slow_in_thread(monkeypatch, tempfile, "mkdtemp")
     out = fake_ffmpeg / "out.mp4"
     asyncio.run(_cancel_when(started, _converter().save(str(out), 10), cancels))
-    assert _no_temp_dirs(fake_ffmpeg)
+    _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))
     assert not (fake_ffmpeg / "pid").exists()  # ffmpeg not started
     assert not out.exists()
 
@@ -253,7 +382,7 @@ def test_length_async_cancelled_while_writing_temp_file(fake_ffmpeg, monkeypatch
     monkeypatch.setattr(tempfile, "tempdir", str(tmpdir))
     started = _slow_in_thread(monkeypatch, convert, "_write_temporary_file")
     asyncio.run(_cancel_when(started, _converter().getLengthAsync(exact=True), cancels))
-    assert list(tmpdir.iterdir()) == []
+    _wait_until(lambda: list(tmpdir.iterdir()) == [])
     assert not (fake_ffmpeg / "pid").exists()
 
 
@@ -297,7 +426,7 @@ def test_length_async_cancelled_kills_ffprobe(fake_ffmpeg, monkeypatch, cancels)
         return int(pidfile.read_text())
 
     assert not _alive(asyncio.run(run()))
-    assert list(tmpdir.iterdir()) == []  # temporary file removed
+    _wait_until(lambda: list(tmpdir.iterdir()) == [])  # temporary file removed
 
 
 def test_length_async_ffprobe_fails(fake_ffmpeg, monkeypatch):
@@ -416,14 +545,13 @@ def test_file_io_cancel_while_queued_ends_at_once():
         done, _ = await asyncio.wait((queued, cleanup), timeout=0.5)
         assert done == {queued, cleanup}
         assert queued.cancelled() and cleanup.cancelled()
-        assert ran == []  # nothing has started
-        release.set()
-        await asyncio.gather(*hung)
-        for _ in range(50):  # the cleanup still runs once a slot is free
+        for _ in range(50):  # the cleanup runs outside the slots, at once
             if ran:
                 break
             await asyncio.sleep(0.02)
-        assert ran == ["cleaned"]
+        assert ran == ["cleaned"]  # _to_thread_to_end's call has not started
+        release.set()
+        await asyncio.gather(*hung)
 
     asyncio.run(run())
 
