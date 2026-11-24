@@ -9,7 +9,7 @@ from datetime import datetime
 from json import JSONDecodeError
 from pytapo import Tapo
 from .convert import Convert
-from ._utils import StreamType, media_output_path
+from ._utils import StreamType, media_output_path, run_file_io
 
 
 class Downloader:
@@ -108,7 +108,7 @@ class Downloader:
     async def md5(self, fileName):
         stop = threading.Event()
         try:
-            return await asyncio.to_thread(self._md5, fileName, stop)
+            return await run_file_io(self._md5, fileName, stop)
         except asyncio.CancelledError:
             # A thread cannot be interrupted; it stops after the current block.
             # Not waiting for it: a read on an unreachable network share may
@@ -192,7 +192,7 @@ class Downloader:
                     "total": 0,
                 }
                 downloading = False
-            elif await asyncio.to_thread(os.path.isfile, fileName):
+            elif await run_file_io(os.path.isfile, fileName):
                 currentAction = "Skipping"
                 yield {
                     "currentAction": currentAction,

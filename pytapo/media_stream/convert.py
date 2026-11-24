@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import logging
 import io
 import subprocess
@@ -6,9 +7,12 @@ import shutil
 import os
 import datetime
 import tempfile
+import threading
 import time
 import aiofiles
 from rtp import PayloadType
+
+from ._utils import start_file_io
 
 logger = logging.getLogger(__name__)
 logging.getLogger("libav").setLevel(logging.ERROR)
@@ -28,22 +32,76 @@ async def _wait_ignoring_cancel(future):
     return cancelled
 
 
+_cleanup_lock = threading.Lock()
+_cleanup_queue = collections.deque()
+_cleanup_running = False
+
+
+def _cleanup_in_background(func, *args):
+    """Hand a blocking cleanup to a thread of its own and return at once.
+
+    Used when the task is already being cancelled: the cleanup must neither
+    wait for a file system slot (both may hang on a dead share) nor depend on
+    the event loop, which may be shutting down. The cleanups run one after
+    another in a single thread outside the slots, so a dead share holds up
+    only that thread. The thread ends when nothing is left to do.
+    """
+    global _cleanup_running
+    with _cleanup_lock:
+        _cleanup_queue.append((func, args))
+        if _cleanup_running:
+            return
+        _cleanup_running = True
+    try:
+        threading.Thread(target=_run_cleanups, name="pytapo-cleanup", daemon=True).start()
+    except BaseException:
+        with _cleanup_lock:
+            _cleanup_running = False
+        raise
+
+
+def _run_cleanups():
+    global _cleanup_running
+    while True:
+        with _cleanup_lock:
+            if not _cleanup_queue:
+                _cleanup_running = False
+                return
+            func, args = _cleanup_queue.popleft()
+        try:
+            func(*args)
+        except Exception:  # noqa: BLE001 - nobody is waiting for the result
+            logger.debug("Cleanup %s%r failed", getattr(func, "__name__", func), args, exc_info=True)
+
+
 async def _cleanup(func, *args):
-    """Run a blocking cleanup in a thread and wait for it to finish, even if
-    the task is cancelled meanwhile; the cancellation is passed on afterwards."""
-    if await _wait_ignoring_cancel(asyncio.ensure_future(asyncio.to_thread(func, *args))):
+    """Run a blocking cleanup in a file system thread and wait for it to finish,
+    even if the task is cancelled meanwhile; the cancellation is passed on
+    afterwards.
+
+    Cancelled while still waiting for a free slot, it returns at once and the
+    cleanup is handed to _cleanup_in_background().
+    """
+    try:
+        future = await start_file_io(func, *args)
+    except asyncio.CancelledError:
+        _cleanup_in_background(func, *args)
+        raise
+    if await _wait_ignoring_cancel(future):
         raise asyncio.CancelledError
 
 
 async def _to_thread_to_end(func, *args, **kwargs):
-    """Run a blocking call in a thread and wait for it to finish, even if the
+    """Run a blocking file system call and wait for it to finish, even if the
     task is cancelled meanwhile, so that the caller learns what it created.
 
     Returns (result, cancelled); the caller cleans up and passes the
     cancellation on. If the call failed, its exception is raised, or
-    CancelledError if the task was cancelled meanwhile.
+    CancelledError if the task was cancelled meanwhile. Cancelled while still
+    waiting for a free slot, CancelledError is raised at once: nothing has
+    been created then.
     """
-    future = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+    future = await start_file_io(func, *args, **kwargs)
     cancelled = await _wait_ignoring_cancel(future)
     if cancelled and future.exception() is not None:
         raise asyncio.CancelledError
@@ -150,6 +208,10 @@ class Convert:
             fileLocation = os.path.abspath(fileLocation)
             audio_format = self._get_audio_format()
             audio_rate = self._get_audio_rate()
+            # ffmpeg writes into the temporary directory, which is in the same
+            # directory as fileLocation; only a complete recording is moved
+            # there (atomically), so a killed or failed ffmpeg never leaves an
+            # incomplete file that the downloader would take as done.
             temporaryDirectory, cancelled = await _to_thread_to_end(
                 tempfile.mkdtemp, prefix=".pytapo-", dir=os.path.dirname(fileLocation)
             )
@@ -159,6 +221,10 @@ class Convert:
                 tempVideoFileLocation = os.path.join(temporaryDirectory, "video.ts")
                 tempAudioFileLocation = os.path.join(
                     temporaryDirectory, "audio." + audio_format
+                )
+                # same extension, ffmpeg picks the container format from it
+                tempOutputLocation = os.path.join(
+                    temporaryDirectory, "output" + os.path.splitext(fileLocation)[1]
                 )
                 async with aiofiles.open(tempVideoFileLocation, "wb") as file:
                     await file.write(self.writer.getvalue())
@@ -195,20 +261,25 @@ class Convert:
                         "0:v",
                         "-map",
                         "1:a:0",
-                        fileLocation,
+                        tempOutputLocation,
                     ]
                 )
-                try:
-                    returncode, _ = await _run_process(args)
-                except asyncio.CancelledError:
-                    # ffmpeg was killed and may have left an incomplete file,
-                    # which the downloader would take as done next time.
-                    await _cleanup(_remove_file, fileLocation)
-                    raise
+                returncode, _ = await _run_process(args)
                 if returncode != 0:
                     raise subprocess.CalledProcessError(returncode, args)
-            finally:
+                _, cancelled = await _to_thread_to_end(
+                    os.replace, tempOutputLocation, fileLocation
+                )
+                if cancelled:
+                    raise asyncio.CancelledError  # the recording is complete
+            except asyncio.CancelledError:
+                # Already cancelling: do not wait for a file system slot.
+                _cleanup_in_background(shutil.rmtree, temporaryDirectory, True)
+                raise
+            except BaseException:
                 await _cleanup(shutil.rmtree, temporaryDirectory, True)
+                raise
+            await _cleanup(shutil.rmtree, temporaryDirectory, True)
         else:
             raise Exception("Method not supported")
 
@@ -311,11 +382,15 @@ class Convert:
             _, stdout = await _run_process(self._ffprobe_args(tmp_name), capture=True)
             detectedLength = float(stdout)
             self._store_length(detectedLength, data)
+        except asyncio.CancelledError:
+            if tmp_name is not None:
+                # Already cancelling: do not wait for a file system slot.
+                _cleanup_in_background(_remove_file, tmp_name)
+            raise
         except Exception as e:
             logger.debug("Could not calculate length from stream: %s", e)
-        finally:
-            if tmp_name is not None:
-                await _cleanup(_remove_file, tmp_name)
+        if tmp_name is not None:
+            await _cleanup(_remove_file, tmp_name)
         return detectedLength
 
     def _should_recalculate_length(self):

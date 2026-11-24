@@ -175,21 +175,39 @@ def test_save_cancelled_kills_ffmpeg_and_cleans_up(fake_ffmpeg, monkeypatch, can
 
     pid = asyncio.run(run())
     assert not _alive(pid)
-    assert _no_temp_dirs(fake_ffmpeg)
+    _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))
+
+
+def _temp_outputs(path):
+    return [
+        os.path.join(path, d, f)
+        for d in os.listdir(path)
+        if d.startswith(".pytapo-")
+        for f in os.listdir(os.path.join(path, d))
+        if f.startswith("output")
+    ]
+
+
+def _wait_until(condition, timeout=5):
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
 
 
 @pytest.mark.parametrize("cancels", [1, 2])
-def test_save_cancelled_removes_incomplete_output(fake_ffmpeg, monkeypatch, cancels):
-    """An incomplete file would be skipped as already downloaded next time."""
+def test_save_cancelled_leaves_no_incomplete_output(fake_ffmpeg, monkeypatch, cancels):
+    """An incomplete file would be skipped as already downloaded next time:
+    ffmpeg writes into the temporary directory, fileLocation never appears."""
     monkeypatch.setenv("FAKE_SLEEP", "30")
     monkeypatch.setenv("FAKE_WRITE_FIRST", "1")
-    pidfile = fake_ffmpeg / "pid"
     out = fake_ffmpeg / "out.mp4"
 
     async def run():
         task = asyncio.ensure_future(_converter().save(str(out), 10))
-        while not pidfile.exists() or not pidfile.read_text() or not out.exists():
+        while not _temp_outputs(fake_ffmpeg):
             await asyncio.sleep(0.02)
+        assert not out.exists()
         for _ in range(cancels):
             task.cancel()
             await asyncio.sleep(0)
@@ -198,7 +216,118 @@ def test_save_cancelled_removes_incomplete_output(fake_ffmpeg, monkeypatch, canc
 
     asyncio.run(run())
     assert not out.exists()
+    _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))
+
+
+def test_save_failed_ffmpeg_leaves_no_output(fake_ffmpeg, monkeypatch):
+    import subprocess
+
+    monkeypatch.setenv("FAKE_EXIT", "1")  # the fake writes its output, then fails
+    out = fake_ffmpeg / "out.mp4"
+    with pytest.raises(subprocess.CalledProcessError):
+        asyncio.run(_converter().save(str(out), 10))
+    assert not out.exists()
     assert _no_temp_dirs(fake_ffmpeg)
+
+
+def _hang_all_slots(release):
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+
+    return [
+        asyncio.ensure_future(run_file_io(release.wait, 10))
+        for _ in range(FILE_IO_THREADS)
+    ]
+
+
+@pytest.mark.parametrize("cancels", [1, 2])
+def test_save_cancelled_with_all_slots_hung_returns_at_once(fake_ffmpeg, monkeypatch, cancels):
+    """Review on #241: the cleanup after the cancellation must not wait for a slot."""
+    import threading
+
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    monkeypatch.setenv("FAKE_WRITE_FIRST", "1")
+    out = fake_ffmpeg / "out.mp4"
+    release = threading.Event()
+
+    async def run():
+        task = asyncio.ensure_future(_converter().save(str(out), 10))
+        while not _temp_outputs(fake_ffmpeg):
+            await asyncio.sleep(0.02)
+        hung = _hang_all_slots(release)
+        await asyncio.sleep(0.05)
+        for _ in range(cancels):
+            task.cancel()
+            await asyncio.sleep(0)
+        done, _ = await asyncio.wait({task}, timeout=2)
+        assert done == {task} and task.cancelled()
+        # the temporary directory is removed while the slots still hang
+        while not _no_temp_dirs(fake_ffmpeg):
+            await asyncio.sleep(0.02)
+        release.set()
+        await asyncio.gather(*hung)
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
+    assert not out.exists()
+
+
+def test_save_cancelled_at_loop_shutdown_still_cleans_up(fake_ffmpeg, monkeypatch):
+    """Review on #241: asyncio.run() cancels the save at its end; the cleanup
+    must not be a task of the loop that is shutting down."""
+    import threading
+
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    monkeypatch.setenv("FAKE_WRITE_FIRST", "1")
+    out = fake_ffmpeg / "out.mp4"
+    release = threading.Event()
+
+    async def run():
+        asyncio.ensure_future(_converter().save(str(out), 10))
+        while not _temp_outputs(fake_ffmpeg):
+            await asyncio.sleep(0.02)
+        _hang_all_slots(release)
+        await asyncio.sleep(0.05)
+        # return without awaiting: asyncio.run() cancels the remaining tasks
+
+    try:
+        asyncio.run(run())
+        _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))  # slots still hung
+    finally:
+        release.set()
+    assert not out.exists()
+
+
+def test_length_async_cancelled_with_all_slots_hung_returns_at_once(fake_ffmpeg, monkeypatch):
+    import tempfile
+    import threading
+
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    tmpdir = fake_ffmpeg / "tmp"
+    tmpdir.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmpdir))
+    pidfile = fake_ffmpeg / "pid"
+    release = threading.Event()
+
+    async def run():
+        task = asyncio.ensure_future(_converter().getLengthAsync(exact=True))
+        while not pidfile.exists() or not pidfile.read_text():
+            await asyncio.sleep(0.02)
+        hung = _hang_all_slots(release)
+        await asyncio.sleep(0.05)
+        task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=2)
+        assert done == {task} and task.cancelled()
+        while list(tmpdir.iterdir()):
+            await asyncio.sleep(0.02)
+        release.set()
+        await asyncio.gather(*hung)
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
 
 
 def _slow_in_thread(monkeypatch, owner, name):
@@ -236,7 +365,7 @@ def test_save_cancelled_while_creating_temp_dir(fake_ffmpeg, monkeypatch, cancel
     started = _slow_in_thread(monkeypatch, tempfile, "mkdtemp")
     out = fake_ffmpeg / "out.mp4"
     asyncio.run(_cancel_when(started, _converter().save(str(out), 10), cancels))
-    assert _no_temp_dirs(fake_ffmpeg)
+    _wait_until(lambda: _no_temp_dirs(fake_ffmpeg))
     assert not (fake_ffmpeg / "pid").exists()  # ffmpeg not started
     assert not out.exists()
 
@@ -253,7 +382,7 @@ def test_length_async_cancelled_while_writing_temp_file(fake_ffmpeg, monkeypatch
     monkeypatch.setattr(tempfile, "tempdir", str(tmpdir))
     started = _slow_in_thread(monkeypatch, convert, "_write_temporary_file")
     asyncio.run(_cancel_when(started, _converter().getLengthAsync(exact=True), cancels))
-    assert list(tmpdir.iterdir()) == []
+    _wait_until(lambda: list(tmpdir.iterdir()) == [])
     assert not (fake_ffmpeg / "pid").exists()
 
 
@@ -297,7 +426,7 @@ def test_length_async_cancelled_kills_ffprobe(fake_ffmpeg, monkeypatch, cancels)
         return int(pidfile.read_text())
 
     assert not _alive(asyncio.run(run()))
-    assert list(tmpdir.iterdir()) == []  # temporary file removed
+    _wait_until(lambda: list(tmpdir.iterdir()) == [])  # temporary file removed
 
 
 def test_length_async_ffprobe_fails(fake_ffmpeg, monkeypatch):
@@ -323,3 +452,152 @@ def test_length_sync_and_async_estimate_alike(fake_ffmpeg):
         c.write(b"\x47" * 188, b"\x00" * 160)
     # Twice the data at the cached bytes-per-second ratio, without ffprobe.
     assert sync.getLength() == asyncio.run(asyn.getLengthAsync()) == 25.0
+
+
+def test_file_io_limits_threads_and_frees_slots_only_when_done():
+    """Calls hanging on an unreachable share occupy at most FILE_IO_THREADS threads."""
+    import threading
+
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+
+    release = threading.Event()
+    started = []
+
+    def hanging(n):
+        started.append(n)
+        release.wait(5)
+        return n
+
+    async def run():
+        tasks = [asyncio.ensure_future(run_file_io(hanging, n)) for n in range(FILE_IO_THREADS + 1)]
+        _, gap = await _max_loop_gap(asyncio.sleep(0.3))
+        assert gap < 0.2  # the event loop keeps running
+        assert len(started) == FILE_IO_THREADS
+        # Cancelling (twice) returns at once, but does not free the slots
+        for t in tasks[:FILE_IO_THREADS]:
+            t.cancel()
+            await asyncio.sleep(0)
+            t.cancel()
+        await asyncio.sleep(0.2)
+        assert all(t.cancelled() for t in tasks[:FILE_IO_THREADS])
+        assert len(started) == FILE_IO_THREADS
+        release.set()  # the hanging calls return: the waiting call runs
+        assert await tasks[-1] == FILE_IO_THREADS
+
+    asyncio.run(run())
+
+
+def test_file_io_passes_errors_and_survives_a_closed_loop():
+    import threading
+
+    from pytapo.media_stream._utils import run_file_io
+
+    def broken():
+        raise OSError("share unreachable")
+
+    async def raises():
+        with pytest.raises(OSError):
+            await run_file_io(broken)
+
+    asyncio.run(raises())
+
+    release = threading.Event()
+    errors = []
+    old_hook = threading.excepthook
+    threading.excepthook = lambda args: errors.append(args.exc_value)
+    try:
+
+        async def leave_running():
+            task = asyncio.ensure_future(run_file_io(release.wait, 5))
+            await asyncio.sleep(0.05)
+            task.cancel()
+
+        asyncio.run(leave_running())  # the loop is closed, the thread still runs
+        release.set()
+        time.sleep(0.2)
+    finally:
+        threading.excepthook = old_hook
+    assert errors == []
+
+
+def test_file_io_cancel_while_queued_ends_at_once():
+    """A call still waiting for a slot can be cancelled at once, also where
+    Convert waits for a started call to finish."""
+    import threading
+
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+    from pytapo.media_stream.convert import _cleanup, _to_thread_to_end
+
+    release = threading.Event()
+    ran = []
+
+    def hanging():
+        release.wait(5)
+
+    async def run():
+        hung = [asyncio.ensure_future(run_file_io(hanging)) for _ in range(FILE_IO_THREADS)]
+        await asyncio.sleep(0.05)
+        queued = asyncio.ensure_future(_to_thread_to_end(ran.append, "created"))
+        cleanup = asyncio.ensure_future(_cleanup(ran.append, "cleaned"))
+        await asyncio.sleep(0.05)
+        for task in (queued, cleanup):
+            task.cancel()
+        done, _ = await asyncio.wait((queued, cleanup), timeout=0.5)
+        assert done == {queued, cleanup}
+        assert queued.cancelled() and cleanup.cancelled()
+        for _ in range(50):  # the cleanup runs outside the slots, at once
+            if ran:
+                break
+            await asyncio.sleep(0.02)
+        assert ran == ["cleaned"]  # _to_thread_to_end's call has not started
+        release.set()
+        await asyncio.gather(*hung)
+
+    asyncio.run(run())
+
+
+def test_file_io_limit_does_not_keep_the_loop_alive():
+    import gc
+    import threading
+    import weakref
+
+    from pytapo.media_stream._utils import FILE_IO_THREADS, run_file_io
+
+    release = threading.Event()
+
+    async def contend():
+        tasks = [
+            asyncio.ensure_future(run_file_io(release.wait, 5))
+            for _ in range(FILE_IO_THREADS + 2)
+        ]
+        await asyncio.sleep(0.05)
+        release.set()
+        await asyncio.gather(*tasks)
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(contend())
+    loop.close()
+    ref = weakref.ref(loop)
+    del loop
+    gc.collect()
+    assert ref() is None
+
+
+def test_file_io_limit_release_between_cancel_and_resume():
+    """Review on #241: release() may drop the cancelled waiter before acquire()
+    resumes; the cancellation must still propagate, not a ValueError."""
+    from pytapo.media_stream._utils import _FileIOLimit
+
+    async def run():
+        limit = _FileIOLimit(1)
+        await limit.acquire()
+        queued = asyncio.ensure_future(limit.acquire())
+        await asyncio.sleep(0)  # now waiting for the slot
+        queued.cancel()  # cancels the waiter, the task resumes later
+        limit.release()  # runs first and drops the cancelled waiter
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+        assert limit._free == 1 and not limit._waiters
+        await limit.acquire()  # the slot is usable again
+
+    asyncio.run(run())
