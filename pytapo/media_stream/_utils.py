@@ -45,7 +45,8 @@ class _FileIOLimit:
             if waiter.done() and not waiter.cancelled():
                 # the slot was granted just before the cancellation
                 self.release()
-            else:
+            elif waiter in self._waiters:
+                # release() may already have dropped the cancelled waiter
                 self._waiters.remove(waiter)
             raise
 

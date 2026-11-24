@@ -581,3 +581,23 @@ def test_file_io_limit_does_not_keep_the_loop_alive():
     del loop
     gc.collect()
     assert ref() is None
+
+
+def test_file_io_limit_release_between_cancel_and_resume():
+    """Review on #241: release() may drop the cancelled waiter before acquire()
+    resumes; the cancellation must still propagate, not a ValueError."""
+    from pytapo.media_stream._utils import _FileIOLimit
+
+    async def run():
+        limit = _FileIOLimit(1)
+        await limit.acquire()
+        queued = asyncio.ensure_future(limit.acquire())
+        await asyncio.sleep(0)  # now waiting for the slot
+        queued.cancel()  # cancels the waiter, the task resumes later
+        limit.release()  # runs first and drops the cancelled waiter
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+        assert limit._free == 1 and not limit._waiters
+        await limit.acquire()  # the slot is usable again
+
+    asyncio.run(run())
