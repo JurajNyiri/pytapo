@@ -27,6 +27,8 @@ class Transport(Kasa, Klap, pyTapo, Tpap):
         if method not in TRANSPORT_METHODS:
             raise Exception(f"Incorrect transport method: {method}.")
         self.logger = logger
+        # shared with every controller that uses this transport
+        self.asyncHandler = kwargs.get("asyncHandler")
         self.method = method
         self.host = host
         self.controlPort = controlPort

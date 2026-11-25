@@ -50,10 +50,14 @@ class Tapo:
 
         Lets the child devices of a hub (childID) share the hub controller's session:
         separate logins with the same account invalidate each other's session.
+        The transport's AsyncHandler is shared too, so all its users run on one event loop.
         """
 
         self.logger = Logger(printDebugInformation, printWarnInformation)
-        self.asyncHandler = AsyncHandler(hass)
+        if transport is not None:
+            self.asyncHandler = transport.asyncHandler
+        else:
+            self.asyncHandler = AsyncHandler(hass)
 
         self.host = host
         if hass is not None:
