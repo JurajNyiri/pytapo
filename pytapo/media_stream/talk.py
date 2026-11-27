@@ -5,8 +5,17 @@ Protocol reference: https://github.com/AlexxIT/go2rtc/tree/master/pkg/tapo
 
 import asyncio
 import json
+import logging
 
 from ._utils import StreamType
+
+logger = logging.getLogger(__name__)
+
+_SAMPLE_RATE = 8000
+_PLAYBACK_FRAME_SIZE = 320  # 40 ms of mono A-law in one PES
+_PLAYBACK_PREFILL_FRAMES = 5
+_PLAYBACK_DRAIN_SECONDS = 1
+_PLAYBACK_GAP_SECONDS = 2 * _PLAYBACK_FRAME_SIZE / _SAMPLE_RATE
 
 
 def _psi_packet(pid, section):
@@ -59,11 +68,15 @@ class Talk:
         await self.tapo._talk_lock.acquire()
         self._locked = True
         self.tapo._talk_session = self
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        stage = "connecting"
         try:
             self.session = await asyncio.to_thread(
                 self.tapo.getMediaSession, StreamType.Stream
             )
             await self.session.start()
+            stage = "negotiating talk"
             self.responses = self.session.transceive(
                 json.dumps(
                     {
@@ -88,25 +101,37 @@ class Talk:
                         break
             if self.session_id is None:
                 raise RuntimeError("Camera did not open a talk session")
+            stage = "writing the stream header"
             # PAT: program 1 -> PMT PID 0x1000. PMT: PCMA (0x90), PID 0x100.
             header = _psi_packet(0, bytes.fromhex("00b00d0001c100000001f000"))
             header += _psi_packet(
                 0x1000, bytes.fromhex("02b0120001c10000fffff00090e100f000")
             )
             await self.session.send_audio(header, self.session_id)
+            logger.debug(
+                "Speaker backchannel ready in %.0f ms", (loop.time() - started_at) * 1000
+            )
             return self
-        except BaseException:
+        except BaseException as err:
+            logger.debug(
+                "Speaker backchannel stopped while %s after %.0f ms (%s)",
+                stage,
+                (loop.time() - started_at) * 1000,
+                type(err).__name__,
+            )
             await self.close()
             raise
 
-    async def write(self, audio):
+    async def write(self, audio, *, pts=None):
         if self.session_id is None:
             raise RuntimeError("Talk session is not open")
         if not audio:
             return
         if len(audio) > 65527:
             raise ValueError("Audio chunk is too large for one PES packet")
-        pts = (self._samples * 90000 // 8000) & ((1 << 33) - 1)
+        if pts is None:
+            pts = self._samples * 90000 // _SAMPLE_RATE
+        pts &= (1 << 33) - 1
         timestamp = bytes(
             (
                 0x21 | ((pts >> 29) & 0x0E),
@@ -143,13 +168,18 @@ class Talk:
         """
         if self.session_id is None:
             raise RuntimeError("Talk session is not open")
+        loop = asyncio.get_running_loop()
+        debug = logger.isEnabledFor(logging.DEBUG)
+        started_at = loop.time()
+        stage = "starting FFmpeg"
+        samples = 0
         start = asyncio.create_task(
             asyncio.create_subprocess_exec(
                 ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
                 "-rw_timeout", "10000000", "-i", source,
                 "-vn", "-sn", "-dn",
                 # Give the camera speaker time to start before the clip.
-                "-af", "adelay=1000:all=1", "-ac", "1", "-ar", "8000",
+                "-af", "adelay=1000:all=1", "-ac", "1", "-ar", str(_SAMPLE_RATE),
                 "-c:a", "pcm_alaw", "-f", "alaw", "pipe:1",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
@@ -160,20 +190,108 @@ class Talk:
         try:
             # Retain the process if cancellation arrives while it is starting.
             process = await asyncio.shield(start)
-            loop = asyncio.get_running_loop()
-            deadline = loop.time()
-            samples = 0
-            while audio := await asyncio.wait_for(process.stdout.read(160), 15):
+
+            read_wait = 0.0
+
+            async def read_audio(size):
+                nonlocal read_wait, stage
+                stage = "reading FFmpeg audio"
+                read_at = loop.time() if debug else 0
+                try:
+                    return await asyncio.wait_for(process.stdout.readexactly(size), 15)
+                except asyncio.IncompleteReadError as err:
+                    return err.partial
+                finally:
+                    if debug:
+                        read_wait = loop.time() - read_at
+
+            async def write_frame(audio):
+                nonlocal stage
+                stage = "writing camera audio"
+                # go2rtc's Tapo backchannel uses relative 8 kHz RTP timestamps
+                # in PES, starting with zero for the first two frames.
+                pts = max(0, self._samples - _PLAYBACK_FRAME_SIZE)
+                await asyncio.wait_for(self.write(audio, pts=pts), 5)
+
+            # Send the first 200 ms of the existing lead-in together.
+            prefill = await read_audio(_PLAYBACK_FRAME_SIZE * _PLAYBACK_PREFILL_FRAMES)
+            logger.debug(
+                "Speaker playback decoded %.0f ms of prefill in %.0f ms "
+                "(%.0f ms waiting for audio)",
+                len(prefill) * 1000 / _SAMPLE_RATE,
+                (loop.time() - started_at) * 1000,
+                read_wait * 1000,
+            )
+            for offset in range(0, len(prefill), _PLAYBACK_FRAME_SIZE):
+                frame = prefill[offset : offset + _PLAYBACK_FRAME_SIZE]
+                await write_frame(frame)
+                samples += len(frame)
+
+            first_frame = min(samples, _PLAYBACK_FRAME_SIZE)
+            buffered_seconds = (samples - first_frame) / _SAMPLE_RATE
+            last_write_at = loop.time()
+            deadline = last_write_at + first_frame / _SAMPLE_RATE
+            max_lateness = longest_gap = 0.0
+            gaps = 0
+            while audio := await read_audio(_PLAYBACK_FRAME_SIZE):
+                stage = "pacing audio"
                 await asyncio.sleep(max(0, deadline - loop.time()))
-                await asyncio.wait_for(self.write(audio), 5)
+                write_at = loop.time() if debug else 0
+                await write_frame(audio)
+                sent_at = loop.time()
+                if debug:
+                    max_lateness = max(max_lateness, sent_at - deadline)
+                    gap = sent_at - last_write_at
+                    longest_gap = max(longest_gap, gap)
+                    last_write_at = sent_at
+                    if gap >= _PLAYBACK_GAP_SECONDS:
+                        gaps += 1
+                        if gaps <= 3:
+                            logger.debug(
+                                "Speaker playback gap at %.2f s of audio (%.0f ms between writes, "
+                                "%.0f ms decoder wait, %.0f ms late before write, %.0f ms writing)",
+                                samples / _SAMPLE_RATE,
+                                gap * 1000,
+                                read_wait * 1000,
+                                max(0, write_at - deadline) * 1000,
+                                (sent_at - write_at) * 1000,
+                            )
                 samples += len(audio)
-                deadline = max(deadline + len(audio) / 8000, loop.time())
-            await asyncio.sleep(max(0, deadline - loop.time()))
+                # Keep the sample clock through short pauses to refill the camera
+                # buffer. A long stall can only trigger a burst as big as the prefill.
+                deadline = max(
+                    deadline + len(audio) / _SAMPLE_RATE,
+                    sent_at - buffered_seconds,
+                )
+
+            stage = "waiting for FFmpeg to exit"
             code = await asyncio.wait_for(process.wait(), 5)
             if code != 0 or not samples:
                 raise RuntimeError(
                     f"FFmpeg could not decode the audio (exit code {code})"
                 )
+            logger.debug(
+                "Speaker playback sent %.2f s of audio (longest write gap %.0f ms, "
+                "%d gaps of at least %.0f ms, max send delay %.0f ms)",
+                samples / _SAMPLE_RATE,
+                longest_gap * 1000,
+                gaps,
+                _PLAYBACK_GAP_SECONDS * 1000,
+                max_lateness * 1000,
+            )
+            # Keep the session open through the audio queued on the camera.
+            buffered_remaining = max(0, deadline + buffered_seconds - loop.time())
+            stage = "draining audio"
+            await asyncio.sleep(buffered_remaining + _PLAYBACK_DRAIN_SECONDS)
+        except (Exception, asyncio.CancelledError) as err:
+            logger.debug(
+                "Speaker playback stopped while %s after %.2f s sent (%s, FFmpeg exit code %s)",
+                stage,
+                samples / _SAMPLE_RATE,
+                type(err).__name__,
+                process.returncode if process is not None else None,
+            )
+            raise
         finally:
             if process is None:
                 process = await start

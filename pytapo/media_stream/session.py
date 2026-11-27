@@ -457,14 +457,18 @@ class HttpMediaSession:
         """Write a speaker MPEG-TS chunk without waiting for a response."""
         if not self._started or session not in self._sessions:
             raise RuntimeError("Media session is not open")
-        headers = {
-            b"Content-Type": b"audio/mp2t",
-            b"X-If-Encrypt": b"0",
-            b"X-Session-Id": str(session).encode(),
-            b"Content-Length": str(len(data)).encode(),
-        }
-        await self._send_http_request(b"--" + self.client_boundary, headers)
-        self._writer.write(data)
+        part = b"\r\n".join(
+            (
+                b"--" + self.client_boundary,
+                b"Content-Type: audio/mp2t",
+                b"X-If-Encrypt: 0",
+                f"X-Session-Id: {session}".encode(),
+                f"Content-Length: {len(data)}".encode(),
+                b"",
+                data,
+            )
+        )
+        self._writer.write(part)
         await self._writer.drain()
 
     async def transceive(
